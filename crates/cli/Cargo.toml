@@ -1,0 +1,30 @@
+[package]
+name = "clearframe-cli"
+description = "ClipFX Enhance command-line interface and processing worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "clipfx"
+path = "src/main.rs"
+
+[features]
+default = []
+cuda = ["clearframe-app/cuda"]
+metal = ["clearframe-app/metal"]
+
+[dependencies]
+clearframe-app.workspace = true
+clearframe-core.workspace = true
+clearframe-models.workspace = true
+clearframe-pipeline.workspace = true
+clearframe-media.workspace = true
+clearframe-inference.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+safetensors.workspace = true

@@ -1,0 +1,31 @@
+[package]
+name = "clearframe-pipeline"
+description = "ClipFX Enhance processing pipeline: specification, planning, processors and the job runner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+cuda = ["clearframe-inference/cuda"]
+metal = ["clearframe-inference/metal"]
+accelerate = ["clearframe-inference/accelerate"]
+
+[dependencies]
+clearframe-core.workspace = true
+clearframe-media.workspace = true
+clearframe-inference.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+log.workspace = true
+crossbeam-channel.workspace = true
+parking_lot.workspace = true
+rayon.workspace = true
+image.workspace = true
+chrono.workspace = true
+sysinfo.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

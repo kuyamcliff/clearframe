@@ -1,0 +1,4 @@
+{
+  "comment": "Ed25519 public keys allowed to sign remote catalog updates. The bundled catalog is compiled into the app and needs no signature. Generate a key with `clipfx catalog keygen`, keep the secret key offline (e.g. as a CI secret) and add the public key here.",
+  "keys": []
+}

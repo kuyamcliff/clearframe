@@ -1,0 +1,890 @@
+{
+  "schema_version": 1,
+  "catalog_version": "2026.10.12",
+  "generated_at": "2026-10-12T00:00:00Z",
+  "models": [
+    {
+      "schema_version": 1,
+      "version": "1.0.0",
+      "supports_denoise_strength": false,
+      "input_types": [
+        "animation"
+      ],
+      "color_formats": [
+        "sdr_rgb"
+      ],
+      "supported_platforms": [
+        "windows-x64",
+        "linux-x64",
+        "macos-arm64",
+        "macos-x64"
+      ],
+      "backends": [
+        "cpu",
+        "cuda",
+        "metal"
+      ],
+      "precisions": [
+        "fp32",
+        "fp16"
+      ],
+      "measurements": [],
+      "provenance_reviewed_at": "2026-10-12",
+      "quality_status": "validated",
+      "recommended": true,
+      "id": "xinntao.realesr-animevideo-v3",
+      "display_name": "Real-ESRGAN AnimeVideo v3",
+      "publisher": "Xintao Wang et al.",
+      "summary": "Small, fast 4x upscaler designed for anime and animation video. Keeps line art clean with low temporal flicker.",
+      "best_for": [
+        "Anime and cartoons",
+        "Clean line art",
+        "Long videos on modest hardware"
+      ],
+      "weaknesses": [
+        "Can flatten fine texture in live-action footage",
+        "Does not remove heavy compression blocks"
+      ],
+      "categories": [
+        "enhancement",
+        "anime"
+      ],
+      "tasks": [
+        "super_resolution"
+      ],
+      "architecture": "srvgg_compact",
+      "scale": 4,
+      "artifacts": [
+        {
+          "role": "weights",
+          "filename": "realesr-animevideov3.pth",
+          "source_url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-animevideov3.pth",
+          "mirrors": [],
+          "size_bytes": 2504012,
+          "sha256": "b8a8376811077954d82ca3fcf476f1ac3da3e8a68a4f4d71363008000a18b75d",
+          "format": "pth",
+          "convert": {
+            "strip_prefixes": [
+              "module."
+            ],
+            "drop_prefixes": [],
+            "wrappers": []
+          }
+        }
+      ],
+      "installed_size_bytes": 2489960,
+      "minimum_ram_bytes": 2147483648,
+      "memory_per_megapixel_mb": 600,
+      "performance_tier": "light",
+      "training_data": "Anime video frames prepared by the Real-ESRGAN authors (see the AnimeVideo-v3 report).",
+      "weights_license": "BSD-3-Clause",
+      "code_license": "BSD-3-Clause",
+      "commercial_use_allowed": true,
+      "redistribution_allowed": true,
+      "license_notes": "Weights are published by the authors as release assets of the BSD-3-Clause Real-ESRGAN repository. Keep the copyright notice when redistributing.",
+      "attribution": [
+        "Real-ESRGAN, Xintao Wang, Liangbin Xie, Chao Dong, Ying Shan (2021). Copyright (c) 2021, Xintao Wang."
+      ],
+      "source_repository": "https://github.com/xinntao/Real-ESRGAN",
+      "download_size_bytes": 2504012
+    },
+    {
+      "schema_version": 1,
+      "version": "1.0.0",
+      "supports_denoise_strength": true,
+      "input_types": [
+        "live_action",
+        "animation"
+      ],
+      "color_formats": [
+        "sdr_rgb"
+      ],
+      "supported_platforms": [
+        "windows-x64",
+        "linux-x64",
+        "macos-arm64",
+        "macos-x64"
+      ],
+      "backends": [
+        "cpu",
+        "cuda",
+        "metal"
+      ],
+      "precisions": [
+        "fp32",
+        "fp16"
+      ],
+      "measurements": [],
+      "provenance_reviewed_at": "2026-10-12",
+      "quality_status": "validated",
+      "recommended": true,
+      "id": "xinntao.realesr-general-v3",
+      "display_name": "Real-ESRGAN General v3",
+      "publisher": "Xintao Wang et al.",
+      "summary": "Compact 4x upscaler for real-world footage with an adjustable denoise strength (blends the general and weak-denoise weights).",
+      "best_for": [
+        "Live action",
+        "Compressed web video",
+        "Fast general upscaling"
+      ],
+      "weaknesses": [
+        "Strong denoise can look painterly",
+        "May invent texture on very low-resolution sources"
+      ],
+      "categories": [
+        "enhancement",
+        "denoise"
+      ],
+      "tasks": [
+        "super_resolution",
+        "denoise"
+      ],
+      "architecture": "srvgg_compact",
+      "scale": 4,
+      "artifacts": [
+        {
+          "role": "weights",
+          "filename": "realesr-general-x4v3.pth",
+          "source_url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth",
+          "mirrors": [],
+          "size_bytes": 4885111,
+          "sha256": "8dc7edb9ac80ccdc30c3a5dca6616509367f05fbc184ad95b731f05bece96292",
+          "format": "pth",
+          "convert": {
+            "strip_prefixes": [
+              "module."
+            ],
+            "drop_prefixes": [],
+            "wrappers": []
+          }
+        },
+        {
+          "role": "wdn",
+          "filename": "realesr-general-wdn-x4v3.pth",
+          "source_url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-wdn-x4v3.pth",
+          "mirrors": [],
+          "size_bytes": 4885111,
+          "sha256": "1641f8c4464b9f097c9fdda5589273713f67cf59f3d909e0bd688f0cee269dca",
+          "format": "pth",
+          "convert": {
+            "strip_prefixes": [
+              "module."
+            ],
+            "drop_prefixes": [],
+            "wrappers": []
+          }
+        }
+      ],
+      "installed_size_bytes": 9722640,
+      "minimum_ram_bytes": 2147483648,
+      "memory_per_megapixel_mb": 700,
+      "performance_tier": "light",
+      "training_data": "DIV2K, Flickr2K and OutdoorSceneTraining with synthetic degradations (Real-ESRGAN paper).",
+      "weights_license": "BSD-3-Clause",
+      "code_license": "BSD-3-Clause",
+      "commercial_use_allowed": true,
+      "redistribution_allowed": true,
+      "license_notes": "Weights are published by the authors as release assets of the BSD-3-Clause Real-ESRGAN repository. Keep the copyright notice when redistributing.",
+      "attribution": [
+        "Real-ESRGAN, Xintao Wang, Liangbin Xie, Chao Dong, Ying Shan (2021). Copyright (c) 2021, Xintao Wang."
+      ],
+      "source_repository": "https://github.com/xinntao/Real-ESRGAN",
+      "download_size_bytes": 9770222
+    },
+    {
+      "schema_version": 1,
+      "version": "1.0.0",
+      "supports_denoise_strength": false,
+      "input_types": [
+        "live_action"
+      ],
+      "color_formats": [
+        "sdr_rgb"
+      ],
+      "supported_platforms": [
+        "windows-x64",
+        "linux-x64",
+        "macos-arm64",
+        "macos-x64"
+      ],
+      "backends": [
+        "cpu",
+        "cuda",
+        "metal"
+      ],
+      "precisions": [
+        "fp32",
+        "fp16"
+      ],
+      "measurements": [],
+      "provenance_reviewed_at": "2026-10-12",
+      "quality_status": "validated",
+      "recommended": false,
+      "id": "xinntao.realesrgan-x4plus",
+      "display_name": "Real-ESRGAN x4plus",
+      "publisher": "Xintao Wang et al.",
+      "summary": "Large RRDB 4x model with strong detail reconstruction for photos and live-action video.",
+      "best_for": [
+        "Live action with detail",
+        "Still-like shots",
+        "Archival upscaling when time allows"
+      ],
+      "weaknesses": [
+        "Slow (about 25x the compute of the compact models)",
+        "Can over-sharpen and invent texture; check faces and text"
+      ],
+      "categories": [
+        "enhancement"
+      ],
+      "tasks": [
+        "super_resolution"
+      ],
+      "architecture": "rrdbnet",
+      "scale": 4,
+      "artifacts": [
+        {
+          "role": "weights",
+          "filename": "RealESRGAN_x4plus.pth",
+          "source_url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
+          "mirrors": [],
+          "size_bytes": 67040989,
+          "sha256": "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1",
+          "format": "pth",
+          "convert": {
+            "strip_prefixes": [
+              "module."
+            ],
+            "drop_prefixes": [],
+            "wrappers": []
+          }
+        }
+      ],
+      "installed_size_bytes": 66857892,
+      "minimum_ram_bytes": 4294967296,
+      "memory_per_megapixel_mb": 2600,
+      "performance_tier": "heavy",
+      "training_data": "DIV2K, Flickr2K and OutdoorSceneTraining with synthetic degradations (Real-ESRGAN paper).",
+      "weights_license": "BSD-3-Clause",
+      "code_license": "BSD-3-Clause",
+      "commercial_use_allowed": true,
+      "redistribution_allowed": true,
+      "license_notes": "Weights are published by the authors as release assets of the BSD-3-Clause Real-ESRGAN repository. Keep the copyright notice when redistributing.",
+      "attribution": [
+        "Real-ESRGAN, Xintao Wang, Liangbin Xie, Chao Dong, Ying Shan (2021). Copyright (c) 2021, Xintao Wang."
+      ],
+      "source_repository": "https://github.com/xinntao/Real-ESRGAN",
+      "download_size_bytes": 67040989
+    },
+    {
+      "schema_version": 1,
+      "version": "1.0.0",
+      "supports_denoise_strength": false,
+      "input_types": [
+        "animation"
+      ],
+      "color_formats": [
+        "sdr_rgb"
+      ],
+      "supported_platforms": [
+        "windows-x64",
+        "linux-x64",
+        "macos-arm64",
+        "macos-x64"
+      ],
+      "backends": [
+        "cpu",
+        "cuda",
+        "metal"
+      ],
+      "precisions": [
+        "fp32",
+        "fp16"
+      ],
+      "measurements": [],
+      "provenance_reviewed_at": "2026-10-12",
+      "quality_status": "validated",
+      "recommended": false,
+      "id": "xinntao.realesrgan-x4plus-anime-6b",
+      "display_name": "Real-ESRGAN x4plus Anime 6B",
+      "publisher": "Xintao Wang et al.",
+      "summary": "Smaller RRDB 4x model tuned for anime illustrations; sharper than AnimeVideo v3 but less temporally stable.",
+      "best_for": [
+        "Anime stills and slow scenes",
+        "Illustrations"
+      ],
+      "weaknesses": [
+        "Can flicker on moving video",
+        "Slower than AnimeVideo v3"
+      ],
+      "categories": [
+        "enhancement",
+        "anime"
+      ],
+      "tasks": [
+        "super_resolution"
+      ],
+      "architecture": "rrdbnet",
+      "scale": 4,
+      "artifacts": [
+        {
+          "role": "weights",
+          "filename": "RealESRGAN_x4plus_anime_6B.pth",
+          "source_url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth",
+          "mirrors": [],
+          "size_bytes": 17938799,
+          "sha256": "f872d837d3c90ed2e05227bed711af5671a6fd1c9f7d7e91c911a61f155e99da",
+          "format": "pth",
+          "convert": {
+            "strip_prefixes": [
+              "module."
+            ],
+            "drop_prefixes": [],
+            "wrappers": []
+          }
+        }
+      ],
+      "installed_size_bytes": 17888836,
+      "minimum_ram_bytes": 3221225472,
+      "memory_per_megapixel_mb": 1500,
+      "performance_tier": "medium",
+      "training_data": "Anime illustrations prepared by the Real-ESRGAN authors.",
+      "weights_license": "BSD-3-Clause",
+      "code_license": "BSD-3-Clause",
+      "commercial_use_allowed": true,
+      "redistribution_allowed": true,
+      "license_notes": "Weights are published by the authors as release assets of the BSD-3-Clause Real-ESRGAN repository. Keep the copyright notice when redistributing.",
+      "attribution": [
+        "Real-ESRGAN, Xintao Wang, Liangbin Xie, Chao Dong, Ying Shan (2021). Copyright (c) 2021, Xintao Wang."
+      ],
+      "source_repository": "https://github.com/xinntao/Real-ESRGAN",
+      "download_size_bytes": 17938799
+    },
+    {
+      "schema_version": 1,
+      "version": "1.0.0",
+      "supports_denoise_strength": false,
+      "input_types": [
+        "live_action"
+      ],
+      "color_formats": [
+        "sdr_rgb"
+      ],
+      "supported_platforms": [
+        "windows-x64",
+        "linux-x64",
+        "macos-arm64",
+        "macos-x64"
+      ],
+      "backends": [
+        "cpu",
+        "cuda",
+        "metal"
+      ],
+      "precisions": [
+        "fp32",
+        "fp16"
+      ],
+      "measurements": [],
+      "provenance_reviewed_at": "2026-10-12",
+      "quality_status": "validated",
+      "recommended": false,
+      "id": "xinntao.realesrgan-x2plus",
+      "display_name": "Real-ESRGAN x2plus",
+      "publisher": "Xintao Wang et al.",
+      "summary": "RRDB 2x model for moderate enlargement of real-world footage (e.g. 1080p to 4K).",
+      "best_for": [
+        "1080p to 4K",
+        "Live action"
+      ],
+      "weaknesses": [
+        "Slow",
+        "Can over-sharpen"
+      ],
+      "categories": [
+        "enhancement"
+      ],
+      "tasks": [
+        "super_resolution"
+      ],
+      "architecture": "rrdbnet",
+      "scale": 2,
+      "artifacts": [
+        {
+          "role": "weights",
+          "filename": "RealESRGAN_x2plus.pth",
+          "source_url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth",
+          "mirrors": [],
+          "size_bytes": 67061725,
+          "sha256": "49fafd45f8fd7aa8d31ab2a22d14d91b536c34494a5cfe31eb5d89c2fa266abb",
+          "format": "pth",
+          "convert": {
+            "strip_prefixes": [
+              "module."
+            ],
+            "drop_prefixes": [],
+            "wrappers": []
+          }
+        }
+      ],
+      "installed_size_bytes": 66878636,
+      "minimum_ram_bytes": 4294967296,
+      "memory_per_megapixel_mb": 1800,
+      "performance_tier": "heavy",
+      "training_data": "DIV2K, Flickr2K and OutdoorSceneTraining with synthetic degradations (Real-ESRGAN paper).",
+      "weights_license": "BSD-3-Clause",
+      "code_license": "BSD-3-Clause",
+      "commercial_use_allowed": true,
+      "redistribution_allowed": true,
+      "license_notes": "Weights are published by the authors as release assets of the BSD-3-Clause Real-ESRGAN repository. Keep the copyright notice when redistributing.",
+      "attribution": [
+        "Real-ESRGAN, Xintao Wang, Liangbin Xie, Chao Dong, Ying Shan (2021). Copyright (c) 2021, Xintao Wang."
+      ],
+      "source_repository": "https://github.com/xinntao/Real-ESRGAN",
+      "download_size_bytes": 67061725
+    },
+    {
+      "schema_version": 1,
+      "version": "1.0.0",
+      "supports_denoise_strength": false,
+      "input_types": [
+        "live_action",
+        "animation"
+      ],
+      "color_formats": [
+        "sdr_rgb"
+      ],
+      "supported_platforms": [
+        "windows-x64",
+        "linux-x64",
+        "macos-arm64",
+        "macos-x64"
+      ],
+      "backends": [
+        "cpu",
+        "cuda",
+        "metal"
+      ],
+      "precisions": [
+        "fp32",
+        "fp16"
+      ],
+      "measurements": [],
+      "provenance_reviewed_at": "2026-10-12",
+      "quality_status": "validated",
+      "recommended": true,
+      "id": "kair.ffdnet-color",
+      "display_name": "FFDNet (color)",
+      "publisher": "Kai Zhang et al. (KAIR)",
+      "summary": "Fast AI denoiser with an explicit noise-level control; works at the source resolution.",
+      "best_for": [
+        "Sensor noise",
+        "Low-light footage",
+        "Quick cleanup before upscaling"
+      ],
+      "weaknesses": [
+        "High strength removes fine texture",
+        "Not designed for compression blocking"
+      ],
+      "categories": [
+        "denoise"
+      ],
+      "tasks": [
+        "denoise"
+      ],
+      "architecture": "ffdnet",
+      "scale": 1,
+      "artifacts": [
+        {
+          "role": "weights",
+          "filename": "ffdnet_color.pth",
+          "source_url": "https://github.com/cszn/KAIR/releases/download/v1.0/ffdnet_color.pth",
+          "mirrors": [],
+          "size_bytes": 3411551,
+          "sha256": "286f04f7e3a20254c067ba95efb5d3339f4fc8a09a365a93cd469184d4cdb279",
+          "format": "pth",
+          "convert": {
+            "strip_prefixes": [
+              "module."
+            ],
+            "drop_prefixes": [],
+            "wrappers": []
+          }
+        }
+      ],
+      "installed_size_bytes": 3410440,
+      "minimum_ram_bytes": 1073741824,
+      "memory_per_megapixel_mb": 250,
+      "performance_tier": "light",
+      "weights_license": "MIT",
+      "code_license": "MIT",
+      "commercial_use_allowed": true,
+      "redistribution_allowed": true,
+      "license_notes": "Released as a release asset of the MIT-licensed KAIR repository.",
+      "attribution": [
+        "FFDNet: Kai Zhang, Wangmeng Zuo, Lei Zhang (2018). KAIR, Copyright (c) 2019 Kai Zhang."
+      ],
+      "source_repository": "https://github.com/cszn/KAIR",
+      "training_data": "Waterloo Exploration Database, BSD and ImageNet subsets (FFDNet paper).",
+      "download_size_bytes": 3411551
+    },
+    {
+      "schema_version": 1,
+      "version": "1.0.0",
+      "supports_denoise_strength": false,
+      "input_types": [
+        "live_action",
+        "animation"
+      ],
+      "color_formats": [
+        "sdr_rgb"
+      ],
+      "supported_platforms": [
+        "windows-x64",
+        "linux-x64",
+        "macos-arm64",
+        "macos-x64"
+      ],
+      "backends": [
+        "cpu",
+        "cuda",
+        "metal"
+      ],
+      "precisions": [
+        "fp32",
+        "fp16"
+      ],
+      "measurements": [],
+      "provenance_reviewed_at": "2026-10-12",
+      "quality_status": "validated",
+      "recommended": false,
+      "id": "kair.drunet-color",
+      "display_name": "DRUNet (color)",
+      "publisher": "Kai Zhang et al. (KAIR)",
+      "summary": "High-quality AI denoiser with noise-level control; slower than FFDNet but preserves more detail.",
+      "best_for": [
+        "Archival footage",
+        "Noisy footage where detail matters"
+      ],
+      "weaknesses": [
+        "Slow on CPU",
+        "High strength can look waxy"
+      ],
+      "categories": [
+        "denoise"
+      ],
+      "tasks": [
+        "denoise"
+      ],
+      "architecture": "drunet",
+      "scale": 1,
+      "artifacts": [
+        {
+          "role": "weights",
+          "filename": "drunet_color.pth",
+          "source_url": "https://github.com/cszn/KAIR/releases/download/v1.0/drunet_color.pth",
+          "mirrors": [],
+          "size_bytes": 130579305,
+          "sha256": "479abe3c5327dfd10ff54a80ec7d4098ca80752a5c9492cdff31cee430bec4b4",
+          "format": "pth",
+          "convert": {
+            "strip_prefixes": [
+              "module."
+            ],
+            "drop_prefixes": [],
+            "wrappers": []
+          }
+        }
+      ],
+      "installed_size_bytes": 130570080,
+      "minimum_ram_bytes": 3221225472,
+      "memory_per_megapixel_mb": 1400,
+      "performance_tier": "medium",
+      "weights_license": "MIT",
+      "code_license": "MIT",
+      "commercial_use_allowed": true,
+      "redistribution_allowed": true,
+      "license_notes": "Released as a release asset of the MIT-licensed KAIR repository.",
+      "attribution": [
+        "DRUNet (DPIR): Kai Zhang, Yawei Li, Wangmeng Zuo, Lei Zhang, Luc Van Gool, Radu Timofte (2021). KAIR, Copyright (c) 2019 Kai Zhang."
+      ],
+      "source_repository": "https://github.com/cszn/KAIR",
+      "training_data": "BSD, Waterloo Exploration, DIV2K and Flickr2K (DPIR paper).",
+      "download_size_bytes": 130579305
+    },
+    {
+      "schema_version": 1,
+      "version": "1.0.0",
+      "supports_denoise_strength": false,
+      "input_types": [
+        "live_action"
+      ],
+      "color_formats": [
+        "sdr_rgb"
+      ],
+      "supported_platforms": [
+        "windows-x64",
+        "linux-x64",
+        "macos-arm64",
+        "macos-x64"
+      ],
+      "backends": [
+        "cpu",
+        "cuda",
+        "metal"
+      ],
+      "precisions": [
+        "fp32",
+        "fp16"
+      ],
+      "measurements": [],
+      "provenance_reviewed_at": "2026-10-12",
+      "quality_status": "validated",
+      "recommended": false,
+      "id": "megvii.nafnet-gopro-w32",
+      "display_name": "NAFNet GoPro (motion deblur)",
+      "publisher": "Megvii Research",
+      "summary": "Motion-deblur network trained on the GoPro dataset. Removes camera-shake and motion blur without upscaling or sharpening filters.",
+      "best_for": [
+        "Camera-shake blur",
+        "Moderate motion blur"
+      ],
+      "weaknesses": [
+        "Cannot recover detail from extreme blur",
+        "May create ringing near strong edges",
+        "Trained on GoPro scenes; animation is out of domain"
+      ],
+      "categories": [
+        "deblur"
+      ],
+      "tasks": [
+        "deblur"
+      ],
+      "architecture": "nafnet",
+      "scale": 1,
+      "artifacts": [
+        {
+          "role": "weights",
+          "filename": "NAFNet-GoPro-width32.pth",
+          "source_url": "https://huggingface.co/mikestealth/nafnet-models/resolve/cd3a91ddc41c9c3a53ee809b3ddd5263c9e94e51/NAFNet-GoPro-width32.pth",
+          "mirrors": [],
+          "size_bytes": 68671121,
+          "sha256": "19394e6155d12ef6371d1d57496f87f0ec88f92bdffa27c0792690722d5d1a5c",
+          "format": "pth",
+          "convert": {
+            "strip_prefixes": [
+              "module."
+            ],
+            "drop_prefixes": [],
+            "wrappers": []
+          }
+        }
+      ],
+      "installed_size_bytes": 68510188,
+      "minimum_ram_bytes": 3221225472,
+      "memory_per_megapixel_mb": 900,
+      "performance_tier": "medium",
+      "weights_license": "MIT",
+      "code_license": "MIT",
+      "commercial_use_allowed": true,
+      "redistribution_allowed": true,
+      "license_notes": "Official weights are distributed by Megvii via Google Drive; this catalog uses a community mirror pinned to a commit and verified by SHA-256 (identical file).",
+      "attribution": [
+        "NAFNet: Liangyu Chen, Xiaojie Chu, Xiangyu Zhang, Jian Sun (2022). Copyright (c) 2022 megvii-model."
+      ],
+      "source_repository": "https://github.com/megvii-research/NAFNet",
+      "training_data": "GoPro deblurring dataset (Nah et al., 2017).",
+      "download_size_bytes": 68671121
+    },
+    {
+      "schema_version": 1,
+      "version": "1.0.0",
+      "supports_denoise_strength": false,
+      "input_types": [
+        "live_action",
+        "animation"
+      ],
+      "color_formats": [
+        "sdr_rgb"
+      ],
+      "supported_platforms": [
+        "windows-x64",
+        "linux-x64",
+        "macos-arm64",
+        "macos-x64"
+      ],
+      "backends": [
+        "cpu",
+        "cuda",
+        "metal"
+      ],
+      "precisions": [
+        "fp32",
+        "fp16"
+      ],
+      "measurements": [],
+      "provenance_reviewed_at": "2026-10-12",
+      "quality_status": "validated",
+      "recommended": true,
+      "id": "hzwer.rife-v4.26",
+      "display_name": "RIFE v4.26",
+      "publisher": "hzwer (Zhewei Huang) et al.",
+      "summary": "Real-time intermediate flow estimation for frame interpolation and slow motion at arbitrary timesteps.",
+      "best_for": [
+        "Frame-rate conversion",
+        "Smooth slow motion",
+        "Animation and live action"
+      ],
+      "weaknesses": [
+        "Ghosting on occlusions and very fast motion",
+        "Artifacts on flashes and transparent overlays",
+        "Scene cuts must be detected (enabled by default)"
+      ],
+      "categories": [
+        "frame_interpolation"
+      ],
+      "tasks": [
+        "frame_interpolation"
+      ],
+      "architecture": "rife",
+      "scale": 1,
+      "artifacts": [
+        {
+          "role": "weights",
+          "filename": "RIFEv4.26_0921.zip",
+          "source_url": "https://huggingface.co/hzwer/RIFE/resolve/01fdc7e97404120c243c3ea7b427046e5dc7643e/RIFEv4.26_0921.zip",
+          "mirrors": [],
+          "size_bytes": 22869906,
+          "sha256": "1fa9b9cda3d9b8c3e301359e2595960902f97bf926c08598b0e9957a3f3f760e",
+          "format": "zip",
+          "convert": {
+            "strip_prefixes": [
+              "module."
+            ],
+            "drop_prefixes": [
+              "teacher.",
+              "caltime."
+            ],
+            "wrappers": []
+          },
+          "member": "RIFEv4.26_0921/flownet.pkl"
+        }
+      ],
+      "installed_size_bytes": 22674448,
+      "minimum_ram_bytes": 2147483648,
+      "memory_per_megapixel_mb": 500,
+      "performance_tier": "light",
+      "weights_license": "MIT",
+      "code_license": "MIT",
+      "commercial_use_allowed": true,
+      "redistribution_allowed": true,
+      "license_notes": "Weights published by the RIFE author on Hugging Face (hzwer/RIFE), pinned to a commit. Only the weight file is extracted; bundled Python files are never executed.",
+      "attribution": [
+        "RIFE: Zhewei Huang, Tianyuan Zhang, Wen Heng, Boxin Shi, Shuchang Zhou (ECCV 2022). Copyright (c) 2021 hzwer."
+      ],
+      "source_repository": "https://github.com/hzwer/Practical-RIFE",
+      "training_data": "Vimeo90K and additional data described by the Practical-RIFE project.",
+      "download_size_bytes": 22869906
+    },
+    {
+      "schema_version": 1,
+      "version": "1.0.0",
+      "supports_denoise_strength": false,
+      "input_types": [
+        "live_action"
+      ],
+      "color_formats": [
+        "sdr_rgb"
+      ],
+      "supported_platforms": [
+        "windows-x64",
+        "linux-x64",
+        "macos-arm64",
+        "macos-x64"
+      ],
+      "backends": [
+        "cpu",
+        "cuda",
+        "metal"
+      ],
+      "precisions": [
+        "fp32",
+        "fp16"
+      ],
+      "measurements": [],
+      "provenance_reviewed_at": "2026-10-12",
+      "quality_status": "validated",
+      "recommended": false,
+      "id": "tencentarc.gfpgan-v1.4",
+      "display_name": "GFPGAN v1.4 + RetinaFace",
+      "publisher": "Tencent ARC",
+      "summary": "Blind face restoration with a generative facial prior, with RetinaFace detection and alignment. Faces are blended back with an adjustable strength.",
+      "best_for": [
+        "Blurry or low-resolution faces",
+        "Old footage of people"
+      ],
+      "weaknesses": [
+        "Can change identity details and invent features",
+        "Struggles with profile views and occlusions",
+        "Applies to faces only; the rest of the frame is unchanged"
+      ],
+      "categories": [
+        "face_recovery"
+      ],
+      "tasks": [
+        "face_restoration"
+      ],
+      "architecture": "gfpgan",
+      "scale": 1,
+      "artifacts": [
+        {
+          "role": "restorer",
+          "filename": "GFPGANv1.4.pth",
+          "source_url": "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth",
+          "mirrors": [],
+          "size_bytes": 348632874,
+          "sha256": "e2cd4703ab14f4d01fd1383a8a8b266f9a5833dacee8e6a79d3bf21a1b6be5ad",
+          "format": "pth",
+          "convert": {
+            "strip_prefixes": [
+              "module."
+            ],
+            "drop_prefixes": [],
+            "wrappers": []
+          }
+        },
+        {
+          "role": "detector",
+          "filename": "detection_Resnet50_Final.pth",
+          "source_url": "https://github.com/xinntao/facexlib/releases/download/v0.1.0/detection_Resnet50_Final.pth",
+          "mirrors": [],
+          "size_bytes": 109497761,
+          "sha256": "6d1de9c2944f2ccddca5f5e010ea5ae64a39845a86311af6fdf30841b0a5a16d",
+          "format": "pth",
+          "convert": {
+            "strip_prefixes": [
+              "module."
+            ],
+            "drop_prefixes": [],
+            "wrappers": []
+          }
+        }
+      ],
+      "installed_size_bytes": 458046400,
+      "minimum_ram_bytes": 4294967296,
+      "memory_per_megapixel_mb": 1200,
+      "performance_tier": "medium",
+      "weights_license": "Apache-2.0 (GFPGAN); MIT (RetinaFace via facexlib)",
+      "code_license": "Apache-2.0",
+      "commercial_use_allowed": true,
+      "redistribution_allowed": true,
+      "license_notes": "GFPGAN's repository license lists third-party components; ClipFX Enhance uses the 'clean' architecture that needs no custom CUDA operators. The model was trained on FFHQ, whose images are under CC BY-NC-SA 4.0 \u2014 review this if your use is commercial.",
+      "attribution": [
+        "GFPGAN: Xintao Wang, Yu Li, Honglun Zhang, Ying Shan (CVPR 2021). Copyright (c) 2021 Tencent ARC.",
+        "RetinaFace weights via facexlib (Xintao Wang) and Pytorch_Retinaface (biubug6), MIT."
+      ],
+      "source_repository": "https://github.com/TencentARC/GFPGAN",
+      "training_data": "FFHQ (CC BY-NC-SA 4.0); RetinaFace on WIDER FACE.",
+      "download_size_bytes": 458130635
+    }
+  ]
+}

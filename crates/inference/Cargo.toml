@@ -1,0 +1,25 @@
+[package]
+name = "clearframe-inference"
+description = "ClipFX Enhance reviewed model adapters implemented on candle (pure Rust)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+cuda = ["candle-core/cuda", "candle-nn/cuda"]
+metal = ["candle-core/metal", "candle-nn/metal"]
+accelerate = ["candle-core/accelerate", "candle-nn/accelerate"]
+
+[dependencies]
+candle-core.workspace = true
+candle-nn.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+rayon.workspace = true
+gemm = { version = "0.19", features = ["rayon"] }
+
+[dev-dependencies]
+safetensors.workspace = true

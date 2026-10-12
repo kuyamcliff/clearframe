@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "mainBinaryName": "ClipFXEnhance",
+  "bundle": {
+    "resources": {
+      "../../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../../../MODEL_LICENSES.md": "MODEL_LICENSES.md",
+      "ffmpeg/*": "ffmpeg/"
+    }
+  }
+}

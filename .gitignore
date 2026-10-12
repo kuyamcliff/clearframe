@@ -1,0 +1,14 @@
+/target
+node_modules/
+dist/
+*.log
+.DS_Store
+/apps/desktop/src-tauri/target
+/apps/desktop/src-tauri/gen/schemas
+/apps/desktop/src-tauri/binaries/
+/test-output/
+*.secret.key
+/apps/desktop/src-tauri/ffmpeg/
+/apps/desktop/test-results/
+/apps/desktop/playwright-report/
+/reference/

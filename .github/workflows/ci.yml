@@ -1,0 +1,195 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: System packages (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - name: FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./packaging/windows/fetch-ffmpeg.ps1
+          "CLIPFX_FFMPEG_DIR=$((Resolve-Path apps/desktop/src-tauri/ffmpeg).Path)" >> $env:GITHUB_ENV
+      - name: Frontend placeholder for the desktop crate
+        shell: bash
+        run: mkdir -p apps/desktop/dist && [ -f apps/desktop/dist/index.html ] || echo '<!doctype html><title>ClipFX Enhance</title>' > apps/desktop/dist/index.html
+      - name: Format
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+      - name: Clippy
+        if: runner.os == 'Linux'
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace --exclude clearframe-desktop
+      - name: Desktop crate builds
+        run: cargo build -p clearframe-desktop
+      - name: Model tests (downloads public weights, verified by SHA-256)
+        if: runner.os == 'Linux'
+        env:
+          CLIPFX_TEST_MODELS: "1"
+        run: cargo test -p clearframe-pipeline --test models_e2e -- --test-threads=1
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx vite build
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test e2e/app.spec.ts
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results
+          path: apps/desktop/test-results
+
+  catalog:
+    name: Model catalog
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Validate catalog schema, URLs and hashes format
+        run: cargo run -q -p clearframe-cli -- catalog validate model-catalog/catalog.json
+      - name: UI fixtures match the backend
+        run: cargo test -p clearframe-app --test ui_fixtures
+
+  licenses:
+    name: Licenses and SBOM
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses bans sources advisories
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust SBOM
+        run: |
+          cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --format json --all
+          mkdir -p sbom && find . -name '*.cdx.json' -not -path './target/*' -exec cp {} sbom/ \;
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: npm SBOM
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npx --yes @cyclonedx/cyclonedx-npm@1.19.3 --omit dev --output-file ../../sbom/desktop-npm.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom
+
+  windows-installer:
+    name: Windows installer lifecycle
+    runs-on: windows-2022
+    needs: [rust, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Bundle FFmpeg
+        shell: pwsh
+        run: ./packaging/windows/fetch-ffmpeg.ps1
+      - name: Build NSIS installer
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npx tauri build --bundles nsis
+      - name: Install, upgrade, uninstall
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          ./packaging/windows/test-installer.ps1 -Installer $setup.FullName
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: target/release/bundle/nsis/*-setup.exe
+
+  linux-packages:
+    name: Linux packages
+    runs-on: ubuntu-24.04
+    needs: [rust, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - name: Build deb, rpm, AppImage
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npx tauri build --bundles deb,rpm,appimage
+      - name: Install the .deb and run its self-test
+        run: |
+          sudo apt-get install -y ./target/release/bundle/deb/*.deb
+          HOME=$(mktemp -d) xvfb-run -a clipfx-enhance --self-test "$RUNNER_TEMP/selftest.json" || (cat "$RUNNER_TEMP/selftest.json"; exit 1)
+          cat "$RUNNER_TEMP/selftest.json"
+          sudo apt-get remove -y clip-fx-enhance
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+            target/release/bundle/appimage/*.AppImage

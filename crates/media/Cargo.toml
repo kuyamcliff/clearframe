@@ -1,0 +1,17 @@
+[package]
+name = "clearframe-media"
+description = "ClipFX Enhance FFmpeg integration: discovery, probing, raw frame pipes, encoding, muxing, validation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+crossbeam-channel.workspace = true
+parking_lot.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
