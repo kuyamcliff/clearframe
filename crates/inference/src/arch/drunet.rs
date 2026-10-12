@@ -15,7 +15,7 @@ impl ResBlock {
         Ok(Self { c1: Conv2d::load(w, &format!("{p}.res.0"), 1, 1)?, c2: Conv2d::load(w, &format!("{p}.res.2"), 1, 1)? })
     }
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        let r = self.c2.forward(&self.c1.forward(x)?.relu()?)?;
+        let r = self.c2.forward(&self.c1.forward_act(x, crate::ops::Act::Relu)?)?;
         x + r
     }
 }

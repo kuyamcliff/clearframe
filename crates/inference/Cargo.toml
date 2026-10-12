@@ -19,6 +19,7 @@ serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
 rayon.workspace = true
+gemm = { version = "0.19", features = ["rayon"] }
 
 [dev-dependencies]
 safetensors.workspace = true

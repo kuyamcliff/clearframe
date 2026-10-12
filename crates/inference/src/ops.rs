@@ -50,13 +50,33 @@ impl Conv2d {
     }
 
     pub fn forward(&self, x: &Tensor) -> Result<Tensor> {
+        self.forward_act(x, Act::None)
+    }
+
+    /// Convolution, bias and activation. On the CPU fast path all three happen in one pass.
+    pub fn forward_act(&self, x: &Tensor, act: Act<'_>) -> Result<Tensor> {
+        if crate::fastconv::supported(x, &self.weight, self.stride, self.groups) {
+            let bias = match &self.bias {
+                Some(b) => Some(b.to_dtype(candle_core::DType::F32)?.to_vec1::<f32>()?),
+                None => None,
+            };
+            return crate::fastconv::conv2d_s1_fused(x, &self.weight, bias.as_deref(), act, self.padding, self.dilation);
+        }
         let y = conv2d(x, &self.weight, self.padding, self.stride, self.dilation, self.groups)?;
-        match &self.bias {
-            Some(b) => y.broadcast_add(&b.reshape((1, b.dim(0)?, 1, 1))?),
-            None => Ok(y),
+        let y = match &self.bias {
+            Some(b) => y.broadcast_add(&b.reshape((1, b.dim(0)?, 1, 1))?)?,
+            None => y,
+        };
+        match act {
+            Act::None => Ok(y),
+            Act::Relu => y.relu(),
+            Act::LeakyRelu(a) => leaky_relu(&y, a as f64),
+            Act::Prelu(a) => prelu(&y, &Tensor::new(a, y.device())?.to_dtype(y.dtype())?),
         }
     }
 }
+
+pub use crate::fastconv::Act;
 
 /// `Tensor::conv2d` with a workaround for a candle 0.9 CPU bug: when
 /// `groups == 1` and channels == height == width, the tiled im2col kernel
@@ -64,6 +84,9 @@ impl Conv2d {
 /// Appending one zero column avoids the ambiguous stride pattern without
 /// changing the valid output region, which is then cropped back.
 pub fn conv2d(x: &Tensor, w: &Tensor, padding: usize, stride: usize, dilation: usize, groups: usize) -> Result<Tensor> {
+    if crate::fastconv::supported(x, w, stride, groups) {
+        return crate::fastconv::conv2d_s1(x, w, padding, dilation);
+    }
     let (_, c, h, wd) = x.dims4()?;
     if groups == 1 && c == h && h == wd && matches!(x.device(), Device::Cpu) {
         let (_, _, kh, kw) = w.dims4()?;

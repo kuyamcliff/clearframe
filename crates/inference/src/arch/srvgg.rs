@@ -2,12 +2,12 @@
 
 use candle_core::{Result, Tensor};
 
-use crate::ops::{pixel_shuffle, prelu, upsample_nearest, Conv2d};
+use crate::ops::{pixel_shuffle, upsample_nearest, Act, Conv2d};
 use crate::weights::Weights;
 
 pub struct SrVggCompact {
     convs: Vec<Conv2d>,
-    acts: Vec<Tensor>,
+    acts: Vec<Vec<f32>>,
     pub scale: usize,
 }
 
@@ -23,7 +23,7 @@ impl SrVggCompact {
             if i % 2 == 0 {
                 convs.push(Conv2d::load(w, &format!("body.{i}"), 1, 1)?);
             } else {
-                acts.push(w.get(&format!("body.{i}.weight"))?);
+                acts.push(w.get(&format!("body.{i}.weight"))?.to_dtype(candle_core::DType::F32)?.flatten_all()?.to_vec1::<f32>()?);
             }
         }
         let out_ch = convs.last().unwrap().weight.dim(0)?;
@@ -34,10 +34,10 @@ impl SrVggCompact {
     pub fn forward(&self, x: &Tensor) -> Result<Tensor> {
         let mut out = x.clone();
         for (i, conv) in self.convs.iter().enumerate() {
-            out = conv.forward(&out)?;
-            if let Some(a) = self.acts.get(i) {
-                out = prelu(&out, a)?;
-            }
+            out = match self.acts.get(i) {
+                Some(a) => conv.forward_act(&out, Act::Prelu(a))?,
+                None => conv.forward(&out)?,
+            };
         }
         let out = pixel_shuffle(&out, self.scale)?;
         out + upsample_nearest(x, self.scale)?

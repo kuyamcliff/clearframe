@@ -2,7 +2,9 @@
 
 use candle_core::{Result, Tensor};
 
-use crate::ops::{leaky_relu, pixel_unshuffle, upsample_nearest, Conv2d};
+use crate::ops::{pixel_unshuffle, upsample_nearest, Act, Conv2d};
+
+const L: Act<'static> = Act::LeakyRelu(0.2);
 use crate::weights::Weights;
 
 struct Rdb {
@@ -15,10 +17,10 @@ impl Rdb {
         Ok(Self { convs: [c(1)?, c(2)?, c(3)?, c(4)?, c(5)?] })
     }
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        let x1 = leaky_relu(&self.convs[0].forward(x)?, 0.2)?;
-        let x2 = leaky_relu(&self.convs[1].forward(&Tensor::cat(&[x, &x1], 1)?)?, 0.2)?;
-        let x3 = leaky_relu(&self.convs[2].forward(&Tensor::cat(&[x, &x1, &x2], 1)?)?, 0.2)?;
-        let x4 = leaky_relu(&self.convs[3].forward(&Tensor::cat(&[x, &x1, &x2, &x3], 1)?)?, 0.2)?;
+        let x1 = self.convs[0].forward_act(x, L)?;
+        let x2 = self.convs[1].forward_act(&Tensor::cat(&[x, &x1], 1)?, L)?;
+        let x3 = self.convs[2].forward_act(&Tensor::cat(&[x, &x1, &x2], 1)?, L)?;
+        let x4 = self.convs[3].forward_act(&Tensor::cat(&[x, &x1, &x2, &x3], 1)?, L)?;
         let x5 = self.convs[4].forward(&Tensor::cat(&[x, &x1, &x2, &x3, &x4], 1)?)?;
         (x5 * 0.2)? + x
     }
@@ -82,8 +84,8 @@ impl RrdbNet {
             b = ((o * 0.2)? + &b)?;
         }
         let feat = (feat + self.conv_body.forward(&b)?)?;
-        let feat = leaky_relu(&self.conv_up1.forward(&upsample_nearest(&feat, 2)?)?, 0.2)?;
-        let feat = leaky_relu(&self.conv_up2.forward(&upsample_nearest(&feat, 2)?)?, 0.2)?;
-        self.conv_last.forward(&leaky_relu(&self.conv_hr.forward(&feat)?, 0.2)?)
+        let feat = self.conv_up1.forward_act(&upsample_nearest(&feat, 2)?, L)?;
+        let feat = self.conv_up2.forward_act(&upsample_nearest(&feat, 2)?, L)?;
+        self.conv_last.forward(&self.conv_hr.forward_act(&feat, L)?)
     }
 }

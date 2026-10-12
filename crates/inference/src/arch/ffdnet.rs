@@ -32,10 +32,7 @@ impl FfdNet {
         let mut y = Tensor::cat(&[&xd, &m], 1)?;
         let last = self.convs.len() - 1;
         for (i, c) in self.convs.iter().enumerate() {
-            y = c.forward(&y)?;
-            if i != last {
-                y = y.relu()?;
-            }
+            y = c.forward_act(&y, if i != last { crate::ops::Act::Relu } else { crate::ops::Act::None })?;
         }
         let y = pixel_shuffle(&y, 2)?;
         y.narrow(2, 0, h)?.narrow(3, 0, w)

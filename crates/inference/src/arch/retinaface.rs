@@ -2,7 +2,7 @@
 
 use candle_core::{Result, Tensor};
 
-use crate::ops::{leaky_relu, resize_nearest, softmax_last, Conv2d};
+use crate::ops::{resize_nearest, softmax_last, Conv2d};
 use crate::weights::Weights;
 
 /// Conv + folded BN + optional leaky ReLU.
@@ -20,12 +20,14 @@ impl Cbr {
         Self::load(w, &format!("{p}.0"), &format!("{p}.1"), stride, pad, groups, act)
     }
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        let y = self.conv.forward(x)?;
-        match self.act {
-            Some(0.0) => y.relu(),
-            Some(s) => leaky_relu(&y, s),
-            None => Ok(y),
-        }
+        self.conv.forward_act(
+            x,
+            match self.act {
+                Some(0.0) => crate::ops::Act::Relu,
+                Some(s) => crate::ops::Act::LeakyRelu(s as f32),
+                None => crate::ops::Act::None,
+            },
+        )
     }
 }
 

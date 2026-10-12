@@ -2,7 +2,7 @@
 
 use candle_core::{Result, Tensor};
 
-use crate::ops::{leaky_relu, pad_replicate, pixel_shuffle, resize_bilinear_factor, warp, Conv2d, ConvTranspose2d};
+use crate::ops::{leaky_relu, pad_replicate, pixel_shuffle, resize_bilinear_factor, warp, Act, Conv2d, ConvTranspose2d};
 use crate::weights::Weights;
 
 struct Head {
@@ -22,9 +22,9 @@ impl Head {
         })
     }
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        let x = leaky_relu(&self.cnn0.forward(x)?, 0.2)?;
-        let x = leaky_relu(&self.cnn1.forward(&x)?, 0.2)?;
-        let x = leaky_relu(&self.cnn2.forward(&x)?, 0.2)?;
+        let x = self.cnn0.forward_act(x, Act::LeakyRelu(0.2))?;
+        let x = self.cnn1.forward_act(&x, Act::LeakyRelu(0.2))?;
+        let x = self.cnn2.forward_act(&x, Act::LeakyRelu(0.2))?;
         self.cnn3.forward(&x)
     }
 }
@@ -55,8 +55,8 @@ impl IfBlock {
             let f = (resize_bilinear_factor(f, 1.0 / scale)? * (1.0 / scale))?;
             x = Tensor::cat(&[&x, &f], 1)?;
         }
-        let mut feat = leaky_relu(&self.conv0[0].forward(&x)?, 0.2)?;
-        feat = leaky_relu(&self.conv0[1].forward(&feat)?, 0.2)?;
+        let mut feat = self.conv0[0].forward_act(&x, Act::LeakyRelu(0.2))?;
+        feat = self.conv0[1].forward_act(&feat, Act::LeakyRelu(0.2))?;
         for (conv, beta) in &self.blocks {
             feat = leaky_relu(&(conv.forward(&feat)?.broadcast_mul(beta)? + &feat)?, 0.2)?;
         }

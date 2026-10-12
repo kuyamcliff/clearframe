@@ -5,6 +5,7 @@
 pub mod arch;
 pub mod device;
 pub mod face;
+pub mod fastconv;
 pub mod image;
 pub mod model;
 pub mod ops;
