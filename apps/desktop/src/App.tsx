@@ -4,7 +4,7 @@ import { Blend, Boxes, ChevronRight, Columns2, FolderInput, Layers, PanelRightCl
 import { Confirm, Toasts, useMenu, type MenuItem } from "./components/ui";
 import { api, inTauri, onFileDrop, VIDEO_EXTENSIONS } from "./lib/ipc";
 import { basename, timecode } from "./lib/format";
-import { boot, clearPipeline, refreshPresets, closeSource, errorToast, openSource, redo, renderClip, renderStill, toast, undo, useStore, type CompareMode } from "./state/store";
+import { boot, clearPipeline, playSource, refreshPresets, stopSource, closeSource, errorToast, openSource, redo, renderClip, renderStill, toast, undo, useStore, type CompareMode } from "./state/store";
 import { ModelsDialog } from "./views/Models";
 import { chooseVideos, Player } from "./views/Player";
 import { PreferencesDialog } from "./views/Preferences";
@@ -149,6 +149,7 @@ function useShortcuts() {
       const v = s.source.info.video;
       const step = v ? v.frame_rate.den / v.frame_rate.num : 1 / 30;
       const dur = s.source.info.duration;
+      if (e.key === " ") { e.preventDefault(); if (s.sourcePlay) stopSource(); else playSource(); return; }
       if (e.key === "ArrowLeft") { e.preventDefault(); useStore.setState({ playhead: Math.max(0, s.playhead - (e.shiftKey ? 1 : step)) }); }
       else if (e.key === "ArrowRight") { e.preventDefault(); useStore.setState({ playhead: Math.min(dur, s.playhead + (e.shiftKey ? 1 : step)) }); }
       else if (k === "i") useStore.setState({ range: { start: s.playhead, end: Math.max(s.playhead + step, s.range?.end ?? dur) } });

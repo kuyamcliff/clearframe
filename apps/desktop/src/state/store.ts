@@ -36,6 +36,9 @@ export interface State {
   sideOpen: boolean;
   zoom: Zoom;
   muted: boolean;
+  /** Source playback through a proxy copy, started at `start` seconds. */
+  sourcePlay: { src: string; start: number } | null;
+  sourcePlayLoading: boolean;
   sources: string[];
   modelFocus: string | null;
 
@@ -96,6 +99,8 @@ export const useStore = create<State>(() => ({
   sideOpen: true,
   zoom: "fit",
   muted: true,
+  sourcePlay: null,
+  sourcePlayLoading: false,
   sources: [],
   modelFocus: null,
   sourcePath: null,
@@ -396,7 +401,7 @@ export function currentJob(overrides: Partial<NewJob> = {}): NewJob | null {
 // ---------- sources ----------
 
 export async function openSource(path: string) {
-  set((s) => ({ sourcePath: path, source: null, sourceLoading: true, sourceError: null, still: null, clip: null, stillError: null, clipError: null, playhead: 0, range: null, sources: s.sources.includes(path) ? s.sources : [...s.sources, path] }));
+  set((s) => ({ sourcePlay: null, sourcePath: path, source: null, sourceLoading: true, sourceError: null, still: null, clip: null, stillError: null, clipError: null, playhead: 0, range: null, sources: s.sources.includes(path) ? s.sources : [...s.sources, path] }));
   try {
     const info = await api.sourceInfo(path, true);
     if (get().sourcePath !== path) return;
@@ -408,6 +413,29 @@ export async function openSource(path: string) {
     if (get().sourcePath !== path) return;
     set({ sourceLoading: false, sourceError: e instanceof Error ? e.message : String(e) });
   }
+}
+
+const PLAY_CHUNK = 10;
+
+/** Play the source from the playhead using browser-playable proxy copies, 10 s at a time. */
+export async function playSource() {
+  const s = get();
+  if (!s.sourcePath || !s.source || s.sourcePlayLoading || s.app?.demo) return;
+  const dur = s.source.info.duration;
+  const start = s.playhead >= dur - 0.05 ? 0 : s.playhead;
+  set({ sourcePlayLoading: true });
+  try {
+    const src = await api.sourceProxy(s.sourcePath, start, Math.min(PLAY_CHUNK, dur - start), Math.min(720, s.settings?.preview_max_height ?? 720));
+    if (get().sourcePath === s.sourcePath) set({ sourcePlay: { src, start }, playhead: start });
+  } catch (e) {
+    errorToast(e);
+  } finally {
+    set({ sourcePlayLoading: false });
+  }
+}
+
+export function stopSource() {
+  set({ sourcePlay: null });
 }
 
 export function closeSource() {

@@ -6,7 +6,7 @@ import { api, fileUrl, pickFile, VIDEO_EXTENSIONS } from "../lib/ipc";
 import { basename, relTime, timecode } from "../lib/format";
 import { moveStage, SECTION_TITLE, stageSummary } from "../lib/ops";
 import type { RecentFile } from "../lib/types";
-import { errorToast, openSource, renderClip, renderStill, setPipeline, useStore } from "../state/store";
+import { errorToast, openSource, playSource, renderClip, renderStill, setPipeline, stopSource, toast, useStore } from "../state/store";
 import { Panels } from "./Panels";
 import { openProjectFile } from "./Projects";
 
@@ -29,13 +29,14 @@ function useOriginalFrame(): string | null {
   const path = useStore((s) => s.sourcePath);
   const t = useStore((s) => s.playhead);
   const ready = useStore((s) => !!s.source);
+  const playing = useStore((s) => !!s.sourcePlay);
   const [img, setImg] = useState<string | null>(null);
   useEffect(() => {
-    if (!path || !ready) return;
+    if (!path || !ready || playing) return;
     let live = true;
     const h = window.setTimeout(() => api.sourceFrame(path, t, 1920).then((p) => live && setImg(p)).catch(() => {}), 90);
     return () => { live = false; window.clearTimeout(h); };
-  }, [path, t, ready]);
+  }, [path, t, ready, playing]);
   return img;
 }
 
@@ -131,12 +132,29 @@ function Stage({ l, r }: { l: RefObject<HTMLVideoElement>; r: RefObject<HTMLVide
     <div className={`view${z ? " zoomed" : ""}`}>{src ? <Media src={src} kind={kind} alt={alt} vref={ref} zoomW={z ? w * z : undefined} /> : <Loader2 className="spin faint" />}</div>
   );
   const effective = right ? mode : "original";
+  const sourcePlay = useStore((s) => s.sourcePlay);
+  const muted = useStore((s) => s.muted);
 
   let status: React.ReactNode = null;
   if (stillBusy) status = <div className="status"><Loader2 size={13} className="spin" /> Rendering frame…</div>;
   else if (clip?.job_id) status = <div className="status"><Loader2 size={13} className="spin" /> Rendering clip {progress ? `${Math.round(progress.fraction * 100)}%` : ""}</div>;
   else if (stillError) status = <div className="status err" role="alert">{stillError}</div>;
   else if (clipError) status = <div className="status err" role="alert">{clipError}</div>;
+
+  if (sourcePlay) {
+    const dur = source?.info.duration ?? 0;
+    return (
+      <div className="stage" data-testid="viewer">
+        <div className="view">
+          <video ref={r} src={fileUrl(sourcePlay.src)} autoPlay muted={muted} playsInline
+            onTimeUpdate={(e) => useStore.setState({ playhead: Math.min(dur, sourcePlay.start + e.currentTarget.currentTime) })}
+            onEnded={() => { stopSource(); if (useStore.getState().playhead < dur - 0.1) playSource(); }}
+            onError={() => { stopSource(); toast("error", "This system cannot play the preview copy."); }} />
+        </div>
+        <span className="label l">Original · playing</span>
+      </div>
+    );
+  }
 
   return (
     <div className="stage" data-testid="viewer">
@@ -248,22 +266,31 @@ function Playback({ r }: { r: RefObject<HTMLVideoElement> }) {
   const { step, dur } = useClock();
   const [playing, setPlaying] = useState(false);
   const set = (t: number) => useStore.setState({ playhead: Math.max(0, Math.min(dur, t)) });
-  const canPlay = !!clip?.path;
+  const sourcePlay = useStore((s) => s.sourcePlay);
+  const loading = useStore((s) => s.sourcePlayLoading);
+  const demo = useStore((s) => !!s.app?.demo);
+  const canPlay = !!clip?.path || !demo;
   useEffect(() => {
     const v = r.current;
     if (!v) return setPlaying(false);
+    setPlaying(!v.paused);
     const on = () => setPlaying(true), off = () => setPlaying(false);
     v.addEventListener("play", on); v.addEventListener("pause", off);
     return () => { v.removeEventListener("play", on); v.removeEventListener("pause", off); };
-  }, [r, clip?.path]);
-  const toggle = () => { const v = r.current; if (!v) return; v.paused ? v.play().catch(() => {}) : v.pause(); };
+  }, [r, clip?.path, sourcePlay]);
+  const toggle = () => {
+    if (sourcePlay) return stopSource();
+    const v = r.current;
+    if (clip?.path && v) return v.paused ? void v.play().catch(() => {}) : v.pause();
+    playSource();
+  };
   return (
     <div className="playback">
       <span className="tc">{timecode(playhead)}</span>
       <div className="center">
         <button className="tb icon" aria-label="Go to start" title="Start" onClick={() => set(range?.start ?? 0)}><SkipBack size={15} /></button>
         <button className="tb icon" aria-label="Previous frame" title="Previous frame (←)" onClick={() => set(playhead - step)}><StepBack size={15} /></button>
-        <button className="tb icon" aria-label={playing ? "Pause" : "Play"} disabled={!canPlay} title={canPlay ? "Play preview (Space)" : "Render a clip to play it"} onClick={toggle}>{playing ? <Pause size={15} /> : <Play size={15} />}</button>
+        <button className="tb icon" aria-label={playing || sourcePlay ? "Pause" : "Play"} disabled={!canPlay} title="Play (Space)" onClick={toggle}>{loading ? <Loader2 size={15} className="spin" /> : playing || sourcePlay ? <Pause size={15} /> : <Play size={15} />}</button>
         <button className="tb icon" aria-label="Next frame" title="Next frame (→)" onClick={() => set(playhead + step)}><StepForward size={15} /></button>
         <button className="tb icon" aria-label="Go to end" title="End" onClick={() => set(range?.end ?? dur)}><SkipForward size={15} /></button>
       </div>
