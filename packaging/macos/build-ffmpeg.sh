@@ -63,11 +63,13 @@ for arch in $ARCHS; do
   P="$WORK/$arch"
   B="$WORK/build-$arch"
   rm -rf "$B" && mkdir -p "$B" "$P"
-  cross=()
+  # (macOS ships bash 3.2, where an empty array counts as unset under `set -u`, so arrays are
+  # expanded as ${a[@]+"${a[@]}"} and cross-compiling is tracked in CROSS.)
+  cross=() CROSS=0
   if [ "$OS" = Darwin ]; then
     triple=$([ "$arch" = arm64 ] && echo aarch64-apple-darwin || echo x86_64-apple-darwin)
     FLAGS="-arch $arch -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET"
-    [ "$arch" != "$HOST_ARCH" ] && cross=(--host="$triple")
+    if [ "$arch" != "$HOST_ARCH" ]; then cross=(--host="$triple") CROSS=1; fi
     export CC=clang CXX=clang++
   else
     FLAGS="-fPIC"
@@ -79,14 +81,14 @@ for arch in $ARCHS; do
   echo "== x264 ($arch)"
   cp -R "$WORK/src/x264" "$B/x264"
   (cd "$B/x264" && ./configure --prefix="$P" --enable-static --enable-pic --disable-cli --disable-opencl \
-    "${cross[@]}" --extra-cflags="$CFLAGS" --extra-ldflags="$LDFLAGS" >/dev/null && make -s -j"$JOBS" && make -s install)
+    ${cross[@]+"${cross[@]}"} --extra-cflags="$CFLAGS" --extra-ldflags="$LDFLAGS" >/dev/null && make -s -j"$JOBS" && make -s install)
 
   echo "== x265 ($arch, 8- and 10-bit)"
   # The 10-bit library is linked into the 8-bit one so a single libx265 encodes both.
   x265_opts=(-DCMAKE_BUILD_TYPE=Release -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     -DCMAKE_OSX_ARCHITECTURES="$arch" -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS")
   # Cross-compiled slices skip x265's hand-written assembly (its build picks it by host CPU).
-  [ ${#cross[@]} -gt 0 ] && x265_opts+=(-DENABLE_ASSEMBLY=OFF -DCMAKE_SYSTEM_PROCESSOR="$arch")
+  [ "$CROSS" = 1 ] && x265_opts+=(-DENABLE_ASSEMBLY=OFF -DCMAKE_SYSTEM_PROCESSOR="$arch")
   cmake -S "$WORK/src/x265/source" -B "$B/x265-10" "${x265_opts[@]}" -DHIGH_BIT_DEPTH=ON -DEXPORT_C_API=OFF >/dev/null
   cmake --build "$B/x265-10" -j "$JOBS" >/dev/null
   cp "$B/x265-10/libx265.a" "$B/libx265_main10.a"
@@ -101,7 +103,7 @@ for arch in $ARCHS; do
 
   echo "== zimg ($arch)"
   cp -R "$WORK/src/zimg" "$B/zimg"
-  (cd "$B/zimg" && ./autogen.sh >/dev/null 2>&1 && ./configure -q --prefix="$P" --disable-shared --enable-static "${cross[@]}" \
+  (cd "$B/zimg" && ./autogen.sh >/dev/null 2>&1 && ./configure -q --prefix="$P" --disable-shared --enable-static ${cross[@]+"${cross[@]}"} \
     && make -s -j"$JOBS" && make -s install)
 
   echo "== vid.stab ($arch)"
@@ -112,7 +114,7 @@ for arch in $ARCHS; do
 
   echo "== dav1d ($arch)"
   meson_cross=()
-  if [ ${#cross[@]} -gt 0 ]; then
+  if [ "$CROSS" = 1 ]; then
     cat > "$B/cross.txt" <<EOF
 [binaries]
 c = 'clang'
@@ -131,7 +133,7 @@ endian = 'little'
 EOF
     meson_cross=(--cross-file "$B/cross.txt")
   fi
-  meson setup "$B/dav1d" "$WORK/src/dav1d" "${meson_cross[@]}" --prefix="$P" --libdir=lib --buildtype=release \
+  meson setup "$B/dav1d" "$WORK/src/dav1d" ${meson_cross[@]+"${meson_cross[@]}"} --prefix="$P" --libdir=lib --buildtype=release \
     --default-library=static -Denable_tools=false -Denable_tests=false >/dev/null
   ninja -C "$B/dav1d" install >/dev/null
 
@@ -143,7 +145,7 @@ EOF
     --extra-cflags="$CFLAGS -I$P/include" --extra-ldflags="$LDFLAGS -L$P/lib")
   if [ "$OS" = Darwin ]; then
     conf+=(--enable-videotoolbox --enable-audiotoolbox --enable-zlib --enable-bzlib --enable-iconv --extra-libs="-lc++")
-    [ ${#cross[@]} -gt 0 ] && conf+=(--enable-cross-compile --arch="$arch" --target-os=darwin --cc=clang --cxx=clang++)
+    [ "$CROSS" = 1 ] && conf+=(--enable-cross-compile --arch="$arch" --target-os=darwin --cc=clang --cxx=clang++)
   else
     conf+=(--extra-libs="-lstdc++ -lm -lpthread")
   fi
