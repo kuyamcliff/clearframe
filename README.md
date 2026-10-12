@@ -49,7 +49,7 @@ Stack as many steps as you like, preview any moment against the original, and ex
 3. Press **Render frame** to preview, then **Export**.
 
 > [!NOTE]
-> This build runs AI models on the CPU. A short 360p clip upscaled 4× takes minutes; long or high-resolution videos take much longer. GPU support is in progress. See [known limitations](docs/limitations.md).
+> Upscaling, denoising and deblurring run on your GPU (NVIDIA, AMD, Intel or Apple, through Vulkan, DirectX 12 or Metal). Frame interpolation and face recovery still use the CPU. Without a GPU, AI processing is slow. See [known limitations](docs/limitations.md).
 
 ## Build from source
 

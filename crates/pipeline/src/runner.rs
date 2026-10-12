@@ -1042,12 +1042,9 @@ fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, compute: &Comp
             let _ = std::fs::remove_file(new_list);
         }
     };
-    match result {
-        Err(e) => {
-            merge(&list_file, &new_list);
-            return Err(e);
-        }
-        Ok(()) => {}
+    if let Err(e) = result {
+        merge(&list_file, &new_list);
+        return Err(e);
     }
     if let Err(e) = enc_result {
         merge(&list_file, &new_list);
@@ -1076,13 +1073,13 @@ fn count_video_packets(tools: &FfmpegTools, p: &Path) -> Option<u64> {
 /// processor in order and push its remaining output downstream.
 fn run_chain(procs: &mut [Timed], from: usize, frames: Vec<Frame>, flush: bool) -> std::result::Result<Vec<Frame>, JobError> {
     let mut cur = frames;
-    for i in from..procs.len() {
+    for p in procs.iter_mut().skip(from) {
         let mut next = Vec::new();
         for f in cur {
-            procs[i].push(f, &mut next).map_err(JobError::Failed)?;
+            p.push(f, &mut next).map_err(JobError::Failed)?;
         }
         if flush {
-            procs[i].finish(&mut next).map_err(JobError::Failed)?;
+            p.finish(&mut next).map_err(JobError::Failed)?;
         }
         cur = next;
     }

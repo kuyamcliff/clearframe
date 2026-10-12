@@ -245,6 +245,9 @@ pub fn use_proxy_for(url: &str) -> bool {
     true
 }
 
+/// (version, role -> absolute file, role -> sha256).
+pub type ResolvedFiles = (String, BTreeMap<String, PathBuf>, BTreeMap<String, String>);
+
 impl ModelManager {
     /// `models_dir`: installed models. `staging_dir`: download staging (inside the managed cache).
     pub fn new(db: Arc<Db>, models_dir: PathBuf, staging_dir: PathBuf, catalog: Catalog) -> Self {
@@ -405,7 +408,7 @@ impl ModelManager {
     }
 
     /// (version, role -> absolute file, role -> sha256) for a usable installed model.
-    pub fn resolve(&self, id: &str) -> Option<(String, BTreeMap<String, PathBuf>, BTreeMap<String, String>)> {
+    pub fn resolve(&self, id: &str) -> Option<ResolvedFiles> {
         let m = self.scan_one(id)?;
         if m.state != ModelState::Installed {
             return None;

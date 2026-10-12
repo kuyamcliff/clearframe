@@ -32,7 +32,7 @@ clearframe-models.workspace = true
 clearframe-pipeline.workspace = true
 clearframe-media.workspace = true
 clearframe-hardware.workspace = true
-clearframe-inference.workspace = true
+clearframe-inference = { workspace = true, features = ["gpu"] }
 
 [dev-dependencies]
 tempfile.workspace = true

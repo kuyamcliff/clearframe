@@ -552,12 +552,12 @@ impl StateDict {
 
 fn decode_storage(bytes: &[u8], dtype: StorageType) -> Vec<f32> {
     match dtype {
-        StorageType::F32 => bytes.chunks_exact(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect(),
-        StorageType::F64 => bytes.chunks_exact(8).map(|c| f64::from_le_bytes(c.try_into().unwrap()) as f32).collect(),
-        StorageType::F16 => bytes.chunks_exact(2).map(|c| half_to_f32(u16::from_le_bytes([c[0], c[1]]))).collect(),
-        StorageType::BF16 => bytes.chunks_exact(2).map(|c| f32::from_bits((u16::from_le_bytes([c[0], c[1]]) as u32) << 16)).collect(),
-        StorageType::I64 => bytes.chunks_exact(8).map(|c| i64::from_le_bytes(c.try_into().unwrap()) as f32).collect(),
-        StorageType::I32 => bytes.chunks_exact(4).map(|c| i32::from_le_bytes(c.try_into().unwrap()) as f32).collect(),
+        StorageType::F32 => bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect(),
+        StorageType::F64 => bytes.as_chunks::<8>().0.iter().map(|c| f64::from_le_bytes(*c) as f32).collect(),
+        StorageType::F16 => bytes.as_chunks::<2>().0.iter().map(|c| half_to_f32(u16::from_le_bytes(*c))).collect(),
+        StorageType::BF16 => bytes.as_chunks::<2>().0.iter().map(|c| f32::from_bits((u16::from_le_bytes(*c) as u32) << 16)).collect(),
+        StorageType::I64 => bytes.as_chunks::<8>().0.iter().map(|c| i64::from_le_bytes(*c) as f32).collect(),
+        StorageType::I32 => bytes.as_chunks::<4>().0.iter().map(|c| i32::from_le_bytes(*c) as f32).collect(),
         StorageType::U8 | StorageType::Bool => bytes.iter().map(|b| *b as f32).collect(),
     }
 }

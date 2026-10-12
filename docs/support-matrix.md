@@ -14,9 +14,9 @@ This page lists only what has actually been tested. "Built in CI" means the CI w
 | Backend | Status |
 |---|---|
 | CPU (x86-64) | Tested. All model adapters match the official PyTorch output (max error ≤ 3e-5). |
-| NVIDIA CUDA (`--features cuda`) | Code path present, **not built or tested** in this release. Default builds are CPU-only. |
-| Apple Metal (`--features metal`) | Code path present, **not built or tested**. |
-| AMD / Intel GPUs | No GPU inference backend. Hardware *encoders* (AMF, QSV) are used when FFmpeg provides them. |
+| GPU, any vendor (Vulkan / DirectX 12 / Metal) | Built into every release. Upscaling, denoising and deblurring models run on NVIDIA, AMD, Intel and Apple GPUs. CI checks every architecture against the CPU on Vulkan (lavapipe), DirectX 12 (WARP) and Metal; **speed on real graphics cards not yet measured**. |
+| NVIDIA CUDA (`--features cuda`) | Optional candle backend; code path present, **not built or tested**. The cross-vendor GPU backend above is the supported way to use NVIDIA cards. |
+| Apple Metal via candle (`--features metal`) | Optional candle backend; **not built or tested**. |
 
 The Models window shows a capability level for each model on your machine: *Tested on this
 system*, *Compatible (not certified)*, *CPU only* or *Not supported*. Only Linux + CPU is

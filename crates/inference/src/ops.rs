@@ -358,8 +358,11 @@ pub fn softmax_last(x: &Tensor) -> Result<Tensor> {
     candle_nn::ops::softmax_last_dim(x)
 }
 
+/// One step of a [`Seq`].
+pub type SeqFn = Box<dyn Fn(&Tensor) -> Result<Tensor> + Send + Sync>;
+
 /// Sequential helper for closures.
-pub struct Seq(pub Vec<Box<dyn Fn(&Tensor) -> Result<Tensor> + Send + Sync>>);
+pub struct Seq(pub Vec<SeqFn>);
 
 impl Module for Seq {
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {

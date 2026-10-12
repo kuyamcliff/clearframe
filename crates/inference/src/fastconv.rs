@@ -192,6 +192,7 @@ pub fn conv2d_s1_fused(x: &Tensor, w: &Tensor, bias: Option<&[f32]>, act: Act<'_
 mod tests {
     use super::*;
 
+    #[allow(clippy::too_many_arguments)]
     fn check(n: usize, cin: usize, cout: usize, h: usize, w: usize, k: usize, pad: usize, dil: usize) {
         let x = Tensor::randn(0f32, 1.0, (n, cin, h, w), &Device::Cpu).unwrap();
         let k = Tensor::randn(0f32, 0.3, (cout, cin, k, k), &Device::Cpu).unwrap();

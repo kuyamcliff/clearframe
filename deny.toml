@@ -15,6 +15,10 @@ allow = [
 [advisories]
 version = 2
 ignore = []
+# Security advisories always fail the build. "Unmaintained" notices only fail for crates
+# we depend on directly; deep transitive ones (e.g. paste via candle, proc-macro-error via
+# GTK, rustls-pemfile via ureq) are tracked upstream and can't be swapped out here.
+unmaintained = "workspace"
 
 [bans]
 multiple-versions = "allow"

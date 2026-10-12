@@ -164,10 +164,10 @@ impl ImageModel {
         let err = |e: String| candle_core::Error::Msg(format!("GPU: {e}"));
         let net = match &self.net {
             ImageNet::SrVgg(n) => GpuNet::SrVgg(GSrVgg::new(&gpu, n).map_err(err)?),
-            ImageNet::Rrdb(n) => GpuNet::Rrdb(GRrdb::new(&gpu, n).map_err(err)?),
+            ImageNet::Rrdb(n) => GpuNet::Rrdb(Box::new(GRrdb::new(&gpu, n).map_err(err)?)),
             ImageNet::Ffd(n) => GpuNet::Ffd(GFfd::new(&gpu, n).map_err(err)?),
-            ImageNet::Dru(n) => GpuNet::Dru(GDru::new(&gpu, n).map_err(err)?),
-            ImageNet::Naf(n) => GpuNet::Naf(GNaf::new(&gpu, n).map_err(err)?),
+            ImageNet::Dru(n) => GpuNet::Dru(Box::new(GDru::new(&gpu, n).map_err(err)?)),
+            ImageNet::Naf(n) => GpuNet::Naf(Box::new(GNaf::new(&gpu, n).map_err(err)?)),
         };
         // Keep each tile's largest tensor within what the GPU allows in one buffer.
         let limit = gpu.max_binding;

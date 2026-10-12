@@ -65,7 +65,10 @@ fn app_info(app: S<'_>) -> AppInfo {
         ffmpeg: t.map(|t| serde_json::json!({ "version": t.version, "path": t.ffmpeg, "source": t.source, "license": t.license_hint, "vidstab": t.has_filter("vidstabdetect"), "zscale": t.has_filter("zscale") })),
         ffmpeg_error: err,
         queue_paused: app.queue.is_paused(),
-        compiled_backends: ["cpu", "cuda", "metal"].iter().filter(|b| match **b { "cuda" => cfg!(feature = "cuda"), "metal" => cfg!(feature = "metal"), _ => true }).map(|s| s.to_string()).collect(),
+        compiled_backends: {
+            use clearframe_inference::device::{compiled, BackendKind};
+            [BackendKind::Cpu, BackendKind::Gpu, BackendKind::Cuda, BackendKind::Metal].into_iter().filter(|k| compiled(*k)).map(|k| k.id().to_string()).collect()
+        },
     }
 }
 
@@ -81,9 +84,7 @@ fn settings_set(app: S<'_>, settings: Settings) -> R<Settings> {
 
 #[tauri::command]
 fn settings_reset(app: S<'_>) -> R<Settings> {
-    let mut s = Settings::default();
-    s.onboarding_complete = true;
-    app.save_settings(s).map_err(e)
+    app.save_settings(Settings { onboarding_complete: true, ..Default::default() }).map_err(e)
 }
 
 #[tauri::command]

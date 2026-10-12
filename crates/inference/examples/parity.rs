@@ -12,11 +12,11 @@ fn read(dir: &Path, name: &str) -> (Vec<Tensor>, Vec<f32>, serde_json::Value) {
     for (i, shape) in meta["inputs"].as_array().unwrap().iter().enumerate() {
         let shape: Vec<usize> = shape.as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as usize).collect();
         let bytes = std::fs::read(dir.join(format!("{name}.in{i}.bin"))).unwrap();
-        let data: Vec<f32> = bytes.chunks_exact(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
+        let data: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
         inputs.push(Tensor::from_vec(data, shape.as_slice(), &Device::Cpu).unwrap());
     }
     let bytes = std::fs::read(dir.join(format!("{name}.out.bin"))).unwrap();
-    let out = bytes.chunks_exact(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
+    let out = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
     (inputs, out, meta)
 }
 
@@ -43,7 +43,7 @@ fn main() {
     let only = a.get(3).cloned();
     let w = |f: &str| Weights::from_safetensors(&st.join(f), &Device::Cpu).unwrap();
     let mut all = true;
-    let run = |n: &str| only.as_deref().map_or(true, |o| n.starts_with(o));
+    let run = |n: &str| only.as_deref().is_none_or(|o| n.starts_with(o));
     for (name, file) in [("animevideov3", "realesr-animevideov3"), ("general_x4v3", "realesr-general-x4v3")] {
         if !run(name) {
             continue;

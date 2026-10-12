@@ -173,7 +173,7 @@ impl App {
         let Ok(jobs) = self.db.jobs(true) else { return };
         let plan = self.resource_plan();
         // Previews have their own lane (one at a time) so they never wait behind long renders.
-        let running = self.queue.running.lock().iter().map(|(_, r)| r.kind).collect::<Vec<_>>();
+        let running = self.queue.running.lock().values().map(|r| r.kind).collect::<Vec<_>>();
         let renders = running.iter().filter(|k| **k == JobKind::Render).count() as u32;
         let previews = running.iter().filter(|k| **k == JobKind::Preview).count();
         if previews == 0 {

@@ -89,11 +89,15 @@ describe("StageForm", () => {
 });
 
 describe("Models dialog", () => {
-  it("lists every catalog model with its license and storage location", async () => {
+  it("lists every catalog model with recommended hardware and its storage location", async () => {
     render(<ModelsDialog />);
     await waitFor(() => expect(screen.getByTestId("models-dir")).not.toHaveTextContent("…"));
     for (const m of useStore.getState().models) expect(screen.getByTestId(`model-${m.manifest!.id}`)).toBeInTheDocument();
-    expect(screen.getByTestId("model-detail")).toHaveTextContent("Weights");
+    const detail = screen.getByTestId("model-detail");
+    expect(detail).toHaveTextContent("Recommended hardware");
+    expect(detail).toHaveTextContent("video memory");
+    // Licensing and provenance details are kept out of the app's Models page.
+    for (const hidden of ["License", "Weights", "Source", "Training", "github.com"]) expect(detail).not.toHaveTextContent(hidden);
     expect(screen.getByRole("button", { name: "Install" })).toBeInTheDocument();
   });
 });

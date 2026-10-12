@@ -34,6 +34,7 @@
       ],
       "backends": [
         "cpu",
+        "gpu",
         "cuda",
         "metal"
       ],
@@ -150,6 +151,7 @@
       ],
       "backends": [
         "cpu",
+        "gpu",
         "cuda",
         "metal"
       ],
@@ -251,6 +253,7 @@
       ],
       "backends": [
         "cpu",
+        "gpu",
         "cuda",
         "metal"
       ],
@@ -349,6 +352,7 @@
       ],
       "backends": [
         "cpu",
+        "gpu",
         "cuda",
         "metal"
       ],
@@ -447,6 +451,7 @@
       ],
       "backends": [
         "cpu",
+        "gpu",
         "cuda",
         "metal"
       ],
@@ -544,6 +549,7 @@
       ],
       "backends": [
         "cpu",
+        "gpu",
         "cuda",
         "metal"
       ],
@@ -643,6 +649,7 @@
       ],
       "backends": [
         "cpu",
+        "gpu",
         "cuda",
         "metal"
       ],
@@ -741,6 +748,7 @@
       ],
       "backends": [
         "cpu",
+        "gpu",
         "cuda",
         "metal"
       ],

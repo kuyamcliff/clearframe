@@ -446,7 +446,7 @@ fn run(cli: Cli) -> Result<bool> {
                 }
                 JobsCmd::Resume { id } => {
                     app.resume_job(id)?;
-                    return wait_for_jobs(&app, &[id.clone()]);
+                    return wait_for_jobs(&app, std::slice::from_ref(id));
                 }
                 JobsCmd::Cancel { id } => app.cancel_job(id)?,
                 JobsCmd::Remove { id } => app.remove_job(id)?,

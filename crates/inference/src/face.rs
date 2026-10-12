@@ -139,8 +139,8 @@ pub fn warp_crop(img: &RgbImage, m: &Affine, size: usize) -> RgbImage {
         for x in 0..size {
             let (sx, sy) = inv.apply(x as f32, y as f32);
             let v = sample_bilinear(img, sx, sy, Some(BORDER_RGB));
-            for c in 0..3 {
-                out.set(x, y, c, v[c]);
+            for (c, value) in v.iter().enumerate().take(3) {
+                out.set(x, y, c, *value);
             }
         }
     }
@@ -287,9 +287,9 @@ pub fn paste_face(frame: &mut RgbImage, face: &RgbImage, m: &Affine) {
                 continue;
             }
             let er = mask[i];
-            for c in 0..3 {
+            for (c, &p) in pasted[i].iter().enumerate().take(3) {
                 let orig = frame.get(x + rx0, y + ry0, c);
-                let face_v = pasted[i][c] * er;
+                let face_v = p * er;
                 frame.set(x + rx0, y + ry0, c, a * face_v + (1.0 - a) * orig);
             }
         }

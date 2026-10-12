@@ -250,7 +250,8 @@ export async function mockInvoke(cmd: string, a: Record<string, any> = {}): Prom
         hardware: {
           os: "demo", os_version: "Browser demo", arch: "demo", cpu_brand: "Demo CPU (8 threads)", logical_cores: 8, physical_cores: 4, ram_total_mb: 16384, ram_available_mb: 9000,
           gpus: [{ vendor: "Demo", name: "Demo GPU", memory_total_mb: 8192, memory_free_mb: 7000, driver: null, source: "demo" }],
-          backends: [{ kind: "cpu", compiled: true, available: true, detail: "device created" }, { kind: "cuda", compiled: false, available: false, detail: "not included in this build" }, { kind: "metal", compiled: false, available: false, detail: "not included in this build" }],
+          gpu_adapters: [{ index: 0, name: "Demo GPU", vendor: "Demo", kind: "discrete", api: "vulkan", max_buffer_mb: 2048 }],
+          backends: [{ kind: "cpu", compiled: true, available: true, detail: "device created" }, { kind: "gpu", compiled: true, available: true, detail: "Demo GPU (vulkan)" }, { kind: "cuda", compiled: false, available: false, detail: "not included in this build" }, { kind: "metal", compiled: false, available: false, detail: "not included in this build" }],
           precisions: ["fp32"], cpu_features: ["avx2"],
         },
         plan: resolvePlan(state.settings.performance), probe: null,

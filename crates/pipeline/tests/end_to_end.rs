@@ -252,14 +252,16 @@ fn hdr_tonemap_and_sdr_to_hdr() {
         src.to_str().unwrap(),
     ]);
     let c = ColorSettings { mode: ColorMode::SdrToHdr, ..Default::default() };
-    let mut out = OutputSettings::default();
-    out.video = clearframe_media::encode::VideoEncodeSettings {
-        encoder: "libx265".into(),
-        rate: clearframe_media::encode::RateControl::Quality { value: 22.0 },
-        preset: Some("ultrafast".into()),
-        pix_fmt: "yuv420p10le".into(),
-        profile: None,
-        gop: None,
+    let out = OutputSettings {
+        video: clearframe_media::encode::VideoEncodeSettings {
+            encoder: "libx265".into(),
+            rate: clearframe_media::encode::RateControl::Quality { value: 22.0 },
+            preset: Some("ultrafast".into()),
+            pix_fmt: "yuv420p10le".into(),
+            profile: None,
+            gop: None,
+        },
+        ..Default::default()
     };
     let r = run(&t, &job(d.path(), &src, Pipeline::single(Operation::Color(c)), out.clone(), "hdr")).unwrap();
     let info = probe(&t, &r.output).unwrap();
@@ -410,8 +412,7 @@ fn vfr_rotation_and_streams() {
     let info = probe(&t, &src).unwrap();
     assert!(info.video.as_ref().unwrap().variable_frame_rate);
     let p = Pipeline::single(Operation::Grain(GrainSettings::default()));
-    let mut out = OutputSettings::default();
-    out.container = Container::Mp4;
+    let out = OutputSettings { container: Container::Mp4, ..Default::default() };
     let r = run(&t, &job(d.path(), &src, p, out, "vfr")).unwrap();
     let o = probe(&t, &r.output).unwrap();
     assert_eq!(o.audio.len(), 2, "both audio tracks kept");

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "ccr-**"]
   pull_request:
   workflow_dispatch:
 
@@ -16,6 +16,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  # Matches rust-toolchain.toml so local checks and CI agree.
+  RUST_VERSION: "1.99.0"
 
 jobs:
   rust:
@@ -27,9 +29,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      - name: Rust toolchain
+        shell: bash
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt,clippy
       - uses: Swatinem/rust-cache@v2
       - name: System packages (Linux)
         if: runner.os == 'Linux'
@@ -59,10 +61,49 @@ jobs:
       - name: Desktop crate builds
         run: cargo build -p clearframe-desktop
       - name: Model tests (downloads public weights, verified by SHA-256)
-        if: runner.os == 'Linux'
         env:
           CLIPFX_TEST_MODELS: "1"
         run: cargo test -p clearframe-pipeline --test models_e2e -- --test-threads=1
+
+  gpu:
+    # Every GPU kernel against the CPU reference, on each graphics API:
+    # Vulkan (Mesa lavapipe), DirectX 12 (Microsoft WARP) and Metal (Apple GPU).
+    name: GPU (${{ matrix.api }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, api: Vulkan }
+          - { os: windows-2022, api: DirectX 12 }
+          - { os: macos-14, api: Metal }
+    runs-on: ${{ matrix.os }}
+    env:
+      CLIPFX_REQUIRE_GPU: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        shell: bash
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - name: Vulkan driver (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers libvulkan1 vulkan-tools
+          vulkaninfo --summary
+      - name: GPU adapters
+        shell: bash
+        run: cargo run -q --release -p clearframe-cli -- hardware --json | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('gpu_adapters', d.get('hardware', {}).get('gpu_adapters')), indent=1))"
+      - name: GPU matches CPU for every architecture
+        run: cargo test --release -p clearframe-inference --features gpu --test gpu_parity -- --nocapture --test-threads=1
+      - name: Real model on the GPU (Real-ESRGAN AnimeVideo v3)
+        shell: bash
+        run: |
+          root="$RUNNER_TEMP/cfx"
+          cargo run -q --release -p clearframe-cli -- --data-root "$root" models install xinntao.realesr-animevideo-v3
+          weights=$(find "$root" -name '*.safetensors' | head -1)
+          echo "weights: $weights"
+          cargo run --release -p clearframe-inference --features gpu --example gpubench -- "$weights" 320 180
 
   frontend:
     name: Frontend
@@ -94,7 +135,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
       - uses: Swatinem/rust-cache@v2
       - name: Validate catalog schema, URLs and hashes format
         run: cargo run -q -p clearframe-cli -- catalog validate model-catalog/catalog.json
@@ -109,7 +151,8 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check licenses bans sources advisories
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
       - name: Rust SBOM
         run: |
           cargo install cargo-cyclonedx --locked
@@ -129,12 +172,14 @@ jobs:
           path: sbom
 
   windows-installer:
-    name: Windows installer lifecycle
+    name: Windows installer and app
     runs-on: windows-2022
     needs: [rust, frontend]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust toolchain
+        shell: bash
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
@@ -154,18 +199,59 @@ jobs:
         run: |
           $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
           ./packaging/windows/test-installer.ps1 -Installer $setup.FullName
+      - name: Install and open the app
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1).FullName
+          Start-Process -FilePath $setup -ArgumentList "/S" -Wait
+          $dir = Join-Path $env:ProgramFiles "ClipFX Enhance"
+          $exe = Join-Path $dir "ClipFXEnhance.exe"
+          if (-not (Test-Path $exe)) { throw "not installed: $exe" }
+          New-Item -ItemType Directory -Force -Path screens | Out-Null
+
+          # Self-test of the installed app, including a real GPU computation (DirectX 12 / WARP).
+          $st = Join-Path $env:RUNNER_TEMP "selftest.json"
+          $p = Start-Process -FilePath $exe -ArgumentList @("--self-test", "`"$st`"") -Wait -PassThru
+          $report = Get-Content $st -Raw
+          Write-Host $report
+          Copy-Item $st screens/windows-selftest.json
+          if ($p.ExitCode -ne 0) { throw "self-test failed" }
+          $json = $report | ConvertFrom-Json
+          if (-not $json.gpu.check.passed) { throw "GPU check failed: $($json.gpu | ConvertTo-Json -Depth 5)" }
+
+          # Open the app with a real video and take a screenshot of what a user sees.
+          $video = Join-Path $env:RUNNER_TEMP "Sample clip.mp4"
+          & (Join-Path $dir "ffmpeg\ffmpeg.exe") -v error -y -f lavfi -i "testsrc2=size=640x360:rate=30" -t 3 -pix_fmt yuv420p $video
+          $app = Start-Process -FilePath $exe -ArgumentList "`"$video`"" -PassThru
+          Start-Sleep -Seconds 30
+          $app.Refresh()
+          if ($app.HasExited) { throw "the app exited with code $($app.ExitCode)" }
+          Write-Host "window title: '$($app.MainWindowTitle)'"
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save((Join-Path (Resolve-Path screens) "windows-app.png"))
+          if ($app.MainWindowTitle -notmatch "ClipFX") { throw "no ClipFX Enhance window (title '$($app.MainWindowTitle)')" }
+          Stop-Process -Id $app.Id
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-screenshots
+          path: screens
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer
           path: target/release/bundle/nsis/*-setup.exe
 
   linux-packages:
-    name: Linux packages
+    name: Linux packages and app
     runs-on: ubuntu-24.04
     needs: [rust, frontend]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
@@ -174,18 +260,33 @@ jobs:
           cache-dependency-path: apps/desktop/package-lock.json
       - run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf ffmpeg mesa-vulkan-drivers imagemagick xvfb
       - name: Build deb, rpm, AppImage
         working-directory: apps/desktop
         run: |
           npm ci
           npx tauri build --bundles deb,rpm,appimage
-      - name: Install the .deb and run its self-test
+      - name: Install the .deb, self-test and open the app
         run: |
           sudo apt-get install -y ./target/release/bundle/deb/*.deb
-          HOME=$(mktemp -d) xvfb-run -a clipfx-enhance --self-test "$RUNNER_TEMP/selftest.json" || (cat "$RUNNER_TEMP/selftest.json"; exit 1)
-          cat "$RUNNER_TEMP/selftest.json"
+          mkdir -p screens
+          export HOME=$(mktemp -d)
+          xvfb-run -a clipfx-enhance --self-test "$PWD/screens/linux-selftest.json" || (cat screens/linux-selftest.json; exit 1)
+          cat screens/linux-selftest.json
+          python3 -c "import json; d=json.load(open('screens/linux-selftest.json')); assert d['gpu']['check']['passed'], d['gpu']"
+          ffmpeg -v error -y -f lavfi -i "testsrc2=size=640x360:rate=30" -t 3 -pix_fmt yuv420p "$RUNNER_TEMP/Sample clip.mp4"
+          Xvfb :99 -screen 0 1600x960x24 & sleep 2
+          DISPLAY=:99 clipfx-enhance "$RUNNER_TEMP/Sample clip.mp4" & app=$!
+          sleep 25
+          kill -0 $app
+          DISPLAY=:99 import -window root screens/linux-app.png
+          kill $app
           sudo apt-get remove -y clip-fx-enhance
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-screenshots
+          path: screens
       - uses: actions/upload-artifact@v4
         with:
           name: linux-packages
@@ -193,3 +294,43 @@ jobs:
             target/release/bundle/deb/*.deb
             target/release/bundle/rpm/*.rpm
             target/release/bundle/appimage/*.AppImage
+
+  macos-app:
+    name: macOS app
+    runs-on: macos-14
+    needs: [rust, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: brew install ffmpeg
+      - name: Build the .app
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npx tauri build --bundles app
+      - name: Self-test and open the app
+        run: |
+          app=$(find target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
+          bin=$(find "$app/Contents/MacOS" -type f -perm +111 | head -1)
+          mkdir -p screens
+          "$bin" --self-test "$PWD/screens/macos-selftest.json" || (cat screens/macos-selftest.json; exit 1)
+          cat screens/macos-selftest.json
+          python3 -c "import json; d=json.load(open('screens/macos-selftest.json')); assert d['gpu']['check']['passed'], d['gpu']"
+          ffmpeg -v error -y -f lavfi -i "testsrc2=size=640x360:rate=30" -t 3 -pix_fmt yuv420p "$RUNNER_TEMP/Sample clip.mp4"
+          "$bin" "$RUNNER_TEMP/Sample clip.mp4" & pid=$!
+          sleep 30
+          kill -0 $pid
+          screencapture -x screens/macos-app.png || true
+          kill $pid
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-screenshots
+          path: screens

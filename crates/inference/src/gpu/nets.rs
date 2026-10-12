@@ -293,7 +293,14 @@ impl GDru {
             head: gconv(gpu, &n.head)?,
             downs: n.downs.iter().map(|(b, d)| Ok((blocks(b)?, gconv(gpu, d)?))).collect::<R<_>>()?,
             body: blocks(&n.body)?,
-            ups: n.ups.iter().map(|(t, b)| { let (w, c) = convt(t)?; Ok((w, c, blocks(b)?)) }).collect::<R<_>>()?,
+            ups: n
+                .ups
+                .iter()
+                .map(|(t, b)| {
+                    let (w, c) = convt(t)?;
+                    Ok((w, c, blocks(b)?))
+                })
+                .collect::<R<_>>()?,
             tail: gconv(gpu, &n.tail)?,
         })
     }
@@ -458,10 +465,10 @@ impl GNaf {
 /// A GPU network for one of the image-to-image architectures.
 pub enum GpuNet {
     SrVgg(GSrVgg),
-    Rrdb(GRrdb),
+    Rrdb(Box<GRrdb>),
     Ffd(GFfd),
-    Dru(GDru),
-    Naf(GNaf),
+    Dru(Box<GDru>),
+    Naf(Box<GNaf>),
 }
 
 impl GpuNet {

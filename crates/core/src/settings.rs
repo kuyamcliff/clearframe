@@ -284,11 +284,15 @@ impl Performance {
                 (t, self.priority)
             }
         };
+        let balanced_reserve = (ram_mb / 4).max(4096.min(ram_mb / 2));
         let reserve = match self.memory_preset {
             MemoryPreset::MoreForOthers => ram_mb / 2,
-            MemoryPreset::Balanced => (ram_mb / 4).max(4096.min(ram_mb / 2)),
+            MemoryPreset::Balanced => balanced_reserve,
             MemoryPreset::PrioritizeApp => 2048.min(ram_mb / 4),
-            MemoryPreset::Custom => ram_mb.saturating_sub(self.memory_budget_mb),
+            // A small budget means "use less", not "keep everything else free": without the
+            // cap, 600 MB on an 8 GB machine would pause jobs whenever less than ~3.7 GB
+            // was free and never resume them.
+            MemoryPreset::Custom => ram_mb.saturating_sub(self.memory_budget_mb).min(balanced_reserve),
         };
         let budget = match self.memory_preset {
             MemoryPreset::Custom => self.memory_budget_mb.min(ram_mb).max(512),
@@ -398,7 +402,14 @@ mod tests {
         p.memory_preset = MemoryPreset::Custom;
         p.memory_budget_mb = 6000;
         let r = p.resolve(8, 16000);
-        assert_eq!((r.threads, r.memory_budget_mb, r.reserve_memory_mb), (4, 6000, 10000));
+        assert_eq!((r.threads, r.memory_budget_mb, r.reserve_memory_mb), (4, 6000, 4096));
+        // A small custom budget must not demand that nearly all memory stays free.
+        p.memory_budget_mb = 600;
+        let r = p.resolve(8, 7168);
+        assert_eq!((r.memory_budget_mb, r.reserve_memory_mb), (600, 3584));
+        // A budget close to all RAM still leaves what's outside it.
+        p.memory_budget_mb = 15000;
+        assert_eq!(p.resolve(8, 16000).reserve_memory_mb, 1000);
         assert_eq!(Performance::default().resolve(1, 2048).threads, 1);
         let s = Settings::from_json(r#"{"performance":{"device":"rm -rf"}}"#).unwrap();
         assert_eq!(s.performance.device, "auto");

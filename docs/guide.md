@@ -115,8 +115,17 @@ cd apps/desktop
 npx tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis
 ```
 
-`cargo-xwin` downloads the Microsoft C runtime and Windows SDK headers the first time it runs. GPU builds: add `--features cuda` (NVIDIA, needs the CUDA toolkit) or
-`--features metal` (Apple) to the desktop or CLI crate.
+`cargo-xwin` downloads the Microsoft C runtime and Windows SDK headers the first time it runs.
+
+GPU support (Vulkan, DirectX 12 and Metal through wgpu) is built in by default; nothing extra
+is needed. To check that a GPU computes correctly, run the parity tests or the benchmark:
+
+```sh
+cargo test --release -p clearframe-inference --features gpu --test gpu_parity -- --nocapture
+cargo run --release -p clearframe-inference --features gpu --example gpubench -- <model.safetensors> 1280 720
+```
+
+The installed app's `--self-test` also runs a small GPU-versus-CPU check and reports it.
 
 ## Tests
 

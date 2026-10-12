@@ -190,7 +190,7 @@ pub fn build_mux_args(spec: &MuxSpec, info: &MediaInfo, list_file: &Path) -> (Ve
 
     // Audio
     let slow = spec.slow_motion > 1.0001;
-    let mut audio: Vec<&crate::probe::AudioStream> = info.audio.iter().filter(|s| spec.audio_streams.as_ref().map_or(true, |keep| keep.contains(&s.index))).collect();
+    let mut audio: Vec<&crate::probe::AudioStream> = info.audio.iter().filter(|s| spec.audio_streams.as_ref().is_none_or(|keep| keep.contains(&s.index))).collect();
     if matches!(spec.audio, AudioMode::None) || (slow && spec.slow_motion_audio == SlowMotionAudio::Mute) {
         if slow && !audio.is_empty() && spec.audio != AudioMode::None {
             report.warnings.push("Audio was removed because slow-motion output is set to mute audio.".into());

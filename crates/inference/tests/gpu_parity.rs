@@ -47,6 +47,9 @@ fn gpu() -> Option<std::sync::Arc<clearframe_inference::gpu::Gpu>> {
             Some(g)
         }
         Err(e) => {
+            // CI sets CLIPFX_REQUIRE_GPU so a machine without a usable device fails loudly
+            // instead of silently skipping.
+            assert!(std::env::var_os("CLIPFX_REQUIRE_GPU").is_none(), "no GPU device: {e}");
             eprintln!("skipping: {e}");
             None
         }

@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Cursor;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
@@ -53,7 +53,7 @@ pub struct StillResult {
 /// Convert packed RGB48 to an 8-bit PNG.
 pub fn raw_to_png(f: &RawFrame) -> Result<Vec<u8>> {
     let mut rgb8 = Vec::with_capacity(f.width * f.height * 3);
-    for c in f.data.chunks_exact(2) {
+    for c in f.data.as_chunks::<2>().0 {
         let v = u16::from_le_bytes([c[0], c[1]]);
         rgb8.push(((v as u32 + 128) / 257).min(255) as u8);
     }
@@ -75,11 +75,12 @@ fn crop_raw(f: &RawFrame, x: u32, y: u32, w: u32, h: u32) -> RawFrame {
     RawFrame { width: w, height: h, data }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn decode_at(
     tools: &FfmpegTools,
     info: &MediaInfo,
     plan: &ExecutionPlan,
-    source: &PathBuf,
+    source: &Path,
     time: f64,
     filters: Vec<String>,
     fmt: &plan::Format,
@@ -87,7 +88,7 @@ fn decode_at(
 ) -> Result<Vec<RawFrame>> {
     let v = info.video()?;
     let tags = ColorTags::from_stream(v);
-    let mut d = DecodeSpec::new(source.clone(), fmt.width as usize, fmt.height as usize);
+    let mut d = DecodeSpec::new(source.to_path_buf(), fmt.width as usize, fmt.height as usize);
     d.stream_index = Some(v.index);
     d.filters = filters;
     d.cfr = plan.cfr_conversion;

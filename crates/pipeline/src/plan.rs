@@ -683,16 +683,16 @@ pub fn plan(
             None,
         );
     }
-    if output.video.pix_fmt.contains("420") || output.video.pix_fmt.contains("422") || output.video.pix_fmt == "nv12" || output.video.pix_fmt == "p010le" {
-        if cur.width % 2 != 0 || cur.height % 2 != 0 {
-            issue(
-                &mut issues,
-                Severity::Error,
-                None,
-                format!("{}x{} has odd dimensions, which {} cannot encode. Add a Resize step.", cur.width, cur.height, output.video.pix_fmt),
-                None,
-            );
-        }
+    if (output.video.pix_fmt.contains("420") || output.video.pix_fmt.contains("422") || output.video.pix_fmt == "nv12" || output.video.pix_fmt == "p010le")
+        && (!cur.width.is_multiple_of(2) || !cur.height.is_multiple_of(2))
+    {
+        issue(
+            &mut issues,
+            Severity::Error,
+            None,
+            format!("{}x{} has odd dimensions, which {} cannot encode. Add a Resize step.", cur.width, cur.height, output.video.pix_fmt),
+            None,
+        );
     }
     if cur.width > 16384 || cur.height > 16384 {
         issue(&mut issues, Severity::Error, None, format!("Output size {}x{} exceeds supported limits.", cur.width, cur.height), None);
@@ -1021,8 +1021,7 @@ mod tests {
 
     #[test]
     fn hdr_needs_10bit_and_slowmo_duration() {
-        let mut c = ColorSettings::default();
-        c.mode = ColorMode::SdrToHdr;
+        let c = ColorSettings { mode: ColorMode::SdrToHdr, ..Default::default() };
         let p = Pipeline {
             stages: vec![st(Operation::Color(c)), st(Operation::Interpolate(InterpolateSettings { slow_motion: 2.0, engine: InterpEngine::Blend, ..Default::default() }))],
         };

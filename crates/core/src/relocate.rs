@@ -75,8 +75,33 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Canonical form for comparing locations. A destination usually doesn't exist yet,
+/// so canonicalise its nearest existing ancestor and re-append the rest. Otherwise a
+/// new folder inside the source would not be recognised: on Windows the canonical
+/// source has a `\\?\` prefix that the raw destination lacks, and on macOS `/var`
+/// is really `/private/var`. Windows and macOS file systems ignore case, so compare
+/// lower-cased there.
 fn canon(p: &Path) -> PathBuf {
-    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+    let mut base = p.to_path_buf();
+    let mut rest = Vec::new();
+    while !base.exists() {
+        match base.file_name() {
+            Some(n) => {
+                rest.push(n.to_os_string());
+                base.pop();
+            }
+            None => break,
+        }
+    }
+    let mut c = std::fs::canonicalize(&base).unwrap_or(base);
+    for n in rest.into_iter().rev() {
+        c.push(n);
+    }
+    if cfg!(any(windows, target_os = "macos")) {
+        PathBuf::from(c.to_string_lossy().to_lowercase())
+    } else {
+        c
+    }
 }
 
 #[cfg(unix)]
@@ -308,7 +333,17 @@ mod tests {
         let src = d.path().join("src");
         tree(&src);
         assert!(!plan(&src, &src.join("inner")).problems.is_empty());
+        assert!(!plan(&src, &src.join("new").join("deeper")).problems.is_empty());
         assert!(!plan(&src, &src).problems.is_empty());
+        // The same folder reached through a link must still count as "inside" (this is
+        // what Windows' `\\?\` prefix and macOS' /var -> /private/var look like).
+        #[cfg(unix)]
+        {
+            let link = d.path().join("link");
+            std::os::unix::fs::symlink(&src, &link).unwrap();
+            assert!(!plan(&src, &link.join("inner")).problems.is_empty());
+            assert!(!plan(&link, &src.join("inner")).problems.is_empty());
+        }
         let full = d.path().join("full");
         std::fs::create_dir_all(&full).unwrap();
         std::fs::write(full.join("f"), b"x").unwrap();

@@ -117,7 +117,10 @@ pub fn context(index: usize) -> Result<Arc<Gpu>, String> {
 impl Gpu {
     pub fn new(index: usize) -> Result<Self, String> {
         let list = adapters();
-        let adapter = list.into_iter().nth(index).ok_or_else(|| if index == 0 { "no Vulkan, DirectX 12 or Metal GPU was found".to_string() } else { format!("GPU #{index} was not found") })?;
+        let adapter =
+            list.into_iter()
+                .nth(index)
+                .ok_or_else(|| if index == 0 { "no Vulkan, DirectX 12 or Metal GPU was found".to_string() } else { format!("GPU #{index} was not found") })?;
         let info = list_adapters().into_iter().nth(index).ok_or("GPU disappeared")?;
         let al = adapter.limits();
         let mut limits = wgpu::Limits::default();
@@ -273,6 +276,7 @@ const FAST_OCB: u32 = 8;
 
 impl GConv {
     /// `weight` is PyTorch layout [cout][cin/groups][k][k].
+    #[allow(clippy::too_many_arguments)]
     pub fn new(gpu: &Gpu, weight: &[f32], bias: Option<&[f32]>, cout: u32, cin_g: u32, k: u32, stride: u32, pad: u32, dilation: u32, groups: u32) -> Self {
         let fast = k == 3 && stride == 1 && pad == 1 && dilation == 1 && groups == 1;
         let w = if fast {
@@ -538,7 +542,12 @@ impl Recorder {
     pub fn finish_read(mut self, t: &GTensor) -> Result<Vec<f32>, String> {
         drop(self.pass.take());
         let bytes = t.c as u64 * t.hw() as u64 * 4;
-        let staging = self.gpu.device.create_buffer(&wgpu::BufferDescriptor { label: Some("readback"), size: bytes, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let staging = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("readback"),
+            size: bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         self.encoder.copy_buffer_to_buffer(t.buf(), 0, &staging, 0, bytes);
         let idx = self.gpu.queue.submit([self.encoder.finish()]);
         for (scope, what) in self.scopes.drain(..).rev() {
@@ -844,3 +853,69 @@ fn main(@builtin(global_invocation_id) g: vec3<u32>) {
 "#,
     ),
 ];
+
+/// Result of [`self_check`].
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SelfCheck {
+    pub device: String,
+    pub api: String,
+    /// Largest |GPU − CPU| over the test output.
+    pub max_abs_diff: f32,
+    pub passed: bool,
+}
+
+/// Run a small convolution network on the GPU and on the CPU and compare them.
+/// Used by the app's `--self-test` and diagnostics to prove the device computes correctly.
+pub fn self_check(index: usize) -> Result<SelfCheck, String> {
+    use candle_core::{Device, Tensor};
+    let gpu = context(index)?;
+    let (cin, cout, h, w) = (12usize, 20usize, 37usize, 29usize);
+    let mut seed = 0x2545F4914F6CDD1Du64;
+    let mut rnd = |n: usize, s: f32| -> Vec<f32> {
+        (0..n)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                ((seed >> 40) as f32 / (1u64 << 24) as f32 - 0.5) * 2.0 * s
+            })
+            .collect()
+    };
+    let x = rnd(cin * h * w, 1.0);
+    // A fast-path 3x3 layer, then a generic stride-2 layer, as in the real networks.
+    let (w1, b1) = (rnd(cout * cin * 9, 0.2), rnd(cout, 0.1));
+    let (w2, b2) = (rnd(3 * cout * 4, 0.2), rnd(3, 0.1));
+    let err = |e: candle_core::Error| e.to_string();
+    let cpu = {
+        let t = Tensor::from_slice(&x, (1, cin, h, w), &Device::Cpu).map_err(err)?;
+        let c1 = crate::ops::Conv2d {
+            weight: Tensor::from_slice(&w1, (cout, cin, 3, 3), &Device::Cpu).map_err(err)?,
+            bias: Some(Tensor::new(b1.as_slice(), &Device::Cpu).map_err(err)?),
+            stride: 1,
+            padding: 1,
+            dilation: 1,
+            groups: 1,
+        };
+        let c2 = crate::ops::Conv2d {
+            weight: Tensor::from_slice(&w2, (3, cout, 2, 2), &Device::Cpu).map_err(err)?,
+            bias: Some(Tensor::new(b2.as_slice(), &Device::Cpu).map_err(err)?),
+            stride: 2,
+            padding: 0,
+            dilation: 1,
+            groups: 1,
+        };
+        let y = c1.forward_act(&t, crate::ops::Act::LeakyRelu(0.2)).map_err(err)?;
+        c2.forward(&y).map_err(err)?.flatten_all().and_then(|t| t.to_vec1::<f32>()).map_err(err)?
+    };
+    let g1 = GConv::new(&gpu, &w1, Some(&b1), cout as u32, cin as u32, 3, 1, 1, 1, 1);
+    let g2 = GConv::new(&gpu, &w2, Some(&b2), 3, cout as u32, 2, 2, 0, 1, 1);
+    let mut rec = Recorder::new(&gpu);
+    let t = rec.upload(cin as u32, h as u32, w as u32, &x)?;
+    let y = rec.conv(&g1, t.all(), GAct::Leaky(0.2))?;
+    let z = rec.conv(&g2, y.all(), GAct::None)?;
+    drop(y);
+    let out = rec.finish_read(&z)?;
+    let max = cpu.iter().zip(&out).map(|(a, b)| (a - b).abs()).fold(0f32, f32::max);
+    gpu.trim();
+    Ok(SelfCheck { device: gpu.info.name.clone(), api: gpu.info.api.clone(), max_abs_diff: max, passed: max < 1e-3 && out.len() >= cpu.len() })
+}

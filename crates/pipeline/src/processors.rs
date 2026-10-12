@@ -470,7 +470,7 @@ mod tests {
         assert_eq!(auto_tile(512, &Device::Cpu, &r, 1000.0), 512);
         r.memory_budget_mb = 200; // 0.1 MP per tile at 1000 MB/MP
         let t = auto_tile(512, &Device::Cpu, &r, 1000.0);
-        assert!(t < 512 && t >= 300, "{t}");
+        assert!((300..512).contains(&t), "{t}");
         r.memory_budget_mb = 1;
         assert_eq!(auto_tile(512, &Device::Cpu, &r, 1000.0), MIN_TILE);
         assert!(is_oom("CUDA_ERROR_OUT_OF_MEMORY"));

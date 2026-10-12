@@ -6,7 +6,7 @@
 mod common;
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clearframe_inference::{Device, ImageModel, ImageParams, Precision, RgbImage, Weights};
 use clearframe_media::probe::probe;
@@ -17,7 +17,7 @@ fn models_dir() -> Option<PathBuf> {
     std::env::var("CLIPFX_TEST_MODELS").ok().map(PathBuf::from).filter(|p| p.is_dir())
 }
 
-fn resolved(dir: &PathBuf, id: &str, files: &[(&str, &str)]) -> (String, ResolvedModel) {
+fn resolved(dir: &Path, id: &str, files: &[(&str, &str)]) -> (String, ResolvedModel) {
     let mut f = BTreeMap::new();
     let mut h = BTreeMap::new();
     for (role, name) in files {
