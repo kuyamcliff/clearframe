@@ -1,15 +1,15 @@
 <div align="center">
 
-<a href="https://www.clipfx.me"><img src="docs/media/hero.jpg" alt="ClipFX Enhance: free AI video enhancer" width="100%"></a>
+<a href="https://www.clipfx.me/a/c8DN7xPn"><img src="docs/media/hero.jpg" alt="ClipFX Enhance: free AI video enhancer" width="100%"></a>
 
 <h1>ClipFX Enhance</h1>
 
 <p><b>Upscale, denoise, deblur and restore video with AI, right on your own computer.</b><br>
 Free and open source. No account, no subscription, no cloud.</p>
 
-<a href="https://www.clipfx.me"><img src="docs/media/btn-download.svg" alt="Download for Windows" height="52"></a>&nbsp;&nbsp;<a href="https://www.clipfx.me"><img src="docs/media/btn-video.svg" alt="Watch the trailer" height="52"></a>
+<a href="https://www.clipfx.me/a/c8DN7xPn"><img src="docs/media/btn-download.svg" alt="Download for Windows" height="52"></a>&nbsp;&nbsp;<a href="https://www.clipfx.me/a/c8DN7xPn"><img src="docs/media/btn-video.svg" alt="Watch the trailer" height="52"></a>
 
-<sub>Windows 10/11 (x64) · 100 MB installer · FFmpeg included · Linux: <a href="docs/guide.md#install">deb / AppImage from source</a></sub>
+<sub>Windows 10/11 (x64) · 96 MB installer · FFmpeg included · Linux: <a href="docs/guide.md#install">deb / AppImage from source</a></sub>
 
 <br><br>
 
@@ -44,7 +44,7 @@ Stack as many steps as you like, preview any moment against the original, and ex
 
 ## Get started
 
-1. **[Download](https://www.clipfx.me)** and run the installer.
+1. **[Download](https://www.clipfx.me/a/c8DN7xPn)** and run the installer.
 2. Drop a video in, turn on **Enhancement**, and install the model it suggests.
 3. Press **Render frame** to preview, then **Export**.
 
