@@ -32,11 +32,14 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> anyhow::Result<T> + Sen
 /// Allow the webview to load a file through the asset protocol.
 fn allow_file(h: &AppHandle, p: &std::path::Path) {
     let _ = h.asset_protocol_scope().allow_file(p);
+    crate::media_server::allow_file(p);
 }
 
 /// The cache (previews, thumbnails, proxies) is always readable by the webview.
 pub fn allow_cache_assets(h: &AppHandle, app: &App) {
-    let _ = h.asset_protocol_scope().allow_directory(app.paths().cache_dir, true);
+    let dir = app.paths().cache_dir;
+    let _ = h.asset_protocol_scope().allow_directory(&dir, true);
+    crate::media_server::allow_dir(&dir);
 }
 
 #[derive(Serialize)]
@@ -296,12 +299,22 @@ fn storage_relocate(h: AppHandle, app: S<'_>, kind: StorageKind, dest: PathBuf, 
     if kind == StorageKind::Cache {
         let _ = h.asset_protocol_scope().allow_directory(&dest, true);
     }
-    app.relocate(kind, dest, mode).map_err(e)
+    app.relocate(kind, dest.clone(), mode).map_err(e)?;
+    if kind == StorageKind::Cache {
+        crate::media_server::allow_dir(&dest);
+    }
+    Ok(())
 }
 
 #[tauri::command]
 fn storage_cancel(app: S<'_>) {
     app.cancel_relocation();
+}
+
+/// URL prefix for `<video>` sources; the path is appended percent-encoded.
+#[tauri::command]
+fn media_base() -> R<String> {
+    crate::media_server::start().map_err(|x| x.to_string())
 }
 
 #[tauri::command]
@@ -472,6 +485,7 @@ fn startup_files(h: AppHandle, files: State<'_, StartupFiles>) -> Vec<PathBuf> {
 
 pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        media_base,
         app_info,
         settings_get,
         settings_set,

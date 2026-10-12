@@ -107,7 +107,10 @@ function JobRow({ j }: { j: JobRecord }) {
             {Math.round(frac * 100)}%{progress && active ? ` · pass ${progress.pass}/${progress.passes}` : ""}
           </div>
         </td>
-        <td className="muted">{active && progress && progress.fps > 0 ? `${progress.fps.toFixed(1)} fps` : report?.timings?.total_s ? duration(report.timings.total_s) : ""}{active && res ? ` · ${mb(res.process_memory_mb)} RAM` : ""}</td>
+        <td className="muted">{[
+          active && progress && progress.fps > 0 ? `${progress.fps.toFixed(1)} fps` : report?.timings?.total_s ? duration(report.timings.total_s) : "",
+          active && res ? `${mb(res.process_memory_mb)} RAM` : "",
+        ].filter(Boolean).join(" · ")}</td>
         <td className="muted">{active ? eta(progress?.eta) : j.state === "completed" && report?.validation?.ok ? "Verified" : ""}</td>
         <td className="act">
           {(active || j.state === "queued" || j.state === "waiting_for_resources") && <button className="btn ghost sm icon" aria-label="Pause" title="Pause" onClick={() => act("pause")}><Pause size={13} /></button>}

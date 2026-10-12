@@ -58,6 +58,27 @@ export function fileUrl(path: string | null | undefined, bust?: string | number)
   return mockModule ? mockModule.mockFileUrl(path) : "";
 }
 
+let mediaBase: string | null = null;
+
+/** Fetch the local media server prefix once at boot (Tauri only). */
+export async function initMedia(): Promise<void> {
+  if (!inTauri()) return;
+  try { mediaBase = await call<string>("media_base"); } catch { mediaBase = null; }
+}
+
+/**
+ * URL for a `<video>` source. WebKitGTK cannot play from the asset protocol,
+ * so videos go through the app's local HTTP server when it is running.
+ */
+export function mediaUrl(path: string | null | undefined, bust?: string | number): string {
+  if (!path) return "";
+  if (inTauri() && mediaBase) {
+    const enc = path.replace(/\\/g, "/").split("/").map(encodeURIComponent).join("/").replace(/^\//, "");
+    return bust !== undefined ? `${mediaBase}${enc}?v=${bust}` : `${mediaBase}${enc}`;
+  }
+  return fileUrl(path, bust);
+}
+
 // ---------- native dialogs ----------
 
 export interface FileFilter { name: string; extensions: string[] }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEven
 import { ChevronDown, ChevronsLeftRight, FileVideo, Loader2, MoreHorizontal, Pause, Play, SkipBack, SkipForward, StepBack, StepForward, Upload, Volume2, VolumeX } from "lucide-react";
 
 import { useMenu } from "../components/ui";
-import { api, fileUrl, pickFile, VIDEO_EXTENSIONS } from "../lib/ipc";
+import { api, fileUrl, mediaUrl, pickFile, VIDEO_EXTENSIONS } from "../lib/ipc";
 import { basename, relTime, timecode } from "../lib/format";
 import { moveStage, SECTION_TITLE, stageSummary } from "../lib/ops";
 import type { RecentFile } from "../lib/types";
@@ -124,7 +124,7 @@ function Stage({ l, r }: { l: RefObject<HTMLVideoElement>; r: RefObject<HTMLVide
   const clipReady = !!clip?.path;
   let left = fileUrl(original), right = "", kind: "img" | "video" = "img";
   let lw = source?.info.video?.width ?? 0, rw = lw;
-  if (clipReady) { left = fileUrl(clip!.original_proxy); right = fileUrl(clip!.path); kind = "video"; }
+  if (clipReady) { left = mediaUrl(clip!.original_proxy); right = mediaUrl(clip!.path); kind = "video"; }
   else if (stillFresh) { left = fileUrl(still!.original); right = fileUrl(still!.processed); lw = still!.original_size[0]; rw = still!.processed_size[0]; }
   useSync(l, r, kind === "video");
   const z = zoom === "fit" ? 0 : Number(zoom);
@@ -146,7 +146,7 @@ function Stage({ l, r }: { l: RefObject<HTMLVideoElement>; r: RefObject<HTMLVide
     return (
       <div className="stage" data-testid="viewer">
         <div className="view">
-          <video ref={r} src={fileUrl(sourcePlay.src)} autoPlay muted={muted} playsInline
+          <video ref={r} src={mediaUrl(sourcePlay.src)} autoPlay muted={muted} playsInline
             onTimeUpdate={(e) => useStore.setState({ playhead: Math.min(dur, sourcePlay.start + e.currentTarget.currentTime) })}
             onEnded={() => { stopSource(); if (useStore.getState().playhead < dur - 0.1) playSource(); }}
             onError={() => { stopSource(); toast("error", "This system cannot play the preview copy."); }} />

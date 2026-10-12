@@ -2,6 +2,7 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
 mod commands;
+mod media_server;
 
 use std::sync::Arc;
 
@@ -70,6 +71,9 @@ fn main() {
             let state = App::open(None, WorkerCommand::current_exe(), dirs, sink).map_err(|e| e.to_string())?;
             clearframe_app::logging::init(&state.paths().logs_dir, "clipfx");
             log::info!("ClipFX Enhance {} starting", env!("CARGO_PKG_VERSION"));
+            if let Err(err) = media_server::start() {
+                log::warn!("media server failed to start: {err}");
+            }
             commands::allow_cache_assets(app.handle(), &state);
             state.start_scheduler();
             app.manage(state);

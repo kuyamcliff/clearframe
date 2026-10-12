@@ -33,3 +33,6 @@ clearframe-pipeline.workspace = true
 clearframe-media.workspace = true
 clearframe-hardware.workspace = true
 clearframe-inference.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

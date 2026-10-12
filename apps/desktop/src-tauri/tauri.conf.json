@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost",
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost http://127.0.0.1:* blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost",
       "assetProtocol": {
         "enable": true,
         "scope": {
@@ -110,7 +110,8 @@
         "depends": [
           "ffmpeg",
           "gstreamer1.0-libav",
-          "gstreamer1.0-plugins-good"
+          "gstreamer1.0-plugins-good",
+          "gstreamer1.0-plugins-bad"
         ],
         "section": "video"
       },
