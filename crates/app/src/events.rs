@@ -23,6 +23,7 @@ pub enum AppEvent {
     StorageProgress { kind: String, bytes_done: u64, bytes_total: u64 },
     StorageDone { kind: String, ok: bool, message: String },
     Notice { level: String, message: String },
+    UpdateProgress { done: u64, total: u64 },
 }
 
 pub type EventSink = std::sync::Arc<dyn Fn(AppEvent) + Send + Sync>;

@@ -32,7 +32,7 @@ function General({ s, patch }: { s: Settings; patch: Patch }) {
       <F label="Closing"><Check checked={s.confirm_before_quit_with_jobs} onChange={(v) => patch((x) => ({ ...x, confirm_before_quit_with_jobs: v }))} label="Ask while exports are running" /></F>
       <F label="Start dialog"><Check checked={!s.hide_start_dialog} onChange={(v) => patch((x) => ({ ...x, hide_start_dialog: !v }))} label="Show after opening a video" /></F>
       <div className="pref-h">Network</div>
-      <F label="Updates"><Check checked={s.check_updates_on_launch} onChange={(v) => patch((x) => ({ ...x, check_updates_on_launch: v }))} label="Check on launch" /></F>
+      <F label="Updates"><Check checked={s.check_updates_on_launch} onChange={(v) => patch((x) => ({ ...x, check_updates_on_launch: v }))} label="Check for updates automatically" /></F>
       <F label="Model catalog"><Check checked={s.allow_catalog_updates} onChange={(v) => patch((x) => ({ ...x, allow_catalog_updates: v }))} label="Allow signed updates" /></F>
     </div>
   );
@@ -358,10 +358,9 @@ function About() {
       <F label="Platform">{app?.os} {app?.arch}</F>
       <F label="Compute">{app?.compiled_backends.join(", ").toUpperCase()}</F>
       <F label="FFmpeg">{app?.ffmpeg ? app.ffmpeg.version : app?.ffmpeg_error}</F>
-      <F label="Licenses">Model licenses are listed per model. Third-party notices ship with the app.</F>
       <F label="Updates">
         <div className="row">
-          <button className="btn sm" onClick={() => api.checkUpdate().then((u) => setUpd(u.newer ? `${u.latest} available — ${u.url}` : "Up to date")).catch((e) => setUpd(e instanceof Error ? e.message : String(e)))}>Check now</button>
+          <button className="btn sm" onClick={() => api.checkUpdate().then((u) => { useStore.setState({ update: u.newer ? u : null }); setUpd(u.newer ? `${u.latest} is available` : "Up to date"); }).catch((e) => setUpd(e instanceof Error ? e.message : String(e)))}>Check now</button>
           {upd && <span className="muted selectable">{upd}</span>}
         </div>
       </F>

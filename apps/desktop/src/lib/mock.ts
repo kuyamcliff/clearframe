@@ -528,7 +528,7 @@ export async function mockInvoke(cmd: string, a: Record<string, any> = {}): Prom
     case "write_text_file":
       return null;
     case "check_update":
-      return { current: "1.0.0", latest: "1.0.0", newer: false, url: "", notes: "" };
+      return { current: "1.0.0", latest: "1.0.0", newer: false, url: "", notes: "", size: null, installable: false, downloaded: false };
     case "update_catalog":
       return "Demo mode: the catalog was not changed.";
     case "refresh_tools":

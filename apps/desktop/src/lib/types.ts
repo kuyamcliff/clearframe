@@ -213,7 +213,7 @@ export interface Project {
   job_ids: string[]; preset_id: string | null; notes: string; created_at: string; updated_at: string;
 }
 export interface OpenReport { project: Project; source_found: boolean; source_changed: boolean; suggested_source: string | null; missing_models: string[]; migrated_from: number | null; backup_path: string | null }
-export interface UpdateInfo { current: string; latest: string; newer: boolean; url: string; notes: string }
+export interface UpdateInfo { current: string; latest: string; newer: boolean; url: string; notes: string; size: number | null; installable: boolean; downloaded: boolean }
 
 export type AppEvent =
   | { type: "job_updated"; job: JobRecord }
@@ -229,4 +229,5 @@ export type AppEvent =
   | { type: "job_resources"; id: string; sample: ResourceSample }
   | { type: "storage_progress"; kind: string; bytes_done: number; bytes_total: number }
   | { type: "storage_done"; kind: string; ok: boolean; message: string }
-  | { type: "notice"; level: string; message: string };
+  | { type: "notice"; level: string; message: string }
+  | { type: "update_progress"; done: number; total: number };

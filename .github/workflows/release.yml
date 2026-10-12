@@ -1,0 +1,172 @@
+name: Release
+
+# Push a tag like v1.1.0 (matching the version in Cargo.toml) to publish a release.
+# Installed apps find it through the signed update.json and download only the small
+# update package for their platform.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_VERSION: "1.99.0"
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: Tag matches the app version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          app=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          [ "$tag" = "$app" ] || { echo "tag v$tag does not match Cargo.toml version $app"; exit 1; }
+          echo "version=$app" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: version
+    runs-on: windows-2022
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        shell: bash
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Bundle FFmpeg
+        shell: pwsh
+        run: ./packaging/windows/fetch-ffmpeg.ps1
+      - name: Full installer
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npx tauri build --bundles nsis
+      - name: App-only update installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          Copy-Item $setup.FullName "dist/ClipFX-Enhance-$env:VERSION-x64-setup.exe"
+          $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path $nsis)) { choco install nsis -y --no-progress; $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
+          & $nsis -V2 "-DVERSION=$env:VERSION" "-DAPP_EXE=$((Resolve-Path target/release/ClipFXEnhance.exe).Path)" "-DOUT=$((Resolve-Path dist).Path)\ClipFX-Enhance-$env:VERSION-x64-update.exe" packaging/windows/update.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
+          Get-ChildItem dist | Format-Table Name, Length
+      - name: The update installs over the full install
+        shell: pwsh
+        run: |
+          Start-Process -FilePath "dist/ClipFX-Enhance-$env:VERSION-x64-setup.exe" -ArgumentList "/S" -Wait
+          $dir = Join-Path $env:ProgramFiles "ClipFX Enhance"
+          $p = Start-Process -FilePath "dist/ClipFX-Enhance-$env:VERSION-x64-update.exe" -ArgumentList @("/S", "/D=$dir") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "update installer exited with $($p.ExitCode)" }
+          Start-Sleep -Seconds 5
+          Get-Process ClipFXEnhance -ErrorAction SilentlyContinue | Stop-Process -Force
+          $st = Join-Path $env:RUNNER_TEMP "selftest.json"
+          $r = Start-Process -FilePath (Join-Path $dir "ClipFXEnhance.exe") -ArgumentList @("--self-test", "`"$st`"") -Wait -PassThru
+          Get-Content $st
+          if ($r.ExitCode -ne 0) { throw "self-test after update failed" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist
+
+  linux:
+    needs: version
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - name: Build .deb
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npx tauri build --bundles deb
+      - run: |
+          mkdir -p dist
+          cp target/release/bundle/deb/*.deb "dist/clipfx-enhance_${VERSION}_amd64.deb"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist
+
+  publish:
+    needs: [version, windows, linux]
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rust toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Release notes
+        run: |
+          notes=$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME" | sed '/-----BEGIN/,$d')
+          [ -n "$notes" ] || notes="ClipFX Enhance $VERSION"
+          printf '%s\n' "$notes" > notes.md
+      - name: Signed update manifest
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          [ -n "$RELEASE_SIGNING_KEY" ] || { echo "Add the RELEASE_SIGNING_KEY secret (Settings > Secrets and variables > Actions)"; exit 1; }
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          python3 - "$base" <<'PY'
+          import hashlib, json, os, sys, datetime
+          base, v = sys.argv[1], os.environ["VERSION"]
+          def pkg(name, kind):
+              data = open(f"dist/{name}", "rb").read()
+              return {"url": f"{base}/{name}", "sha256": hashlib.sha256(data).hexdigest(), "size": len(data), "kind": kind}
+          manifest = {
+              "version": v,
+              "date": datetime.date.today().isoformat(),
+              "notes": open("notes.md").read().strip(),
+              "page": f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/tag/v{v}",
+              "packages": {
+                  "windows-x64": pkg(f"ClipFX-Enhance-{v}-x64-update.exe", "nsis-patch"),
+                  "linux-x64-deb": pkg(f"clipfx-enhance_{v}_amd64.deb", "deb"),
+              },
+          }
+          json.dump(manifest, open("dist/update.json", "w"), indent=2)
+          PY
+          umask 077
+          printf '%s' "$RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/key"
+          cargo run -q --release -p clearframe-cli -- catalog sign-update dist/update.json --key-file "$RUNNER_TEMP/key"
+          rm -f "$RUNNER_TEMP/key"
+          cat dist/update.json
+          ls -la dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ClipFX Enhance ${{ env.VERSION }}
+          body_path: notes.md
+          files: dist/*

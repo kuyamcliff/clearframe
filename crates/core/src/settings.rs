@@ -148,7 +148,7 @@ impl Default for Settings {
             notifications: true,
             inspector_mode_advanced: false,
             confirm_before_quit_with_jobs: true,
-            check_updates_on_launch: false,
+            check_updates_on_launch: true,
             allow_catalog_updates: false,
             onboarding_complete: false,
             shortcuts: default_shortcuts(),
@@ -231,11 +231,13 @@ pub struct Performance {
 impl Default for Performance {
     fn default() -> Self {
         Self {
-            mode: PerformanceMode::Balanced,
+            // Use the machine fully by default: every core but one at normal priority (so the
+            // window stays responsive) and most of the memory. Maximum uses every core.
+            mode: PerformanceMode::HighPerformance,
             cpu_threads: 0,
             reserve_cpu_threads: 2,
-            priority: ProcessPriority::BelowNormal,
-            memory_preset: MemoryPreset::Balanced,
+            priority: ProcessPriority::Normal,
+            memory_preset: MemoryPreset::PrioritizeApp,
             memory_budget_mb: 8192,
             memory_pressure: MemoryPressureAction::Pause,
             max_concurrent_jobs: 1,
@@ -386,7 +388,10 @@ mod tests {
 
     #[test]
     fn performance_modes() {
-        let mut p = Performance::default();
+        // Out of the box the app uses all but one thread and nearly all memory.
+        let r = Performance::default().resolve(16, 32768);
+        assert_eq!((r.threads, r.priority, r.memory_budget_mb), (15, ProcessPriority::Normal, 32768 - 2048));
+        let mut p = Performance { mode: PerformanceMode::Balanced, memory_preset: MemoryPreset::Balanced, ..Performance::default() };
         let r = p.resolve(16, 32768);
         assert_eq!(r.threads, 12);
         assert_eq!(r.priority, ProcessPriority::BelowNormal);

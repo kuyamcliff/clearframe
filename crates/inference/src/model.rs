@@ -157,9 +157,17 @@ impl ImageModel {
         })
     }
 
-    /// Run this model on a GPU (any vendor) instead of the CPU.
+    /// Run this model on a GPU (any vendor) instead of the CPU, with tiles as large as the
+    /// GPU accepts.
     #[cfg(feature = "gpu")]
     pub fn use_gpu(&mut self, gpu: std::sync::Arc<crate::gpu::Gpu>) -> Result<()> {
+        self.use_gpu_with_budget(gpu, 0)
+    }
+
+    /// Like [`use_gpu`](Self::use_gpu), keeping one tile's working memory within
+    /// `vram_budget_mb` of video memory (0 = no limit beyond what the GPU allows).
+    #[cfg(feature = "gpu")]
+    pub fn use_gpu_with_budget(&mut self, gpu: std::sync::Arc<crate::gpu::Gpu>, vram_budget_mb: u64) -> Result<()> {
         use crate::gpu::nets::*;
         let err = |e: String| candle_core::Error::Msg(format!("GPU: {e}"));
         let net = match &self.net {
@@ -169,12 +177,18 @@ impl ImageModel {
             ImageNet::Dru(n) => GpuNet::Dru(Box::new(GDru::new(&gpu, n).map_err(err)?)),
             ImageNet::Naf(n) => GpuNet::Naf(Box::new(GNaf::new(&gpu, n).map_err(err)?)),
         };
-        // Keep each tile's largest tensor within what the GPU allows in one buffer.
+        // Big tiles keep the GPU busy and cut per-tile overhead, so start from 2048 px (a
+        // whole 1080p frame in one pass for most models) and shrink until the largest tensor
+        // fits in one GPU buffer and, with a budget, the working set (about 4x the largest
+        // tensor) fits in the allowed video memory.
         let limit = gpu.max_binding;
-        let side = |t: usize| if t == 0 { 2048 } else { t };
-        let mut t = side(self.tile).max(512);
-        while t > 64 && net.largest_tensor_bytes(t + 2 * self.tile_pad, t + 2 * self.tile_pad) > limit {
-            t = t * 3 / 4;
+        let budget = if vram_budget_mb > 0 { vram_budget_mb << 20 } else { u64::MAX };
+        let mut t = 2048usize;
+        while t > 64 && {
+            let big = net.largest_tensor_bytes(t + 2 * self.tile_pad, t + 2 * self.tile_pad);
+            big > limit || big.saturating_mul(4) > budget
+        } {
+            t = t * 7 / 8;
         }
         self.tile = t;
         self.gpu = Some((gpu, net));

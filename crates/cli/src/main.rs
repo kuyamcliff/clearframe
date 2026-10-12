@@ -196,6 +196,12 @@ enum CatalogCmd {
     Validate {
         file: PathBuf,
     },
+    /// Sign a release `update.json` (checked against the update manifest format).
+    SignUpdate {
+        file: PathBuf,
+        #[arg(long)]
+        key_file: PathBuf,
+    },
 }
 
 fn gb(b: u64) -> String {
@@ -613,6 +619,17 @@ fn catalog_cmd(cmd: &CatalogCmd) -> Result<bool> {
         CatalogCmd::Validate { file } => {
             let c = clearframe_models::catalog::Catalog::parse(&std::fs::read_to_string(file)?).map_err(|e| anyhow!("{e}"))?;
             println!("valid catalog {} with {} models", c.catalog_version, c.models.len());
+        }
+        CatalogCmd::SignUpdate { file, key_file } => {
+            let data = std::fs::read(file)?;
+            let m: clearframe_app::updates::UpdateManifest = serde_json::from_slice(&data)?;
+            let sk = std::fs::read_to_string(key_file)?;
+            let sig = signature::sign(&data, sk.trim()).map_err(|e| anyhow!("{e}"))?;
+            // Prove the signature verifies with a key built into this app before publishing.
+            clearframe_app::updates::parse_manifest(std::str::from_utf8(&data)?, &sig, &signature::TrustedKeys::bundled())?;
+            let out = PathBuf::from(format!("{}.sig", file.display()));
+            std::fs::write(&out, sig)?;
+            println!("signed update {} ({} packages) -> {}", m.version, m.packages.len(), out.display());
         }
     }
     Ok(true)

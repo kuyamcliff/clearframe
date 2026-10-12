@@ -266,6 +266,8 @@ impl App {
                 }
                 let Ok(ev) = serde_json::from_str::<Event>(&line) else { continue };
                 match ev {
+                    // Terminal states come from the result line, after the report is saved.
+                    Event::State { state, .. } if state.is_terminal() => {}
                     Event::State { state, detail } => app.set_state(&id, state, Some(&detail)),
                     Event::Progress(p) => {
                         if last_db.elapsed() > Duration::from_millis(900) || p.fraction >= 1.0 {

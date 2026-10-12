@@ -372,3 +372,13 @@ table.q .pc { width: 170px; }
 .toast .ic.info { color: var(--accent-2); }
 .toast .act { color: var(--accent-2); background: transparent; border: 0; cursor: pointer; padding: 0 6px; }
 @keyframes up { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* Update available */
+.update-bar { position: fixed; top: 54px; left: 50%; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: 10px;
+  min-width: 420px; max-width: calc(100vw - 32px); padding: 7px 8px 7px 12px; border-radius: 10px; background: var(--panel-2);
+  border: 1px solid var(--line-2); box-shadow: var(--shadow); font-size: 12px; }
+.update-bar .grow { flex: 1; }
+.update-bar .btn svg { margin-right: 4px; }
+.update-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); flex: none; }
+.update-progress { width: 140px; height: 4px; border-radius: 2px; background: var(--hover); overflow: hidden; }
+.update-progress i { display: block; height: 100%; background: var(--accent); transition: width .2s; }

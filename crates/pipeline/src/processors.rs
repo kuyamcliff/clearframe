@@ -332,18 +332,26 @@ pub fn budget_tile(res: &JobResources, mb_per_mp: f64) -> usize {
 
 /// Move an image model onto the job's GPU when one was selected. Returns whether it runs there;
 /// on failure the model stays on the CPU and the job continues.
-fn attach_gpu(im: &mut ImageModel, compute: &crate::runner::Compute, id: &str) -> bool {
+fn attach_gpu(im: &mut ImageModel, compute: &crate::runner::Compute, id: &str, res: &JobResources) -> bool {
     #[cfg(feature = "gpu")]
     if let Some(g) = &compute.gpu {
-        match im.use_gpu(g.clone()) {
+        match im.use_gpu_with_budget(g.clone(), res.vram_budget_mb) {
             Ok(()) => {
+                // Each tile's input and output (and the read-back copy) still pass through
+                // system memory, so half the RAM budget bounds the tile as well.
+                if res.memory_budget_mb > 0 {
+                    let s = im.scale().max(1) as f64;
+                    let bytes_per_px = 2.0 * 12.0 * (1.0 + s * s);
+                    let side = ((res.memory_budget_mb as f64 * 0.5 * 1048576.0 / bytes_per_px).sqrt() as usize).max(MIN_TILE);
+                    im.tile = im.tile.min(side);
+                }
                 log::info!("{id}: running on {} with {}px tiles", g.info.name, im.tile);
                 return true;
             }
             Err(e) => log::warn!("{id}: GPU unavailable ({e}); using the CPU"),
         }
     }
-    let _ = (im, compute, id);
+    let _ = (im, compute, id, res);
     false
 }
 
@@ -367,7 +375,7 @@ pub fn build_native(
                 w = w.interpolate(&wdn, dn as f64).map_err(|e| anyhow!("{e}"))?;
             }
             let mut im = ImageModel::load(&w, precision).map_err(|e| anyhow!("{}: {e}", m.id))?;
-            let on_gpu = attach_gpu(&mut im, compute, &m.id);
+            let on_gpu = attach_gpu(&mut im, compute, &m.id, res);
             if e.tile_size > 0 {
                 im.tile = e.tile_size as usize;
             } else if !on_gpu {
@@ -396,7 +404,7 @@ pub fn build_native(
             let w = load_weights(m, "weights", device)?;
             let _ = d.engine;
             let mut im = ImageModel::load(&w, precision).map_err(|e| anyhow!("{}: {e}", m.id))?;
-            if !attach_gpu(&mut im, compute, &m.id) {
+            if !attach_gpu(&mut im, compute, &m.id, res) {
                 im.tile = auto_tile(im.tile, device, res, m.memory_per_megapixel_mb);
             }
             Box::new(ImageProc {
@@ -412,7 +420,7 @@ pub fn build_native(
             let m = model(models, &d.model_id)?;
             let w = load_weights(m, "weights", device)?;
             let mut im = ImageModel::load(&w, precision).map_err(|e| anyhow!("{}: {e}", m.id))?;
-            if !attach_gpu(&mut im, compute, &m.id) {
+            if !attach_gpu(&mut im, compute, &m.id, res) {
                 im.tile = auto_tile(im.tile, device, res, m.memory_per_megapixel_mb).min(512);
             }
             Box::new(ImageProc {

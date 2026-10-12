@@ -265,19 +265,7 @@ impl FfmpegTools {
             }
         }
         let (_, flt, _) = run_capture(Command::new(&ffmpeg).args(["-hide_banner", "-filters"]), t, 4 << 20)?;
-        let filters = flt
-            .lines()
-            .filter_map(|l| {
-                let mut it = l.split_whitespace();
-                let flags = it.next()?;
-                let name = it.next()?;
-                if flags.len() == 3 && it.next().is_some() {
-                    Some(name.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let filters = flt.lines().filter_map(parse_filter_line).collect();
         let (_, mux, _) = run_capture(Command::new(&ffmpeg).args(["-hide_banner", "-muxers"]), t, 4 << 20)?;
         let muxers = mux
             .lines()
@@ -334,9 +322,29 @@ impl FfmpegTools {
     }
 }
 
+/// One line of `ffmpeg -filters`, e.g. ` TSC scale  V->V  Scale…` (FFmpeg 7 and older) or
+/// ` .. scale  V->V  Scale…` (FFmpeg 8, which dropped the command-support column).
+fn parse_filter_line(l: &str) -> Option<String> {
+    let mut it = l.split_whitespace();
+    let flags = it.next()?;
+    let name = it.next()?;
+    let io = it.next()?;
+    (flags.chars().all(|c| matches!(c, 'T' | 'S' | 'C' | '.')) && io.contains("->")).then(|| name.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filter_list_formats() {
+        assert_eq!(parse_filter_line(" ..C scale             V->V       Scale the input video.").as_deref(), Some("scale"));
+        assert_eq!(parse_filter_line(" .S zscale            V->V       Apply resizing.").as_deref(), Some("zscale"));
+        assert_eq!(parse_filter_line(" TS aap               AA->A      Apply Affine Projection.").as_deref(), Some("aap"));
+        assert_eq!(parse_filter_line("  T.. = Timeline support"), None);
+        assert_eq!(parse_filter_line("  A = Audio input/output"), None);
+        assert_eq!(parse_filter_line(" ------"), None);
+    }
 
     #[test]
     fn discovers_system_ffmpeg() {

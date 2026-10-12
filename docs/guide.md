@@ -85,9 +85,18 @@ for all commands.
 
 ## Privacy
 
-ClipFX Enhance contacts the network only when you install a model, or when you explicitly check
-for updates (both features can be disabled). There is no telemetry. Diagnostics reports are
-created locally, can hide personal paths, and are never uploaded.
+ClipFX Enhance contacts the network only to install a model you chose, and to check for a new
+version when it starts (turn this off in Preferences → General → Updates). The check downloads a
+small signed file from GitHub and sends nothing about you or your videos. There is no telemetry.
+Diagnostics reports are created locally, can hide personal paths, and are never uploaded.
+
+## Updates
+
+When a new version is out, a bar at the top of the window shows its version and download size.
+**Download** fetches only the update package for your computer, and **Restart to update** installs it
+and reopens the app. On Windows the update package contains just the app (a few MB), not the
+bundled FFmpeg, so it is far smaller than the full installer. Every update is checked against
+the release signing key built into the app and against its SHA-256 before anything runs.
 
 ## Building from source
 

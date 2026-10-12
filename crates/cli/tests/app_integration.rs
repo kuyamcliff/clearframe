@@ -325,6 +325,8 @@ fn performance_settings_reach_the_worker() {
     s.performance.cpu_threads = 1;
     s.performance.memory_preset = MemoryPreset::Custom;
     s.performance.memory_budget_mb = 600;
+    // The CPU tile rule is checked here; GPU tiles are covered by the pipeline tests.
+    s.performance.device = "cpu".into();
     app.save_settings(s).unwrap();
     let r = app.job_resources();
     assert_eq!(r.threads, 1);

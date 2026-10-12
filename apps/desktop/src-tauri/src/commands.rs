@@ -455,6 +455,33 @@ async fn check_update(app: S<'_>) -> R<clearframe_app::updates::UpdateInfo> {
     blocking(move || a.check_for_update()).await
 }
 
+/// Download the app update for this computer (verified), reporting progress as events.
+#[tauri::command]
+async fn update_download(app: S<'_>) -> R<()> {
+    let a = app.inner().clone();
+    blocking(move || {
+        let mut last = 0u64;
+        a.download_update(|done, total| {
+            // About 100 progress events per download.
+            if done == total || done >= last + (total / 100).max(1 << 16) {
+                last = done;
+                a.emit(clearframe_app::AppEvent::UpdateProgress { done, total });
+            }
+        })
+        .map(|_| ())
+    })
+    .await
+}
+
+/// Start the downloaded update and quit so it can replace the app.
+#[tauri::command]
+async fn update_install(h: AppHandle, app: S<'_>) -> R<()> {
+    let a = app.inner().clone();
+    blocking(move || a.install_update()).await?;
+    h.exit(0);
+    Ok(())
+}
+
 #[tauri::command]
 async fn update_catalog(app: S<'_>) -> R<String> {
     let a = app.inner().clone();
@@ -531,6 +558,8 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         diagnostics,
         write_text_file,
         check_update,
+        update_download,
+        update_install,
         update_catalog,
         refresh_tools,
         allow_asset,

@@ -6,6 +6,7 @@ import { addStageCanonical } from "../lib/ops";
 import type {
   AppEvent, AppInfo, ClipPreview, OperationType, EngineSettings, InstallProgress, JobRecord, ModelCard, NewJob, OutputSettings, Pipeline,
   Preset, Progress, ResourceSample, Settings, SourceInfo, StillPreview, TimeRange,
+  UpdateInfo,
 } from "../lib/types";
 
 export type Panel = "sources" | "queue" | null;
@@ -28,6 +29,8 @@ export interface State {
   defaults: OperationDefaults | null;
   codecs: CodecEntry[];
   hardware: HardwareReport | null;
+  /** A newer version found by an update check (shown by the update banner). */
+  update: UpdateInfo | null;
 
   panel: Panel;
   dialog: DialogKind;
@@ -91,6 +94,7 @@ export const useStore = create<State>(() => ({
   settings: null,
   defaults: null,
   codecs: [],
+  update: null,
   hardware: null,
   panel: null,
   dialog: null,
