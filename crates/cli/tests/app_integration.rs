@@ -165,7 +165,9 @@ fn worker_crash_and_app_restart_recover() {
             std::thread::sleep(Duration::from_millis(100));
         }
         for pid in app.queue.worker_pids() {
-            let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+            let pid = pid.to_string();
+            let st = if cfg!(windows) { Command::new("taskkill").args(["/F", "/PID", &pid]).status() } else { Command::new("kill").args(["-9", &pid]).status() };
+            assert!(st.map(|s| s.success()).unwrap_or(false), "could not kill worker {pid}");
         }
         let s = wait(&app, &id, |s| s == JobState::Recoverable, 30);
         assert_eq!(s, JobState::Recoverable, "{:?}", app.db.job(&id).unwrap());

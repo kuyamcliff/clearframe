@@ -53,6 +53,10 @@ clone https://github.com/sekrit-twc/zimg.git "$ZIMG_TAG" "$ZIMG_COMMIT" zimg
 clone https://github.com/georgmartius/vid.stab.git "$VIDSTAB_TAG" "$VIDSTAB_COMMIT" vidstab
 clone https://code.videolan.org/videolan/dav1d.git "$DAV1D_TAG" "$DAV1D_COMMIT" dav1d
 git -C "$WORK/src/zimg" submodule update -q --init --depth 1
+# x265 4.1 asks for two pre-3.1 CMake policies that CMake 4 no longer supports. Use the new
+# behaviour, under which Apple's compiler reports itself as "AppleClang", so match on "Clang".
+perl -pi -e 's/cmake_policy\(SET (CMP0025|CMP0054) OLD\)/cmake_policy(SET $1 NEW)/; s/if\(\$\{CMAKE_CXX_COMPILER_ID\} STREQUAL "Clang"\)/if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")/' \
+  "$WORK/src/x265/source/CMakeLists.txt"
 if [ ! -d "$WORK/src/ffmpeg-$FFMPEG_VERSION" ]; then
   curl -sSLf -o "$WORK/src/ffmpeg.tar.xz" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
   echo "$FFMPEG_SHA256  $WORK/src/ffmpeg.tar.xz" | shasum -a 256 -c -
