@@ -74,7 +74,11 @@ const MIN_TILE: usize = 64;
 /// Whether an inference error message indicates memory exhaustion.
 pub fn is_oom(msg: &str) -> bool {
     let m = msg.to_ascii_lowercase();
-    m.contains("out of memory") || m.contains("cuda_error_out_of_memory") || m.contains("failed to allocate") || m.contains("allocation failed") || m.contains("insufficient memory")
+    m.contains("out of memory")
+        || m.contains("cuda_error_out_of_memory")
+        || m.contains("failed to allocate")
+        || m.contains("allocation failed")
+        || m.contains("insufficient memory")
 }
 
 /// Image model stage (enhance / denoise / deblur) with optional strength blend.
@@ -223,16 +227,8 @@ pub struct FfmpegProc {
 
 impl FfmpegProc {
     pub fn new(tools: &FfmpegTools, filters: &[String], input: &Format, output: &Format) -> Result<Self> {
-        let p = FilterProcess::spawn(
-            tools,
-            input.width as usize,
-            input.height as usize,
-            input.fps,
-            filters,
-            output.width as usize,
-            output.height as usize,
-        )
-        .context("starting FFmpeg filter process")?;
+        let p = FilterProcess::spawn(tools, input.width as usize, input.height as usize, input.fps, filters, output.width as usize, output.height as usize)
+            .context("starting FFmpeg filter process")?;
         let ratio = (output.fps.as_f64() * output.time_scale) / (input.fps.as_f64() * input.time_scale);
         Ok(Self { label: format!("FFmpeg: {}", filters.join(",")), proc_: p, ratio, base: None, count: 0, raw_out: Vec::new() })
     }
@@ -334,7 +330,14 @@ pub fn budget_tile(res: &JobResources, mb_per_mp: f64) -> usize {
 }
 
 /// Build the native processor for a stage.
-pub fn build_native(op: &Operation, sp: &StagePlan, models: &BTreeMap<String, ResolvedModel>, device: &Device, precision: Precision, res: &JobResources) -> Result<Box<dyn Processor>> {
+pub fn build_native(
+    op: &Operation,
+    sp: &StagePlan,
+    models: &BTreeMap<String, ResolvedModel>,
+    device: &Device,
+    precision: Precision,
+    res: &JobResources,
+) -> Result<Box<dyn Processor>> {
     Ok(match op {
         Operation::Enhance(e) => {
             let m = model(models, &e.model_id)?;
@@ -358,7 +361,14 @@ pub fn build_native(op: &Operation, sp: &StagePlan, models: &BTreeMap<String, Re
             if sp.input.width * scale != expect {
                 anyhow::bail!("model {} scale x{scale} does not match the plan", m.id);
             }
-            Box::new(ImageProc { label: format!("Enhance ({})", m.id), model: im, params: ImageParams::default(), mix: e.strength, oom_fallback: res.oom_tile_fallback, oom_retries: 0 })
+            Box::new(ImageProc {
+                label: format!("Enhance ({})", m.id),
+                model: im,
+                params: ImageParams::default(),
+                mix: e.strength,
+                oom_fallback: res.oom_tile_fallback,
+                oom_retries: 0,
+            })
         }
         Operation::Denoise(d) => {
             let id = op.required_models().into_iter().next().ok_or_else(|| anyhow!("denoise engine has no model"))?;
@@ -367,14 +377,28 @@ pub fn build_native(op: &Operation, sp: &StagePlan, models: &BTreeMap<String, Re
             let _ = d.engine;
             let mut im = ImageModel::load(&w, precision).map_err(|e| anyhow!("{}: {e}", m.id))?;
             im.tile = auto_tile(im.tile, device, res, m.memory_per_megapixel_mb);
-            Box::new(ImageProc { label: format!("Denoise ({})", m.id), model: im, params: ImageParams { noise_sigma: d.strength / 255.0 }, mix: d.mix, oom_fallback: res.oom_tile_fallback, oom_retries: 0 })
+            Box::new(ImageProc {
+                label: format!("Denoise ({})", m.id),
+                model: im,
+                params: ImageParams { noise_sigma: d.strength / 255.0 },
+                mix: d.mix,
+                oom_fallback: res.oom_tile_fallback,
+                oom_retries: 0,
+            })
         }
         Operation::Deblur(d) => {
             let m = model(models, &d.model_id)?;
             let w = load_weights(m, "weights", device)?;
             let mut im = ImageModel::load(&w, precision).map_err(|e| anyhow!("{}: {e}", m.id))?;
             im.tile = auto_tile(im.tile, device, res, m.memory_per_megapixel_mb).min(512);
-            Box::new(ImageProc { label: format!("Deblur ({})", m.id), model: im, params: ImageParams::default(), mix: d.strength, oom_fallback: res.oom_tile_fallback, oom_retries: 0 })
+            Box::new(ImageProc {
+                label: format!("Deblur ({})", m.id),
+                model: im,
+                params: ImageParams::default(),
+                mix: d.strength,
+                oom_fallback: res.oom_tile_fallback,
+                oom_retries: 0,
+            })
         }
         Operation::FaceRestore(f) => {
             let m = model(models, &f.model_id)?;
@@ -393,10 +417,7 @@ pub fn build_native(op: &Operation, sp: &StagePlan, models: &BTreeMap<String, Re
                 }
                 _ => Box::new(BlendSynth),
             };
-            Box::new(InterpProc {
-                retimer: Retimer::new(ratio, if i.scene_detection { Some(i.scene_threshold) } else { None }, i.duplicate_threshold),
-                synth,
-            })
+            Box::new(InterpProc { retimer: Retimer::new(ratio, if i.scene_detection { Some(i.scene_threshold) } else { None }, i.duplicate_threshold), synth })
         }
         Operation::Grain(g) => Box::new(GrainProc { settings: g.clone() }),
         other => anyhow::bail!("{} is not a native stage", other.label()),

@@ -40,10 +40,7 @@ impl IfBlock {
         let n = w.count_indexed(&format!("{p}.convblock."));
         let mut blocks = Vec::new();
         for i in 0..n {
-            blocks.push((
-                Conv2d::load(w, &format!("{p}.convblock.{i}.conv"), 1, 1)?,
-                w.get(&format!("{p}.convblock.{i}.beta"))?,
-            ));
+            blocks.push((Conv2d::load(w, &format!("{p}.convblock.{i}.conv"), 1, 1)?, w.get(&format!("{p}.convblock.{i}.beta"))?));
         }
         Ok(Self {
             conv0: [Conv2d::load(w, &format!("{p}.conv0.0.0"), 2, 1)?, Conv2d::load(w, &format!("{p}.conv0.1.0"), 2, 1)?],
@@ -131,10 +128,7 @@ impl Rife {
                 Some(fl) => {
                     let wf0 = warp(&f0, &fl.narrow(1, 0, 2)?)?;
                     let wf1 = warp(&f1, &fl.narrow(1, 2, 2)?)?;
-                    let inp = Tensor::cat(
-                        &[&wi0, &wi1, &wf0, &wf1, &ts, mask.as_ref().unwrap(), feat.as_ref().unwrap()],
-                        1,
-                    )?;
+                    let inp = Tensor::cat(&[&wi0, &wi1, &wf0, &wf1, &ts, mask.as_ref().unwrap(), feat.as_ref().unwrap()], 1)?;
                     let (fd, m, ft) = block.forward(&inp, Some(&fl), scales[i])?;
                     flow = Some((fl + fd)?);
                     mask = Some(m);

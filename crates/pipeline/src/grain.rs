@@ -67,11 +67,8 @@ pub fn apply_grain(img: &mut RgbImage, s: &GrainSettings, frame_index: u64) {
     let base = mix64(s.seed ^ mix64(frame_key.wrapping_add(0x51_7CC1_B727_220A)));
     let mono = noise_plane(w, h, s.size, base);
     let color = s.color.clamp(0.0, 1.0);
-    let chans: Option<[Vec<f32>; 3]> = if color > 0.0 {
-        Some([noise_plane(w, h, s.size, mix64(base ^ 1)), noise_plane(w, h, s.size, mix64(base ^ 2)), noise_plane(w, h, s.size, mix64(base ^ 3))])
-    } else {
-        None
-    };
+    let chans: Option<[Vec<f32>; 3]> =
+        if color > 0.0 { Some([noise_plane(w, h, s.size, mix64(base ^ 1)), noise_plane(w, h, s.size, mix64(base ^ 2)), noise_plane(w, h, s.size, mix64(base ^ 3))]) } else { None };
     let norm = 1.0 / ((1.0 - color).powi(2) + color.powi(2)).sqrt();
     let amp = s.strength * 0.08;
     let luma_response = s.luma_response;

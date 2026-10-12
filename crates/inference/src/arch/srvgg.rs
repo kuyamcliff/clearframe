@@ -2,7 +2,7 @@
 
 use candle_core::{Result, Tensor};
 
-use crate::ops::{prelu, pixel_shuffle, upsample_nearest, Conv2d};
+use crate::ops::{pixel_shuffle, prelu, upsample_nearest, Conv2d};
 use crate::weights::Weights;
 
 pub struct SrVggCompact {

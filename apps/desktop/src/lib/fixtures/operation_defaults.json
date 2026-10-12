@@ -1,0 +1,183 @@
+{
+  "color": {
+    "settings": {
+      "brightness": 0.0,
+      "contrast": 1.0,
+      "desaturate": 0.0,
+      "gamma": 1.0,
+      "hdr_transfer": "pq",
+      "mode": "adjust",
+      "peak_nits": 1000.0,
+      "saturation": 1.0,
+      "sdr_white_nits": 203.0,
+      "tone_mapper": "hable"
+    },
+    "type": "color"
+  },
+  "deblur": {
+    "settings": {
+      "model_id": "megvii.nafnet-gopro-w32",
+      "strength": 1.0
+    },
+    "type": "deblur"
+  },
+  "deinterlace": {
+    "settings": {
+      "field_order": "auto",
+      "method": "bwdif",
+      "only_flagged": false,
+      "rate": "frame"
+    },
+    "type": "deinterlace"
+  },
+  "denoise": {
+    "settings": {
+      "engine": "ffdnet",
+      "mix": 1.0,
+      "model_id": null,
+      "strength": 10.0,
+      "temporal": false
+    },
+    "type": "denoise"
+  },
+  "enhance": {
+    "settings": {
+      "denoise": null,
+      "model_id": "xinntao.realesr-animevideo-v3",
+      "strength": 1.0,
+      "target": {
+        "kind": "model_scale"
+      },
+      "tile_pad": 0,
+      "tile_size": 0
+    },
+    "type": "enhance"
+  },
+  "face_restore": {
+    "settings": {
+      "model_id": "tencentarc.gfpgan-v1.4",
+      "params": {
+        "detection_max_side": 1280,
+        "detection_threshold": 0.9700000286102295,
+        "max_faces": 8,
+        "strength": 0.699999988079071,
+        "temporal_smoothing": 0.30000001192092896
+      }
+    },
+    "type": "face_restore"
+  },
+  "grain": {
+    "settings": {
+      "animated": true,
+      "color": 0.15000000596046448,
+      "luma_response": true,
+      "preset": "fine",
+      "seed": 1,
+      "size": 1.0,
+      "strength": 0.25
+    },
+    "type": "grain"
+  },
+  "grain_presets": [
+    {
+      "animated": true,
+      "color": 0.15000000596046448,
+      "luma_response": true,
+      "preset": "fine",
+      "seed": 1,
+      "size": 1.0,
+      "strength": 0.20000000298023224
+    },
+    {
+      "animated": true,
+      "color": 0.30000001192092896,
+      "luma_response": true,
+      "preset": "film",
+      "seed": 1,
+      "size": 1.600000023841858,
+      "strength": 0.30000001192092896
+    },
+    {
+      "animated": true,
+      "color": 0.25,
+      "luma_response": true,
+      "preset": "coarse",
+      "seed": 1,
+      "size": 2.5999999046325684,
+      "strength": 0.4000000059604645
+    },
+    {
+      "animated": true,
+      "color": 0.0,
+      "luma_response": true,
+      "preset": "monochrome",
+      "seed": 1,
+      "size": 1.2999999523162842,
+      "strength": 0.30000001192092896
+    },
+    {
+      "animated": true,
+      "color": 1.0,
+      "luma_response": true,
+      "preset": "color",
+      "seed": 1,
+      "size": 1.2000000476837158,
+      "strength": 0.30000001192092896
+    }
+  ],
+  "interpolate": {
+    "settings": {
+      "duplicate_threshold": 0.0,
+      "engine": "rife",
+      "model_id": "hzwer.rife-v4.26",
+      "rife_scale": 1.0,
+      "scene_detection": true,
+      "scene_threshold": 0.11999999731779099,
+      "slow_motion": 1.0,
+      "slow_motion_audio": "mute",
+      "target": {
+        "factor": 2,
+        "kind": "multiply"
+      }
+    },
+    "type": "interpolate"
+  },
+  "output": {
+    "audio": {
+      "mode": "auto"
+    },
+    "chapters": true,
+    "container": "mp4",
+    "metadata": true,
+    "subtitles": true,
+    "video": {
+      "encoder": "libx264",
+      "gop": null,
+      "pix_fmt": "yuv420p",
+      "preset": "medium",
+      "profile": null,
+      "rate": {
+        "mode": "quality",
+        "value": 18.0
+      }
+    }
+  },
+  "resize": {
+    "settings": {
+      "filter": "lanczos",
+      "fit": "fit",
+      "height": 1080,
+      "width": 1920
+    },
+    "type": "resize"
+  },
+  "stabilize": {
+    "settings": {
+      "mode": "auto_crop",
+      "shakiness": 5,
+      "smoothing": 15,
+      "tripod": false
+    },
+    "type": "stabilize"
+  }
+}

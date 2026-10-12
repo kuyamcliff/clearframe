@@ -6,6 +6,7 @@
 pub mod diagnostics;
 pub mod events;
 pub mod export;
+pub mod ipc;
 pub mod logging;
 pub mod models;
 pub mod presets;

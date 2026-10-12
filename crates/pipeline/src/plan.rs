@@ -305,7 +305,14 @@ impl Default for PlanOptions {
 }
 
 /// Build the execution plan.
-pub fn plan(info: &MediaInfo, job_range: Option<TimeRange>, pipeline: &Pipeline, output: &OutputSettings, models: &dyn ModelLookup, opts: &PlanOptions) -> Result<ExecutionPlan, String> {
+pub fn plan(
+    info: &MediaInfo,
+    job_range: Option<TimeRange>,
+    pipeline: &Pipeline,
+    output: &OutputSettings,
+    models: &dyn ModelLookup,
+    opts: &PlanOptions,
+) -> Result<ExecutionPlan, String> {
     let v = info.video().map_err(|e| e.to_string())?;
     let mut issues: Vec<Issue> = Vec::new();
     let issue = |issues: &mut Vec<Issue>, sev: Severity, stage: Option<&str>, msg: String, action: Option<&str>| {
@@ -316,9 +323,7 @@ pub fn plan(info: &MediaInfo, job_range: Option<TimeRange>, pipeline: &Pipeline,
     let cfr_conversion = if v.variable_frame_rate { Some(snap_fps(v.avg_frame_rate)) } else { None };
     let fps_in = cfr_conversion.unwrap_or(if v.frame_rate.as_f64() > 240.0 { snap_fps(v.avg_frame_rate) } else { v.frame_rate });
     if let Some(r) = cfr_conversion {
-        issue(&mut issues, Severity::Info, None, format!(
-            "The source has a variable frame rate; it will be converted to a constant {r} fps. Audio stays in sync."
-        ), None);
+        issue(&mut issues, Severity::Info, None, format!("The source has a variable frame rate; it will be converted to a constant {r} fps. Audio stays in sync."), None);
     }
     let flagged = v.is_interlaced_flagged();
     let interlaced = opts.detected_interlaced.unwrap_or(flagged);
@@ -442,9 +447,13 @@ pub fn plan(info: &MediaInfo, job_range: Option<TimeRange>, pipeline: &Pipeline,
                     notes.push(format!("Model output {mw}x{mh} is resized to {ow}x{oh} (Lanczos)."));
                 }
                 if ow > mw || oh > mh {
-                    issue(&mut issues, Severity::Warning, Some(sid), format!(
-                        "The requested size {ow}x{oh} is larger than the model's {scale}x output ({mw}x{mh}); the remainder is a plain resize without added detail."
-                    ), None);
+                    issue(
+                        &mut issues,
+                        Severity::Warning,
+                        Some(sid),
+                        format!("The requested size {ow}x{oh} is larger than the model's {scale}x output ({mw}x{mh}); the remainder is a plain resize without added detail."),
+                        None,
+                    );
                 }
                 if e.denoise.is_some() && !facts.as_ref().map(|f| f.supports_denoise_strength).unwrap_or(false) {
                     notes.push("The selected model has no denoise control; the denoise value is ignored.".into());
@@ -514,11 +523,8 @@ pub fn plan(info: &MediaInfo, job_range: Option<TimeRange>, pipeline: &Pipeline,
                         StabilizeMode::Black => ("black", 0),
                     };
                     let detect = format!("vidstabdetect=shakiness={}:accuracy=15:result={{TRF}}", s.shakiness.clamp(1, 10));
-                    let transform = format!(
-                        "vidstabtransform=input={{TRF}}:smoothing={}:optzoom={optzoom}:crop={crop}:tripod={}:interpol=bicubic",
-                        s.smoothing,
-                        if s.tripod { 1 } else { 0 }
-                    );
+                    let transform =
+                        format!("vidstabtransform=input={{TRF}}:smoothing={}:optzoom={optzoom}:crop={crop}:tripod={}:interpol=bicubic", s.smoothing, if s.tripod { 1 } else { 0 });
                     notes.push("vid.stab processes 8-bit 4:4:4 frames; higher bit depth is reduced to 8 bits for this step.".into());
                     match s.mode {
                         StabilizeMode::FullFrame => notes.push("Full frame: uncovered edges are filled from neighbouring frames and may show artifacts.".into()),
@@ -583,10 +589,7 @@ pub fn plan(info: &MediaInfo, job_range: Option<TimeRange>, pipeline: &Pipeline,
                         out_color.transfer = Some(tname.into());
                         out_color.primaries = Some("bt2020".into());
                         out_color.matrix = clearframe_media::color::YuvMatrix::Bt2020;
-                        out_color.mastering_display = Some(format!(
-                            "G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L({},50)",
-                            (c.peak_nits * 10000.0).round() as i64
-                        ));
+                        out_color.mastering_display = Some(format!("G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L({},50)", (c.peak_nits * 10000.0).round() as i64));
                         out_color.content_light = Some(format!("{},{}", c.peak_nits.round() as i64, (c.sdr_white_nits * 1.5).round() as i64));
                     }
                 }
@@ -613,7 +616,13 @@ pub fn plan(info: &MediaInfo, job_range: Option<TimeRange>, pipeline: &Pipeline,
                 seen_native_before_deint = true;
             }
             if inp.is_hdr() {
-                issue(&mut issues, Severity::Warning, Some(sid), "AI models are trained on SDR video; processing HDR (PQ/HLG) frames directly can shift tones. Consider tone mapping to SDR first.".into(), None);
+                issue(
+                    &mut issues,
+                    Severity::Warning,
+                    Some(sid),
+                    "AI models are trained on SDR video; processing HDR (PQ/HLG) frames directly can shift tones. Consider tone mapping to SDR first.".into(),
+                    None,
+                );
             }
             for m in st.op.required_models() {
                 match models.facts(&m) {
@@ -638,7 +647,13 @@ pub fn plan(info: &MediaInfo, job_range: Option<TimeRange>, pipeline: &Pipeline,
     }
 
     if interlaced && !seen_deinterlace {
-        issue(&mut issues, Severity::Warning, None, "The source appears to be interlaced. Add a Deinterlace step first; enhancement models expect progressive frames.".into(), Some("add_deinterlace"));
+        issue(
+            &mut issues,
+            Severity::Warning,
+            None,
+            "The source appears to be interlaced. Add a Deinterlace step first; enhancement models expect progressive frames.".into(),
+            Some("add_deinterlace"),
+        );
     } else if seen_native_before_deint {
         issue(&mut issues, Severity::Warning, None, "An AI step runs before deinterlacing; move Deinterlace to the start of the pipeline.".into(), Some("move_deinterlace_first"));
     }
@@ -647,25 +662,36 @@ pub fn plan(info: &MediaInfo, job_range: Option<TimeRange>, pipeline: &Pipeline,
     // Output format checks.
     let depth = pix_fmt_bit_depth(&output.video.pix_fmt);
     if out_color.is_hdr() && depth < 10 {
-        issue(&mut issues, Severity::Error, None, format!(
-            "HDR output needs a 10-bit pixel format; {} is {}-bit. Choose a 10-bit format such as yuv420p10le.",
-            output.video.pix_fmt, depth
-        ), Some("set_pix_fmt:yuv420p10le"));
+        issue(
+            &mut issues,
+            Severity::Error,
+            None,
+            format!("HDR output needs a 10-bit pixel format; {} is {}-bit. Choose a 10-bit format such as yuv420p10le.", output.video.pix_fmt, depth),
+            Some("set_pix_fmt:yuv420p10le"),
+        );
     }
     if v.bit_depth > 8 && depth == 8 && !out_color.is_hdr() {
         issue(&mut issues, Severity::Info, None, format!("The source is {}-bit; the output pixel format is 8-bit.", v.bit_depth), None);
     }
     let family = clearframe_media::encode::codec_profile(&output.video.encoder).map(|c| c.family).unwrap_or("h264");
     if !output.container.video_ok(family) {
-        issue(&mut issues, Severity::Error, None, format!(
-            "{} cannot be stored in {}. Choose another container or codec.",
-            family.to_uppercase(),
-            output.container.extension().to_uppercase()
-        ), None);
+        issue(
+            &mut issues,
+            Severity::Error,
+            None,
+            format!("{} cannot be stored in {}. Choose another container or codec.", family.to_uppercase(), output.container.extension().to_uppercase()),
+            None,
+        );
     }
     if output.video.pix_fmt.contains("420") || output.video.pix_fmt.contains("422") || output.video.pix_fmt == "nv12" || output.video.pix_fmt == "p010le" {
         if cur.width % 2 != 0 || cur.height % 2 != 0 {
-            issue(&mut issues, Severity::Error, None, format!("{}x{} has odd dimensions, which {} cannot encode. Add a Resize step.", cur.width, cur.height, output.video.pix_fmt), None);
+            issue(
+                &mut issues,
+                Severity::Error,
+                None,
+                format!("{}x{} has odd dimensions, which {} cannot encode. Add a Resize step.", cur.width, cur.height, output.video.pix_fmt),
+                None,
+            );
         }
     }
     if cur.width > 16384 || cur.height > 16384 {
@@ -677,18 +703,7 @@ pub fn plan(info: &MediaInfo, job_range: Option<TimeRange>, pipeline: &Pipeline,
     let input_frames = (input_duration * input.fps.as_f64()).round() as u64;
     let output_frames = (output_duration * cur.fps.as_f64()).round() as u64;
     let estimates = estimate(&stages, &passes, &cur, output, models, input_frames, output_frames, output_duration);
-    Ok(ExecutionPlan {
-        input,
-        output: cur,
-        stages,
-        passes,
-        issues,
-        estimates,
-        output_duration,
-        input_duration,
-        output_color: out_color,
-        cfr_conversion,
-    })
+    Ok(ExecutionPlan { input, output: cur, stages, passes, issues, estimates, output_duration, input_duration, output_color: out_color, cfr_conversion })
 }
 
 fn order_hints(stages: &[&Stage], issues: &mut Vec<Issue>) {
@@ -771,12 +786,7 @@ fn build_passes(stages: &[StagePlan], input: &Format) -> Vec<PassPlan> {
                 }
                 // Everything before in this pass is FFmpeg-only, held in `pending`.
                 let pre = std::mem::take(&mut pending);
-                p.stabilize = Some(StabilizePass {
-                    stage: sp.index,
-                    pre_filters: pre.clone(),
-                    detect_filter: detect.clone(),
-                    transform_template: transform_template.clone(),
-                });
+                p.stabilize = Some(StabilizePass { stage: sp.index, pre_filters: pre.clone(), detect_filter: detect.clone(), transform_template: transform_template.clone() });
                 pending = pre;
                 // vid.stab only accepts 8-bit YUV/RGB24; convert explicitly (4:4:4 keeps chroma).
                 pending.push("format=yuv444p".into());
@@ -878,13 +888,7 @@ fn estimate(
         work += p.output.megapixels() * 1e6 * 6.0 * 0.5 * (output_duration / out.time_scale) * p.output.fps.as_f64() / 1e6;
     }
     let (out_lo, out_hi) = (video_mb(lo_bpp).max(0.1), video_mb(hi_bpp).max(0.2));
-    Estimates {
-        peak_memory_mb: (peak * 0.8, peak * 1.5),
-        output_size_mb: (out_lo, out_hi),
-        work_disk_mb: (work * 0.6 + out_lo, work * 1.4 + out_hi),
-        output_frames,
-        input_frames,
-    }
+    Estimates { peak_memory_mb: (peak * 0.8, peak * 1.5), output_size_mb: (out_lo, out_hi), work_disk_mb: (work * 0.6 + out_lo, work * 1.4 + out_hi), output_frames, input_frames }
 }
 
 fn stages_model_mem(sp: &StagePlan, models: &dyn ModelLookup, tile_mp: f64) -> f64 {
@@ -911,7 +915,15 @@ mod tests {
     impl ModelLookup for Models {
         fn facts(&self, id: &str) -> Option<ModelFacts> {
             let scale = if id.contains("realesr") || id.contains("esrgan") { 4 } else { 1 };
-            Some(ModelFacts { id: id.into(), display_name: id.into(), scale, installed: !id.contains("missing"), mb_per_megapixel: 1000.0, weights_mb: 10.0, supports_denoise_strength: id.contains("general") })
+            Some(ModelFacts {
+                id: id.into(),
+                display_name: id.into(),
+                scale,
+                installed: !id.contains("missing"),
+                mb_per_megapixel: 1000.0,
+                weights_mb: 10.0,
+                supports_denoise_strength: id.contains("general"),
+            })
         }
     }
 
@@ -958,7 +970,12 @@ mod tests {
 
     #[test]
     fn ffmpeg_only_runs_in_decoder() {
-        let p = Pipeline { stages: vec![st(Operation::Deinterlace(DeinterlaceSettings { rate: DeinterlaceRate::Field, ..Default::default() })), st(Operation::Denoise(DenoiseSettings { engine: DenoiseEngine::Hqdn3d, ..Default::default() }))] };
+        let p = Pipeline {
+            stages: vec![
+                st(Operation::Deinterlace(DeinterlaceSettings { rate: DeinterlaceRate::Field, ..Default::default() })),
+                st(Operation::Denoise(DenoiseSettings { engine: DenoiseEngine::Hqdn3d, ..Default::default() })),
+            ],
+        };
         let plan = plan(&info(r#","field_order":"tt""#), None, &p, &OutputSettings::default(), &Models, &PlanOptions::default()).unwrap();
         assert_eq!(plan.passes[0].decode_filters.len(), 2);
         assert!(plan.passes[0].segments.is_empty());
@@ -1006,7 +1023,9 @@ mod tests {
     fn hdr_needs_10bit_and_slowmo_duration() {
         let mut c = ColorSettings::default();
         c.mode = ColorMode::SdrToHdr;
-        let p = Pipeline { stages: vec![st(Operation::Color(c)), st(Operation::Interpolate(InterpolateSettings { slow_motion: 2.0, engine: InterpEngine::Blend, ..Default::default() }))] };
+        let p = Pipeline {
+            stages: vec![st(Operation::Color(c)), st(Operation::Interpolate(InterpolateSettings { slow_motion: 2.0, engine: InterpEngine::Blend, ..Default::default() }))],
+        };
         let plan = plan(&info(""), Some(TimeRange { start: 1.0, end: 3.0 }), &p, &OutputSettings::default(), &Models, &PlanOptions::default()).unwrap();
         assert!(plan.errors().any(|e| e.message.contains("10-bit")));
         assert!((plan.output_duration - 4.0).abs() < 1e-9);

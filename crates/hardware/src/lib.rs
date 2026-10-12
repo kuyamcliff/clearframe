@@ -164,7 +164,11 @@ fn os_gpus() -> Vec<GpuInfo> {
 
 #[cfg(target_os = "windows")]
 fn os_gpus() -> Vec<GpuInfo> {
-    let Some(out) = run("powershell", &["-NoProfile", "-Command", "Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM,DriverVersion,AdapterCompatibility | ConvertTo-Json"]) else { return vec![] };
+    let Some(out) =
+        run("powershell", &["-NoProfile", "-Command", "Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM,DriverVersion,AdapterCompatibility | ConvertTo-Json"])
+    else {
+        return vec![];
+    };
     let Ok(v): Result<serde_json::Value, _> = serde_json::from_str(&out) else { return vec![] };
     let arr = if v.is_array() { v.as_array().cloned().unwrap_or_default() } else { vec![v] };
     arr.iter()
@@ -260,7 +264,11 @@ pub fn capability(hw: &HardwareInfo, model_backends: &[String], model_platforms:
             Capability {
                 level: if certified { CapabilityLevel::Supported } else { CapabilityLevel::CompatibleNotCertified },
                 backend: Some(b.kind),
-                reason: if certified { format!("Tested with {}.", b.kind.label()) } else { format!("{} is available; this combination is not in the release test matrix.", b.kind.label()) },
+                reason: if certified {
+                    format!("Tested with {}.", b.kind.label())
+                } else {
+                    format!("{} is available; this combination is not in the release test matrix.", b.kind.label())
+                },
             }
         }
         None => {
@@ -270,7 +278,11 @@ pub fn capability(hw: &HardwareInfo, model_backends: &[String], model_platforms:
             } else {
                 "This build has no GPU backend; processing runs on the CPU and may be slow.".to_string()
             };
-            Capability { level: CapabilityLevel::CpuFallbackOnly, backend: Some(BackendKind::Cpu), reason: if certified { format!("{reason} CPU processing is tested on this OS.") } else { reason } }
+            Capability {
+                level: CapabilityLevel::CpuFallbackOnly,
+                backend: Some(BackendKind::Cpu),
+                reason: if certified { format!("{reason} CPU processing is tested on this OS.") } else { reason },
+            }
         }
     }
 }

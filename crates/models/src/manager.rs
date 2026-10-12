@@ -248,7 +248,13 @@ pub fn use_proxy_for(url: &str) -> bool {
 impl ModelManager {
     /// `models_dir`: installed models. `staging_dir`: download staging (inside the managed cache).
     pub fn new(db: Arc<Db>, models_dir: PathBuf, staging_dir: PathBuf, catalog: Catalog) -> Self {
-        Self { db, root: RwLock::new(models_dir), staging_root: RwLock::new(staging_dir), catalog: RwLock::new(catalog), user_agent: format!("ClearFrame/{}", env!("CARGO_PKG_VERSION")) }
+        Self {
+            db,
+            root: RwLock::new(models_dir),
+            staging_root: RwLock::new(staging_dir),
+            catalog: RwLock::new(catalog),
+            user_agent: format!("ClearFrame/{}", env!("CARGO_PKG_VERSION")),
+        }
     }
 
     pub fn catalog(&self) -> Catalog {
@@ -343,7 +349,8 @@ impl ModelManager {
 
     /// All models found on disk or known to the registry.
     pub fn all_installed(&self) -> Vec<InstalledModel> {
-        let mut ids: std::collections::BTreeSet<String> = self.db.model_all().unwrap_or_default().iter().filter_map(|s| serde_json::from_str::<InstalledModel>(s).ok()).map(|m| m.id).collect();
+        let mut ids: std::collections::BTreeSet<String> =
+            self.db.model_all().unwrap_or_default().iter().filter_map(|s| serde_json::from_str::<InstalledModel>(s).ok()).map(|m| m.id).collect();
         // Adopt folders present on disk (e.g. after restoring a backup of the models folder).
         if let Ok(cats) = std::fs::read_dir(self.models_dir()) {
             for c in cats.flatten() {
@@ -659,7 +666,14 @@ impl ModelManager {
             }
             let raw = staging.join(fsutil::sanitize_component(&a.filename));
             if let Some(local) = local_files.get(&a.role) {
-                progress(InstallProgress { id: id.into(), state: ModelState::Verifying, role: Some(a.role.clone()), bytes_done: base, bytes_total: total, message: format!("Verifying {}", a.filename) });
+                progress(InstallProgress {
+                    id: id.into(),
+                    state: ModelState::Verifying,
+                    role: Some(a.role.clone()),
+                    bytes_done: base,
+                    bytes_total: total,
+                    message: format!("Verifying {}", a.filename),
+                });
                 let sha = fsutil::sha256_file(local)?;
                 if sha != a.sha256 {
                     return Err(InstallError::Checksum(a.filename.clone()));
@@ -670,13 +684,27 @@ impl ModelManager {
                 let role = a.role.clone();
                 let fname = a.filename.clone();
                 self.download(a, &raw, ctl, &mut |done| {
-                    progress(InstallProgress { id: id.into(), state: ModelState::Downloading, role: Some(role.clone()), bytes_done: b + done, bytes_total: total, message: format!("Downloading {fname}") })
+                    progress(InstallProgress {
+                        id: id.into(),
+                        state: ModelState::Downloading,
+                        role: Some(role.clone()),
+                        bytes_done: b + done,
+                        bytes_total: total,
+                        message: format!("Downloading {fname}"),
+                    })
                 })?;
             }
             base += a.size_bytes;
             raws.push((a.clone(), raw));
         }
-        progress(InstallProgress { id: id.into(), state: ModelState::Preparing, role: None, bytes_done: total, bytes_total: total, message: "Converting weights to a safe format".into() });
+        progress(InstallProgress {
+            id: id.into(),
+            state: ModelState::Preparing,
+            role: None,
+            bytes_done: total,
+            bytes_total: total,
+            message: "Converting weights to a safe format".into(),
+        });
         let mut prepared = BTreeMap::new();
         for (a, raw) in &raws {
             self.check(ctl)?;
@@ -713,7 +741,8 @@ impl ModelManager {
 
     /// Install a user-provided checkpoint for a supported architecture (power users).
     pub fn import_custom(&self, info: CustomModelInfo, file: &Path, rules: &KeyRules, smoke: &SmokeTest) -> Result<InstalledModel, InstallError> {
-        let slug: String = info.display_name.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect::<String>().trim_matches('-').chars().take(40).collect();
+        let slug: String =
+            info.display_name.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect::<String>().trim_matches('-').chars().take(40).collect();
         let id = format!("custom.{}", if slug.is_empty() { "model".into() } else { slug });
         let staging = self.staging_dir(&id);
         std::fs::create_dir_all(&staging)?;
@@ -809,7 +838,14 @@ impl ModelManager {
 
     pub fn storage(&self) -> StorageReport {
         let root = self.models_dir();
-        let per_model = self.all_installed().into_iter().map(|m| { let b = fsutil::dir_size(&root.join(&m.dir)); (m.id, b) }).collect();
+        let per_model = self
+            .all_installed()
+            .into_iter()
+            .map(|m| {
+                let b = fsutil::dir_size(&root.join(&m.dir));
+                (m.id, b)
+            })
+            .collect();
         StorageReport {
             models_dir_exists: root.is_dir(),
             total_bytes: fsutil::dir_size(&root),
@@ -862,7 +898,12 @@ mod tests {
                     let _ = s.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
                     continue;
                 };
-                let start = req.lines().find(|l| l.to_lowercase().starts_with("range:")).and_then(|l| l.split('=').nth(1)).and_then(|r| r.trim_end_matches('-').trim().trim_end_matches('-').parse::<usize>().ok()).unwrap_or(0);
+                let start = req
+                    .lines()
+                    .find(|l| l.to_lowercase().starts_with("range:"))
+                    .and_then(|l| l.split('=').nth(1))
+                    .and_then(|r| r.trim_end_matches('-').trim().trim_end_matches('-').parse::<usize>().ok())
+                    .unwrap_or(0);
                 let slice = &body[start.min(body.len())..];
                 let (status, send) = if first {
                     first = false;

@@ -69,14 +69,7 @@ pub struct ColorTags {
 
 impl ColorTags {
     pub fn sdr_bt709() -> Self {
-        Self {
-            matrix: YuvMatrix::Bt709,
-            full_range: false,
-            primaries: Some("bt709".into()),
-            transfer: Some("bt709".into()),
-            mastering_display: None,
-            content_light: None,
-        }
+        Self { matrix: YuvMatrix::Bt709, full_range: false, primaries: Some("bt709".into()), transfer: Some("bt709".into()), mastering_display: None, content_light: None }
     }
 
     /// Derive tags from a probed stream (keeping what is valid, guessing what is missing).

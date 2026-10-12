@@ -190,11 +190,7 @@ mod tests {
         }
         // Every architecture referenced is one the app ships an adapter for.
         for m in &c.models {
-            assert!(
-                ["srvgg_compact", "rrdbnet", "ffdnet", "drunet", "nafnet", "rife", "gfpgan"].contains(&m.architecture.as_str()),
-                "{}",
-                m.architecture
-            );
+            assert!(["srvgg_compact", "rrdbnet", "ffdnet", "drunet", "nafnet", "rife", "gfpgan"].contains(&m.architecture.as_str()), "{}", m.architecture);
         }
     }
 

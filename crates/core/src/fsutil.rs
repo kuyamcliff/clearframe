@@ -18,7 +18,9 @@ pub fn sanitize_component(s: &str) -> String {
     // Reserved device names on Windows.
     let upper = out.to_ascii_uppercase();
     let stem = upper.split('.').next().unwrap_or("");
-    const RESERVED: &[&str] = &["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
+    const RESERVED: &[&str] = &[
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
     if RESERVED.contains(&stem) {
         out = format!("_{out}");
     }

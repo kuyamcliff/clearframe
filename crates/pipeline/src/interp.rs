@@ -81,11 +81,7 @@ impl Retimer {
                     self.stats.duplicates += 1;
                 }
                 let need: Vec<(usize, f32)> = ts.iter().enumerate().filter(|(_, t)| **t > EPS as f32).map(|(i, t)| (i, *t)).collect();
-                let synth_frames = if !need.is_empty() && !is_cut && !is_dup {
-                    synth.synthesize(&prev, &img, &need.iter().map(|x| x.1).collect::<Vec<_>>())?
-                } else {
-                    Vec::new()
-                };
+                let synth_frames = if !need.is_empty() && !is_cut && !is_dup { synth.synthesize(&prev, &img, &need.iter().map(|x| x.1).collect::<Vec<_>>())? } else { Vec::new() };
                 let mut si = 0;
                 for (i, (jj, t)) in js.iter().zip(&ts).enumerate() {
                     let frame = if *t <= EPS as f32 {
@@ -93,7 +89,11 @@ impl Retimer {
                         prev.clone()
                     } else if is_cut || is_dup {
                         self.stats.copied += 1;
-                        if *t < 0.5 || is_dup { prev.clone() } else { img.clone() }
+                        if *t < 0.5 || is_dup {
+                            prev.clone()
+                        } else {
+                            img.clone()
+                        }
                     } else {
                         debug_assert_eq!(need[si].0, i);
                         self.stats.synthesized += 1;

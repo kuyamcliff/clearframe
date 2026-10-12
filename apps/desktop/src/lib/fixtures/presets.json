@@ -1,0 +1,423 @@
+[
+  {
+    "builtin": true,
+    "category": "Enhance",
+    "description": "AnimeVideo v3 at the model's native 4x, resized to 2x the source.",
+    "favorite": false,
+    "id": "builtin.anime-2x",
+    "name": "Anime 2x (fast)",
+    "output": null,
+    "pipeline": {
+      "stages": [
+        {
+          "enabled": true,
+          "id": "enhance",
+          "settings": {
+            "denoise": null,
+            "model_id": "xinntao.realesr-animevideo-v3",
+            "strength": 1.0,
+            "target": {
+              "factor": 2.0,
+              "kind": "scale"
+            },
+            "tile_pad": 0,
+            "tile_size": 0
+          },
+          "type": "enhance"
+        }
+      ]
+    },
+    "tags": [
+      "anime"
+    ]
+  },
+  {
+    "builtin": true,
+    "category": "Enhance",
+    "description": "Real-ESRGAN AnimeVideo v3 to 2160p, HEVC 10-bit.",
+    "favorite": false,
+    "id": "builtin.anime-4k",
+    "name": "Anime upscale to 4K",
+    "output": {
+      "audio": {
+        "mode": "auto"
+      },
+      "chapters": true,
+      "container": "mp4",
+      "metadata": true,
+      "subtitles": true,
+      "video": {
+        "encoder": "libx265",
+        "gop": null,
+        "pix_fmt": "yuv420p10le",
+        "preset": "medium",
+        "profile": null,
+        "rate": {
+          "mode": "quality",
+          "value": 18.0
+        }
+      }
+    },
+    "pipeline": {
+      "stages": [
+        {
+          "enabled": true,
+          "id": "enhance",
+          "settings": {
+            "denoise": null,
+            "model_id": "xinntao.realesr-animevideo-v3",
+            "strength": 1.0,
+            "target": {
+              "height": 2160,
+              "kind": "height"
+            },
+            "tile_pad": 0,
+            "tile_size": 0
+          },
+          "type": "enhance"
+        }
+      ]
+    },
+    "tags": [
+      "anime",
+      "4k"
+    ]
+  },
+  {
+    "builtin": true,
+    "category": "Restore",
+    "description": "FFDNet AI denoiser at a moderate strength.",
+    "favorite": false,
+    "id": "builtin.denoise",
+    "name": "Clean noisy footage",
+    "output": null,
+    "pipeline": {
+      "stages": [
+        {
+          "enabled": true,
+          "id": "denoise",
+          "settings": {
+            "engine": "ffdnet",
+            "mix": 1.0,
+            "model_id": null,
+            "strength": 15.0,
+            "temporal": false
+          },
+          "type": "denoise"
+        }
+      ]
+    },
+    "tags": [
+      "low light",
+      "noise"
+    ]
+  },
+  {
+    "builtin": true,
+    "category": "Grain",
+    "description": "Deterministic film-like grain.",
+    "favorite": false,
+    "id": "builtin.film-grain",
+    "name": "Film grain",
+    "output": null,
+    "pipeline": {
+      "stages": [
+        {
+          "enabled": true,
+          "id": "grain",
+          "settings": {
+            "animated": true,
+            "color": 0.30000001192092896,
+            "luma_response": true,
+            "preset": "film",
+            "seed": 1,
+            "size": 1.600000023841858,
+            "strength": 0.30000001192092896
+          },
+          "type": "grain"
+        }
+      ]
+    },
+    "tags": [
+      "grain"
+    ]
+  },
+  {
+    "builtin": true,
+    "category": "Color & HDR",
+    "description": "Tone-map HDR10/HLG to SDR BT.709 (Hable).",
+    "favorite": false,
+    "id": "builtin.hdr-to-sdr",
+    "name": "HDR to SDR",
+    "output": null,
+    "pipeline": {
+      "stages": [
+        {
+          "enabled": true,
+          "id": "color",
+          "settings": {
+            "brightness": 0.0,
+            "contrast": 1.0,
+            "desaturate": 0.0,
+            "gamma": 1.0,
+            "hdr_transfer": "pq",
+            "mode": "hdr_to_sdr",
+            "peak_nits": 1000.0,
+            "saturation": 1.0,
+            "sdr_white_nits": 203.0,
+            "tone_mapper": "hable"
+          },
+          "type": "color"
+        }
+      ]
+    },
+    "tags": [
+      "hdr"
+    ]
+  },
+  {
+    "builtin": true,
+    "category": "Enhance",
+    "description": "Real-ESRGAN General v3 with light denoise, to 1080p.",
+    "favorite": false,
+    "id": "builtin.live-1080",
+    "name": "Live action to 1080p",
+    "output": null,
+    "pipeline": {
+      "stages": [
+        {
+          "enabled": true,
+          "id": "enhance",
+          "settings": {
+            "denoise": 0.5,
+            "model_id": "xinntao.realesr-general-v3",
+            "strength": 1.0,
+            "target": {
+              "height": 1080,
+              "kind": "height"
+            },
+            "tile_pad": 0,
+            "tile_size": 0
+          },
+          "type": "enhance"
+        }
+      ]
+    },
+    "tags": [
+      "live action",
+      "1080p"
+    ]
+  },
+  {
+    "builtin": true,
+    "category": "Restore",
+    "description": "NAFNet motion deblur at full strength.",
+    "favorite": false,
+    "id": "builtin.deblur",
+    "name": "Motion deblur",
+    "output": null,
+    "pipeline": {
+      "stages": [
+        {
+          "enabled": true,
+          "id": "deblur",
+          "settings": {
+            "model_id": "megvii.nafnet-gopro-w32",
+            "strength": 1.0
+          },
+          "type": "deblur"
+        }
+      ]
+    },
+    "tags": [
+      "blur"
+    ]
+  },
+  {
+    "builtin": true,
+    "category": "Restore",
+    "description": "GFPGAN face restoration at 70% strength.",
+    "favorite": false,
+    "id": "builtin.faces",
+    "name": "Recover faces",
+    "output": null,
+    "pipeline": {
+      "stages": [
+        {
+          "enabled": true,
+          "id": "faces",
+          "settings": {
+            "model_id": "tencentarc.gfpgan-v1.4",
+            "params": {
+              "detection_max_side": 1280,
+              "detection_threshold": 0.9700000286102295,
+              "max_faces": 8,
+              "strength": 0.699999988079071,
+              "temporal_smoothing": 0.30000001192092896
+            }
+          },
+          "type": "face_restore"
+        }
+      ]
+    },
+    "tags": [
+      "faces"
+    ]
+  },
+  {
+    "builtin": true,
+    "category": "Restore",
+    "description": "Deinterlace, denoise and upscale to 1080p with conservative settings.",
+    "favorite": false,
+    "id": "builtin.restore-old",
+    "name": "Restore old footage",
+    "output": null,
+    "pipeline": {
+      "stages": [
+        {
+          "enabled": true,
+          "id": "deinterlace",
+          "settings": {
+            "field_order": "auto",
+            "method": "bwdif",
+            "only_flagged": false,
+            "rate": "frame"
+          },
+          "type": "deinterlace"
+        },
+        {
+          "enabled": true,
+          "id": "denoise",
+          "settings": {
+            "engine": "ffdnet",
+            "mix": 1.0,
+            "model_id": null,
+            "strength": 12.0,
+            "temporal": false
+          },
+          "type": "denoise"
+        },
+        {
+          "enabled": true,
+          "id": "enhance",
+          "settings": {
+            "denoise": 0.30000001192092896,
+            "model_id": "xinntao.realesr-general-v3",
+            "strength": 0.800000011920929,
+            "target": {
+              "height": 1080,
+              "kind": "height"
+            },
+            "tile_pad": 0,
+            "tile_size": 0
+          },
+          "type": "enhance"
+        }
+      ]
+    },
+    "tags": [
+      "archival",
+      "interlaced"
+    ]
+  },
+  {
+    "builtin": true,
+    "category": "Interpolate",
+    "description": "RIFE slow motion at 4x with pitch-preserved audio.",
+    "favorite": false,
+    "id": "builtin.slowmo-4x",
+    "name": "Slow motion 4x",
+    "output": null,
+    "pipeline": {
+      "stages": [
+        {
+          "enabled": true,
+          "id": "interpolate",
+          "settings": {
+            "duplicate_threshold": 0.0,
+            "engine": "rife",
+            "model_id": "hzwer.rife-v4.26",
+            "rife_scale": 1.0,
+            "scene_detection": true,
+            "scene_threshold": 0.11999999731779099,
+            "slow_motion": 4.0,
+            "slow_motion_audio": "stretch_preserve_pitch",
+            "target": {
+              "factor": 4,
+              "kind": "multiply"
+            }
+          },
+          "type": "interpolate"
+        }
+      ]
+    },
+    "tags": [
+      "slow motion"
+    ]
+  },
+  {
+    "builtin": true,
+    "category": "Interpolate",
+    "description": "RIFE frame interpolation to 60 fps with scene-cut detection; duration and audio unchanged.",
+    "favorite": false,
+    "id": "builtin.smooth-60",
+    "name": "Smooth 60 fps",
+    "output": null,
+    "pipeline": {
+      "stages": [
+        {
+          "enabled": true,
+          "id": "interpolate",
+          "settings": {
+            "duplicate_threshold": 0.0,
+            "engine": "rife",
+            "model_id": "hzwer.rife-v4.26",
+            "rife_scale": 1.0,
+            "scene_detection": true,
+            "scene_threshold": 0.11999999731779099,
+            "slow_motion": 1.0,
+            "slow_motion_audio": "mute",
+            "target": {
+              "fps": {
+                "den": 1,
+                "num": 60
+              },
+              "kind": "fps"
+            }
+          },
+          "type": "interpolate"
+        }
+      ]
+    },
+    "tags": [
+      "60fps"
+    ]
+  },
+  {
+    "builtin": true,
+    "category": "Stabilize",
+    "description": "Two-pass stabilization that zooms just enough to hide moving borders.",
+    "favorite": false,
+    "id": "builtin.stabilize",
+    "name": "Stabilize (auto crop)",
+    "output": null,
+    "pipeline": {
+      "stages": [
+        {
+          "enabled": true,
+          "id": "stabilize",
+          "settings": {
+            "mode": "auto_crop",
+            "shakiness": 5,
+            "smoothing": 15,
+            "tripod": false
+          },
+          "type": "stabilize"
+        }
+      ]
+    },
+    "tags": [
+      "shaky"
+    ]
+  }
+]

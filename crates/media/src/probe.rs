@@ -132,9 +132,7 @@ fn u(v: &Value, k: &str) -> Option<u64> {
     v.get(k).and_then(|x| x.as_str().and_then(|s| s.parse().ok()).or_else(|| x.as_u64()))
 }
 fn tag(v: &Value, k: &str) -> Option<String> {
-    v.get("tags").and_then(|t| {
-        t.as_object().and_then(|o| o.iter().find(|(kk, _)| kk.eq_ignore_ascii_case(k)).and_then(|(_, vv)| vv.as_str().map(String::from)))
-    })
+    v.get("tags").and_then(|t| t.as_object().and_then(|o| o.iter().find(|(kk, _)| kk.eq_ignore_ascii_case(k)).and_then(|(_, vv)| vv.as_str().map(String::from))))
 }
 
 fn bit_depth_from_pix_fmt(p: &str) -> u32 {
@@ -237,13 +235,7 @@ pub fn parse_probe_json(path: &str, json: &str, first_frame_json: Option<&str>) 
             }),
             Some("subtitle") => {
                 let codec = s(st, "codec_name").unwrap_or_default();
-                subtitles.push(SubtitleStream {
-                    index,
-                    is_text: text_sub(&codec),
-                    codec,
-                    language: tag(st, "language").filter(|l| l != "und"),
-                    title: tag(st, "title"),
-                })
+                subtitles.push(SubtitleStream { index, is_text: text_sub(&codec), codec, language: tag(st, "language").filter(|l| l != "und"), title: tag(st, "title") })
             }
             _ => {}
         }
@@ -397,9 +389,7 @@ impl InterlaceAnalysis {
 /// Parse the "Multi frame detection" line printed by `idet`.
 pub fn parse_idet(stderr: &str) -> Option<InterlaceAnalysis> {
     let line = stderr.lines().rev().find(|l| l.contains("Multi frame detection:"))?;
-    let num = |k: &str| -> u64 {
-        line.split(k).nth(1).and_then(|r| r.split_whitespace().next()).and_then(|v| v.parse().ok()).unwrap_or(0)
-    };
+    let num = |k: &str| -> u64 { line.split(k).nth(1).and_then(|r| r.split_whitespace().next()).and_then(|v| v.parse().ok()).unwrap_or(0) };
     Some(InterlaceAnalysis { tff: num("TFF:"), bff: num("BFF:"), progressive: num("Progressive:"), undetermined: num("Undetermined:") })
 }
 

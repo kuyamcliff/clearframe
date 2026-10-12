@@ -31,9 +31,7 @@ pub struct DruNet {
 impl DruNet {
     pub fn load(w: &Weights) -> Result<Self> {
         let nb = 4;
-        let blocks = |p: &str, off: usize| -> Result<Vec<ResBlock>> {
-            (0..nb).map(|i| ResBlock::load(w, &format!("{p}.{}", i + off))).collect()
-        };
+        let blocks = |p: &str, off: usize| -> Result<Vec<ResBlock>> { (0..nb).map(|i| ResBlock::load(w, &format!("{p}.{}", i + off))).collect() };
         let mut downs = Vec::new();
         for d in 1..=3 {
             let p = format!("m_down{d}");

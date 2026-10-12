@@ -29,7 +29,29 @@ fn open(root: &Path) -> Arc<App> {
 fn clip(path: &Path, secs: u32) {
     let s = secs.to_string();
     let st = Command::new("ffmpeg")
-        .args(["-v", "error", "-y", "-f", "lavfi", "-t", &s, "-i", "testsrc2=size=320x240:rate=30", "-f", "lavfi", "-t", &s, "-i", "sine", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac"])
+        .args([
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-t",
+            &s,
+            "-i",
+            "testsrc2=size=320x240:rate=30",
+            "-f",
+            "lavfi",
+            "-t",
+            &s,
+            "-i",
+            "sine",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+        ])
         .arg(path)
         .status()
         .unwrap();
@@ -37,7 +59,18 @@ fn clip(path: &Path, secs: u32) {
 }
 
 fn job(src: &Path, out: &Path, p: Pipeline) -> NewJob {
-    NewJob { source: src.into(), pipeline: p, output: OutputSettings::default(), range: None, folder: Some(out.into()), file_name: None, remember_folder: false, preset_name: None, batch_id: None, engine: Default::default() }
+    NewJob {
+        source: src.into(),
+        pipeline: p,
+        output: OutputSettings::default(),
+        range: None,
+        folder: Some(out.into()),
+        file_name: None,
+        remember_folder: false,
+        preset_name: None,
+        batch_id: None,
+        engine: Default::default(),
+    }
 }
 
 fn wait(app: &Arc<App>, id: &str, until: impl Fn(JobState) -> bool, secs: u64) -> JobState {
@@ -73,7 +106,8 @@ fn synthetic_srvgg(path: &Path) {
     tensors.push(("body.2.weight".into(), vec![48, 4, 3, 3], rnd(48 * 36)));
     tensors.push(("body.2.bias".into(), vec![48], rnd(48)));
     let bytes: Vec<(String, Vec<usize>, Vec<u8>)> = tensors.into_iter().map(|(n, s, d)| (n, s, d.iter().flat_map(|v| v.to_le_bytes()).collect())).collect();
-    let views: Vec<(String, safetensors::tensor::TensorView)> = bytes.iter().map(|(n, s, d)| (n.clone(), safetensors::tensor::TensorView::new(safetensors::Dtype::F32, s.clone(), d).unwrap())).collect();
+    let views: Vec<(String, safetensors::tensor::TensorView)> =
+        bytes.iter().map(|(n, s, d)| (n.clone(), safetensors::tensor::TensorView::new(safetensors::Dtype::F32, s.clone(), d).unwrap())).collect();
     safetensors::serialize_to_file(views, &None, path).unwrap();
 }
 
@@ -116,7 +150,12 @@ fn worker_crash_and_app_restart_recover() {
         s.segment_seconds = 2.0;
         app.save_settings(s).unwrap();
         app.start_scheduler();
-        let p = Pipeline { stages: vec![Stage::new(Operation::Interpolate(InterpolateSettings { engine: InterpEngine::Blend, ..Default::default() })), Stage::new(Operation::Grain(GrainSettings::default()))] };
+        let p = Pipeline {
+            stages: vec![
+                Stage::new(Operation::Interpolate(InterpolateSettings { engine: InterpEngine::Blend, ..Default::default() })),
+                Stage::new(Operation::Grain(GrainSettings::default())),
+            ],
+        };
         id = app.enqueue(job(&src, &d.path().join("out"), p)).unwrap().id;
         assert_eq!(wait(&app, &id, |s| s == JobState::Processing, 60), JobState::Processing);
         // Wait until at least one segment exists, then kill the worker like a crash.

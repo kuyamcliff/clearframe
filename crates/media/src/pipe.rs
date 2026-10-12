@@ -81,9 +81,7 @@ impl StderrLog {
 }
 
 fn spawn(mut cmd: Command, stdin: bool, stdout: bool) -> Result<(Child, StderrLog, JoinHandle<()>), MediaError> {
-    cmd.stdin(if stdin { Stdio::piped() } else { Stdio::null() })
-        .stdout(if stdout { Stdio::piped() } else { Stdio::null() })
-        .stderr(Stdio::piped());
+    cmd.stdin(if stdin { Stdio::piped() } else { Stdio::null() }).stdout(if stdout { Stdio::piped() } else { Stdio::null() }).stderr(Stdio::piped());
     log::debug!("spawn {:?}", cmd);
     let mut child = cmd.spawn().map_err(|e| MediaError::Spawn(e.to_string()))?;
     let log = StderrLog::default();
@@ -162,11 +160,7 @@ impl DecodeSpec {
             vf.push(format!("fps={}", r.to_ffmpeg()));
         }
         vf.extend(self.filters.iter().cloned());
-        vf.push(format!(
-            "scale=in_color_matrix={}:in_range={}:flags=accurate_rnd+full_chroma_int",
-            self.matrix.ffmpeg_name(),
-            if self.full_range { "pc" } else { "tv" }
-        ));
+        vf.push(format!("scale=in_color_matrix={}:in_range={}:flags=accurate_rnd+full_chroma_int", self.matrix.ffmpeg_name(), if self.full_range { "pc" } else { "tv" }));
         vf.push("format=rgb48le".into());
         c.args(["-vf", &vf.join(",")]);
         c.args(["-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "rgb48le", "pipe:1"]);
@@ -325,10 +319,7 @@ impl FrameWriter {
 
     pub fn write(&mut self, f: &RawFrame) -> Result<(), MediaError> {
         if f.width != self.width || f.height != self.height {
-            return Err(MediaError::Invalid(format!(
-                "frame size {}x{} does not match encoder size {}x{}",
-                f.width, f.height, self.width, self.height
-            )));
+            return Err(MediaError::Invalid(format!("frame size {}x{} does not match encoder size {}x{}", f.width, f.height, self.width, self.height)));
         }
         let stdin = self.stdin.as_mut().ok_or_else(|| MediaError::Process("encoder already closed".into()))?;
         if let Err(e) = stdin.write_all(&f.data) {
@@ -380,15 +371,7 @@ pub struct FilterProcess {
 }
 
 impl FilterProcess {
-    pub fn spawn(
-        tools: &FfmpegTools,
-        in_w: usize,
-        in_h: usize,
-        fps: Rational,
-        filters: &[String],
-        out_w: usize,
-        out_h: usize,
-    ) -> Result<Self, MediaError> {
+    pub fn spawn(tools: &FfmpegTools, in_w: usize, in_h: usize, fps: Rational, filters: &[String], out_w: usize, out_h: usize) -> Result<Self, MediaError> {
         let mut c = tools.ffmpeg_cmd();
         c.args(["-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb48le", "-s", &format!("{in_w}x{in_h}")]);
         c.args(["-framerate", &fps.to_ffmpeg(), "-i", "pipe:0"]);

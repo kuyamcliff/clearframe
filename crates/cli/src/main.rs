@@ -116,8 +116,12 @@ enum ModelsCmd {
         #[arg(long = "file")]
         files: Vec<String>,
     },
-    Remove { id: String },
-    Verify { id: String },
+    Remove {
+        id: String,
+    },
+    Verify {
+        id: String,
+    },
     /// Re-scan the models folder (detects files removed outside ClearFrame).
     Refresh,
     /// Import a custom ESRGAN-family checkpoint.
@@ -133,9 +137,15 @@ enum ModelsCmd {
 #[derive(Subcommand)]
 enum JobsCmd {
     List,
-    Resume { id: String },
-    Cancel { id: String },
-    Remove { id: String },
+    Resume {
+        id: String,
+    },
+    Cancel {
+        id: String,
+    },
+    Remove {
+        id: String,
+    },
     /// Run the queue until it is empty.
     Process,
     ClearFinished,
@@ -174,9 +184,18 @@ enum StorageCmd {
 #[derive(Subcommand)]
 enum CatalogCmd {
     Keygen,
-    Sign { file: PathBuf, #[arg(long)] key_file: PathBuf },
-    Verify { file: PathBuf, signature: PathBuf },
-    Validate { file: PathBuf },
+    Sign {
+        file: PathBuf,
+        #[arg(long)]
+        key_file: PathBuf,
+    },
+    Verify {
+        file: PathBuf,
+        signature: PathBuf,
+    },
+    Validate {
+        file: PathBuf,
+    },
 }
 
 fn gb(b: u64) -> String {
@@ -250,7 +269,10 @@ fn main() {
         std::process::exit(code);
     }
     if args.get(1).map(String::as_str) == Some("--still") {
-        let code = clearframe_app::worker::run_still(std::path::Path::new(args.get(2).map(String::as_str).unwrap_or("")), std::path::Path::new(args.get(3).map(String::as_str).unwrap_or("")));
+        let code = clearframe_app::worker::run_still(
+            std::path::Path::new(args.get(2).map(String::as_str).unwrap_or("")),
+            std::path::Path::new(args.get(3).map(String::as_str).unwrap_or("")),
+        );
         std::process::exit(code);
     }
     let cli = Cli::parse();
@@ -275,10 +297,27 @@ fn run(cli: Cli) -> Result<bool> {
             } else {
                 let v = i.info.video()?;
                 println!("{}  {}  {:.2}s  {}", i.info.path, i.info.container, i.info.duration, gb(i.info.size_bytes));
-                println!("video: {} {}x{} ({}x{} displayed) {} fps{} {} {}-bit", v.codec, v.width, v.height, v.display_width, v.display_height, v.frame_rate, if v.variable_frame_rate { " (variable)" } else { "" }, v.pix_fmt, v.bit_depth);
+                println!(
+                    "video: {} {}x{} ({}x{} displayed) {} fps{} {} {}-bit",
+                    v.codec,
+                    v.width,
+                    v.height,
+                    v.display_width,
+                    v.display_height,
+                    v.frame_rate,
+                    if v.variable_frame_rate { " (variable)" } else { "" },
+                    v.pix_fmt,
+                    v.bit_depth
+                );
                 println!("color: {:?}", v.color);
                 if let Some(a) = &i.interlace {
-                    println!("interlace: {} (TFF {} / BFF {} / progressive {})", if a.likely_interlaced() { "likely interlaced" } else { "progressive" }, a.tff, a.bff, a.progressive);
+                    println!(
+                        "interlace: {} (TFF {} / BFF {} / progressive {})",
+                        if a.likely_interlaced() { "likely interlaced" } else { "progressive" },
+                        a.tff,
+                        a.bff,
+                        a.progressive
+                    );
                 }
                 for a in &i.info.audio {
                     println!("audio #{}: {} {} ch {} Hz {}", a.index, a.codec, a.channels, a.sample_rate, a.language.clone().unwrap_or_default());
@@ -310,6 +349,7 @@ fn run(cli: Cli) -> Result<bool> {
         Cmd::Models { cmd } => {
             let app = open_app(&cli, false)?;
             match cmd {
+                ModelsCmd::List | ModelsCmd::Refresh if cli.json => println!("{}", serde_json::to_string_pretty(&app.model_cards())?),
                 ModelsCmd::List | ModelsCmd::Refresh => {
                     for c in app.model_cards() {
                         let id = c.status.manifest.as_ref().map(|m| m.id.clone()).or(c.status.installed.as_ref().map(|i| i.id.clone())).unwrap_or_default();
@@ -423,6 +463,7 @@ fn run(cli: Cli) -> Result<bool> {
         Cmd::Presets { cmd } => {
             let app = open_app(&cli, true)?;
             match cmd {
+                PresetsCmd::List if cli.json => println!("{}", serde_json::to_string_pretty(&app.presets())?),
                 PresetsCmd::List => {
                     for p in app.presets() {
                         println!("{:<28} {:<14} {}{}", p.id, p.category, p.name, if p.builtin { " (built-in)" } else { "" });
@@ -447,8 +488,20 @@ fn run(cli: Cli) -> Result<bool> {
                         println!("{}", serde_json::to_string_pretty(&o)?);
                     } else {
                         println!("data:   {}", o.paths.data_dir.display());
-                        println!("models: {} ({}, {} free){}", o.paths.models_dir.display(), gb(o.models.total_bytes), o.models.free_bytes.map(gb).unwrap_or_default(), if o.paths.models_is_default { "" } else { " [custom]" });
-                        println!("cache:  {} ({}, {} free){}", o.paths.cache_dir.display(), gb(o.cache.total_bytes), o.cache.free_bytes.map(gb).unwrap_or_default(), if o.paths.cache_is_default { "" } else { " [custom]" });
+                        println!(
+                            "models: {} ({}, {} free){}",
+                            o.paths.models_dir.display(),
+                            gb(o.models.total_bytes),
+                            o.models.free_bytes.map(gb).unwrap_or_default(),
+                            if o.paths.models_is_default { "" } else { " [custom]" }
+                        );
+                        println!(
+                            "cache:  {} ({}, {} free){}",
+                            o.paths.cache_dir.display(),
+                            gb(o.cache.total_bytes),
+                            o.cache.free_bytes.map(gb).unwrap_or_default(),
+                            if o.paths.cache_is_default { "" } else { " [custom]" }
+                        );
                         for a in &o.cache.areas {
                             println!("  {:<44} {:>10} ({} protected)", a.label, gb(a.bytes), gb(a.protected_bytes));
                         }

@@ -13,13 +13,7 @@ use crate::image::RgbImage;
 use crate::model::FaceModels;
 
 /// The 512x512 five-point template used by GFPGAN.
-pub const FACE_TEMPLATE: [[f32; 2]; 5] = [
-    [192.98138, 239.94708],
-    [318.90277, 240.1936],
-    [256.63416, 314.01935],
-    [201.26117, 371.41043],
-    [313.08905, 371.15118],
-];
+pub const FACE_TEMPLATE: [[f32; 2]; 5] = [[192.98138, 239.94708], [318.90277, 240.1936], [256.63416, 314.01935], [201.26117, 371.41043], [313.08905, 371.15118]];
 
 /// Grey border fill used by facexlib (BGR 135,133,132).
 const BORDER_RGB: [f32; 3] = [132.0 / 255.0, 133.0 / 255.0, 135.0 / 255.0];
@@ -330,10 +324,7 @@ impl FaceRestorer {
         let scale = if long > p.detection_max_side { p.detection_max_side as f32 / long as f32 } else { 1.0 };
         let small;
         let src = if scale < 1.0 {
-            small = img.resize_bilinear(
-                ((img.width as f32 * scale).round() as usize).max(1),
-                ((img.height as f32 * scale).round() as usize).max(1),
-            );
+            small = img.resize_bilinear(((img.width as f32 * scale).round() as usize).max(1), ((img.height as f32 * scale).round() as usize).max(1));
             &small
         } else {
             img
@@ -372,12 +363,7 @@ impl FaceRestorer {
         }
         let alpha = alpha.min(0.95);
         for d in dets.iter_mut() {
-            let best = self
-                .prev
-                .iter()
-                .map(|p| (iou(&p.bbox, &d.bbox), p))
-                .filter(|(i, _)| *i > 0.3)
-                .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+            let best = self.prev.iter().map(|p| (iou(&p.bbox, &d.bbox), p)).filter(|(i, _)| *i > 0.3).max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
             if let Some((_, p)) = best {
                 for k in 0..5 {
                     for j in 0..2 {
@@ -429,10 +415,13 @@ mod tests {
         let s = 1.7f32;
         let m = Affine([s * angle.cos(), -s * angle.sin(), 12.0, s * angle.sin(), s * angle.cos(), -5.0]);
         let src: Vec<[f32; 2]> = FACE_TEMPLATE.to_vec();
-        let dst: Vec<[f32; 2]> = src.iter().map(|p| {
-            let (x, y) = m.apply(p[0], p[1]);
-            [x, y]
-        }).collect();
+        let dst: Vec<[f32; 2]> = src
+            .iter()
+            .map(|p| {
+                let (x, y) = m.apply(p[0], p[1]);
+                [x, y]
+            })
+            .collect();
         let est = estimate_similarity(&src, &dst);
         for (a, b) in est.0.iter().zip(m.0.iter()) {
             assert!((a - b).abs() < 1e-3, "{est:?} vs {m:?}");

@@ -55,12 +55,7 @@ pub fn probe() -> Vec<BackendStatus> {
         .map(|kind| {
             let compiled = compiled(kind);
             if !compiled {
-                return BackendStatus {
-                    kind,
-                    compiled,
-                    available: false,
-                    detail: "not included in this build".into(),
-                };
+                return BackendStatus { kind, compiled, available: false, detail: "not included in this build".into() };
             }
             match create(kind, 0) {
                 Ok(_) => BackendStatus { kind, compiled, available: true, detail: "device created".into() },

@@ -96,7 +96,10 @@ impl App {
         }
         thumbs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
         let v = info.video()?;
-        let browser_playable = matches!(v.codec.as_str(), "h264" | "vp8" | "vp9" | "av1") && v.bit_depth <= 8 && (info.container.contains("mp4") || info.container.contains("webm") || info.container.contains("mov")) && !v.color.is_hdr();
+        let browser_playable = matches!(v.codec.as_str(), "h264" | "vp8" | "vp9" | "av1")
+            && v.bit_depth <= 8
+            && (info.container.contains("mp4") || info.container.contains("webm") || info.container.contains("mov"))
+            && !v.color.is_hdr();
         let interlace = if detect_interlace { clearframe_media::probe::detect_interlace(&tools, path, 300).ok() } else { None };
         let _ = self.db.add_recent(&path.to_string_lossy(), "video", &path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), None);
         Ok(SourceInfo { info, fingerprint: fp, thumbnails: thumbs, browser_playable, interlace })
@@ -132,11 +135,26 @@ impl App {
 
     fn still_key(&self, req: &StillRequest, fp: &str) -> String {
         let shas: Vec<String> = req.models.values().flat_map(|m| m.sha256.values().cloned()).collect();
-        key_of(&[fp, &serde_json::to_string(&req.pipeline).unwrap_or_default(), &format!("{:.4}", req.time), &format!("{:?}", req.crop), &shas.join(","), &serde_json::to_string(&req.engine).unwrap_or_default()])
+        key_of(&[
+            fp,
+            &serde_json::to_string(&req.pipeline).unwrap_or_default(),
+            &format!("{:.4}", req.time),
+            &format!("{:?}", req.crop),
+            &shas.join(","),
+            &serde_json::to_string(&req.engine).unwrap_or_default(),
+        ])
     }
 
     /// Render a still preview with the real models in a worker process (cached).
-    pub fn preview_still(&self, source: &Path, time: f64, pipeline: Pipeline, output: OutputSettings, engine: EngineSettings, crop: Option<(u32, u32, u32, u32)>) -> Result<StillPreview> {
+    pub fn preview_still(
+        &self,
+        source: &Path,
+        time: f64,
+        pipeline: Pipeline,
+        output: OutputSettings,
+        engine: EngineSettings,
+        crop: Option<(u32, u32, u32, u32)>,
+    ) -> Result<StillPreview> {
         if self.storage_busy.load(std::sync::atomic::Ordering::SeqCst) {
             bail!("Previews are unavailable while storage is being moved.");
         }
@@ -211,7 +229,14 @@ impl App {
         let s = self.settings();
         let models = self.resolve_models(&job.pipeline)?;
         let shas: Vec<String> = models.values().flat_map(|m| m.sha256.values().cloned()).collect();
-        let key = key_of(&[&fp, &serde_json::to_string(&job.pipeline).unwrap_or_default(), &format!("{start:.3}"), &format!("{duration:.3}"), &shas.join(","), &serde_json::to_string(&job.engine).unwrap_or_default()]);
+        let key = key_of(&[
+            &fp,
+            &serde_json::to_string(&job.pipeline).unwrap_or_default(),
+            &format!("{start:.3}"),
+            &format!("{duration:.3}"),
+            &shas.join(","),
+            &serde_json::to_string(&job.engine).unwrap_or_default(),
+        ]);
         let out = self.paths().cache(CacheArea::Previews).join(format!("clip-{key}.mp4"));
         let original_proxy = self.source_proxy(&job.source, start, duration, s.preview_max_height)?;
         if out.is_file() {
@@ -222,13 +247,23 @@ impl App {
             if j.kind == JobKind::Preview && !j.state.is_terminal() && j.name != key {
                 let _ = self.cancel_job(&j.id);
             }
-            if j.kind == JobKind::Preview && j.name == key && matches!(j.state, JobState::Queued | JobState::Preparing | JobState::Processing | JobState::Encoding | JobState::Validating) {
+            if j.kind == JobKind::Preview
+                && j.name == key
+                && matches!(j.state, JobState::Queued | JobState::Preparing | JobState::Processing | JobState::Encoding | JobState::Validating)
+            {
                 return Ok(ClipPreview { key, path: None, job_id: Some(j.id), original_proxy });
             }
         }
         let mut p = job;
         p.range = Some(TimeRange { start, end: start + duration });
-        p.output = OutputSettings { container: Container::Mp4, video: VideoEncodeSettings::preview(), audio: AudioMode::Encode { codec: "aac".into(), bitrate_kbps: 160 }, subtitles: false, metadata: false, chapters: false };
+        p.output = OutputSettings {
+            container: Container::Mp4,
+            video: VideoEncodeSettings::preview(),
+            audio: AudioMode::Encode { codec: "aac".into(), bitrate_kbps: 160 },
+            subtitles: false,
+            metadata: false,
+            chapters: false,
+        };
         p.preset_name = Some(key.clone());
         let rec = self.enqueue_with(p, &BTreeSet::new(), JobKind::Preview, Some(out))?;
         Ok(ClipPreview { key, path: None, job_id: Some(rec.id), original_proxy })

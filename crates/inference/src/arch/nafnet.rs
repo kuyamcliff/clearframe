@@ -85,15 +85,7 @@ impl NafNet {
             ups.push(Conv2d::load(w, &format!("ups.{i}.0"), 1, 0)?);
             decoders.push(blocks(format!("decoders.{i}"))?);
         }
-        Ok(Self {
-            intro: Conv2d::load(w, "intro", 1, 1)?,
-            ending: Conv2d::load(w, "ending", 1, 1)?,
-            encoders,
-            downs,
-            middle: blocks("middle_blks".into())?,
-            ups,
-            decoders,
-        })
+        Ok(Self { intro: Conv2d::load(w, "intro", 1, 1)?, ending: Conv2d::load(w, "ending", 1, 1)?, encoders, downs, middle: blocks("middle_blks".into())?, ups, decoders })
     }
 
     pub fn forward(&self, inp: &Tensor) -> Result<Tensor> {

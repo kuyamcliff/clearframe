@@ -297,8 +297,7 @@ impl Db {
     }
 
     pub fn job(&self, id: &str) -> Result<JobRecord> {
-        self.with(|c| c.query_row("SELECT * FROM jobs WHERE id=?1", [id], Self::job_from_row).optional())?
-            .ok_or_else(|| DbError::NotFound(format!("job {id}")))
+        self.with(|c| c.query_row("SELECT * FROM jobs WHERE id=?1", [id], Self::job_from_row).optional())?.ok_or_else(|| DbError::NotFound(format!("job {id}")))
     }
 
     pub fn jobs(&self, include_previews: bool) -> Result<Vec<JobRecord>> {
@@ -368,10 +367,7 @@ impl Db {
         self.with(|c| {
             c.execute("INSERT INTO job_events(job_id,at,level,message) VALUES(?1,?2,?3,?4)", params![id, now(), level, msg])?;
             // Bound per-job logs.
-            c.execute(
-                "DELETE FROM job_events WHERE job_id=?1 AND id NOT IN (SELECT id FROM job_events WHERE job_id=?1 ORDER BY id DESC LIMIT 500)",
-                [id],
-            )
+            c.execute("DELETE FROM job_events WHERE job_id=?1 AND id NOT IN (SELECT id FROM job_events WHERE job_id=?1 ORDER BY id DESC LIMIT 500)", [id])
         })?;
         Ok(())
     }
@@ -438,7 +434,8 @@ impl Db {
 
     pub fn presets(&self) -> Result<Vec<StoredPreset>> {
         self.with(|c| {
-            let mut st = c.prepare("SELECT id,name,category,favorite,builtin,data_json,created_at,updated_at FROM presets ORDER BY builtin DESC, favorite DESC, name COLLATE NOCASE")?;
+            let mut st =
+                c.prepare("SELECT id,name,category,favorite,builtin,data_json,created_at,updated_at FROM presets ORDER BY builtin DESC, favorite DESC, name COLLATE NOCASE")?;
             let rows = st.query_map([], |r| {
                 Ok(StoredPreset {
                     id: r.get(0)?,
@@ -633,7 +630,8 @@ mod tests {
         assert_eq!(db.recent(10).unwrap().len(), 2);
         db.remove_recent("/a.mp4").unwrap();
         assert_eq!(db.recent(10).unwrap().len(), 1);
-        let p = StoredPreset { id: "p".into(), name: "P".into(), category: "".into(), favorite: false, builtin: true, data_json: "{}".into(), created_at: now(), updated_at: now() };
+        let p =
+            StoredPreset { id: "p".into(), name: "P".into(), category: "".into(), favorite: false, builtin: true, data_json: "{}".into(), created_at: now(), updated_at: now() };
         db.upsert_preset(&p).unwrap();
         db.delete_preset("p").unwrap();
         assert_eq!(db.presets().unwrap().len(), 1, "built-in presets cannot be deleted");

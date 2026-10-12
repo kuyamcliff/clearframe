@@ -135,30 +135,28 @@ impl App {
         }
         let app = self.clone();
         let id = id.to_string();
-        std::thread::Builder::new()
-            .name(format!("install-{id}"))
-            .spawn(move || {
-                let events = app.events.clone();
-                let r = app.models.install(&id, &local_files, &ctl, &clearframe_pipeline::smoke::smoke_test, &mut |p| events(AppEvent::ModelProgress { progress: p }));
-                app.installs.0.lock().remove(&id);
-                match r {
-                    Ok(_) => log::info!("installed model {id}"),
-                    Err(InstallError::Paused) => log::info!("install of {id} paused"),
-                    Err(InstallError::Cancelled) => {
-                        app.models.discard_partial(&id);
-                        log::info!("install of {id} cancelled")
-                    }
-                    Err(e) => {
-                        log::warn!("install of {id} failed: {e}");
-                        // Discard unsafe partial files for anything but network failures (which resume).
-                        if !matches!(e, InstallError::Download(_)) {
-                            app.models.discard_partial(&id);
-                        }
-                        app.emit(AppEvent::ModelError { id: id.clone(), message: e.to_string() });
-                    }
+        std::thread::Builder::new().name(format!("install-{id}")).spawn(move || {
+            let events = app.events.clone();
+            let r = app.models.install(&id, &local_files, &ctl, &clearframe_pipeline::smoke::smoke_test, &mut |p| events(AppEvent::ModelProgress { progress: p }));
+            app.installs.0.lock().remove(&id);
+            match r {
+                Ok(_) => log::info!("installed model {id}"),
+                Err(InstallError::Paused) => log::info!("install of {id} paused"),
+                Err(InstallError::Cancelled) => {
+                    app.models.discard_partial(&id);
+                    log::info!("install of {id} cancelled")
                 }
-                app.emit(AppEvent::ModelChanged { id });
-            })?;
+                Err(e) => {
+                    log::warn!("install of {id} failed: {e}");
+                    // Discard unsafe partial files for anything but network failures (which resume).
+                    if !matches!(e, InstallError::Download(_)) {
+                        app.models.discard_partial(&id);
+                    }
+                    app.emit(AppEvent::ModelError { id: id.clone(), message: e.to_string() });
+                }
+            }
+            app.emit(AppEvent::ModelChanged { id });
+        })?;
         Ok(())
     }
 
@@ -220,11 +218,9 @@ impl App {
     /// Repair: re-verify and reinstall when broken.
     pub fn repair_model(self: &Arc<Self>, id: &str) -> Result<bool> {
         let ok = self.models.installed(id).map(|_| self.models.verify(id).map(|r| r.ok).unwrap_or(false)).unwrap_or(false);
-        if ok {
-            return Ok(true);
-        }
-        self.install_model(id, BTreeMap::new())?;
-        Ok(false)
+        // Never download from here: the caller asks the user before reinstalling.
+        self.emit(AppEvent::ModelChanged { id: id.to_string() });
+        Ok(ok)
     }
 
     pub fn import_custom_model(&self, name: &str, license: &str, file: PathBuf, scale_hint: Option<u32>) -> Result<String> {
@@ -243,7 +239,12 @@ impl App {
     }
 
     pub fn model_state(&self, id: &str) -> ModelState {
-        self.models.status().into_iter().find(|s| s.manifest.as_ref().map(|m| m.id.as_str()) == Some(id) || s.installed.as_ref().map(|i| i.id.as_str()) == Some(id)).map(|s| s.state).unwrap_or(ModelState::NotInstalled)
+        self.models
+            .status()
+            .into_iter()
+            .find(|s| s.manifest.as_ref().map(|m| m.id.as_str()) == Some(id) || s.installed.as_ref().map(|i| i.id.as_str()) == Some(id))
+            .map(|s| s.state)
+            .unwrap_or(ModelState::NotInstalled)
     }
 }
 

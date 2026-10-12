@@ -176,11 +176,7 @@ impl ImageModel {
         };
         let y = y.clamp(0f32, 1f32)?;
         let s = self.scale();
-        let y = if padded.width != img.width || padded.height != img.height {
-            y.narrow(2, 0, img.height * s)?.narrow(3, 0, img.width * s)?
-        } else {
-            y
-        };
+        let y = if padded.width != img.width || padded.height != img.height { y.narrow(2, 0, img.height * s)?.narrow(3, 0, img.width * s)? } else { y };
         RgbImage::from_tensor(&y)
     }
 

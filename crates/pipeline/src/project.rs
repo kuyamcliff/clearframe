@@ -199,19 +199,12 @@ impl Project {
         project.validate()?;
         let src = Path::new(&project.source.path);
         let source_found = src.is_file();
-        let source_changed = source_found
-            && !project.source.fingerprint.is_empty()
-            && clearframe_core::fsutil::quick_fingerprint(src).map(|f| f != project.source.fingerprint).unwrap_or(false);
+        let source_changed =
+            source_found && !project.source.fingerprint.is_empty() && clearframe_core::fsutil::quick_fingerprint(src).map(|f| f != project.source.fingerprint).unwrap_or(false);
         let suggested_source = if source_found {
             None
         } else {
-            project
-                .source
-                .relative_path
-                .as_ref()
-                .and_then(|r| path.parent().map(|d| d.join(r)))
-                .filter(|p| p.is_file())
-                .map(|p| p.to_string_lossy().into_owned())
+            project.source.relative_path.as_ref().and_then(|r| path.parent().map(|d| d.join(r))).filter(|p| p.is_file()).map(|p| p.to_string_lossy().into_owned())
         };
         let missing_models = project.pipeline.required_models().into_iter().filter(|m| !installed_models(m)).collect();
         Ok(OpenReport { project, source_found, source_changed, suggested_source, missing_models, migrated_from, backup_path })

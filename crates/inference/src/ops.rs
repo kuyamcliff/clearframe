@@ -25,14 +25,7 @@ impl Conv2d {
         Self::load_full(w, prefix, stride, padding, 1, 1)
     }
 
-    pub fn load_full(
-        w: &Weights,
-        prefix: &str,
-        stride: usize,
-        padding: usize,
-        dilation: usize,
-        groups: usize,
-    ) -> Result<Self> {
+    pub fn load_full(w: &Weights, prefix: &str, stride: usize, padding: usize, dilation: usize, groups: usize) -> Result<Self> {
         let weight = w.get(&format!("{prefix}.weight"))?;
         let bias = w.opt(&format!("{prefix}.bias"));
         Ok(Self { weight, bias, stride, padding, dilation, groups })
@@ -94,12 +87,7 @@ pub struct ConvTranspose2d {
 
 impl ConvTranspose2d {
     pub fn load(w: &Weights, prefix: &str, stride: usize, padding: usize) -> Result<Self> {
-        Ok(Self {
-            weight: w.get(&format!("{prefix}.weight"))?,
-            bias: w.opt(&format!("{prefix}.bias")),
-            stride,
-            padding,
-        })
+        Ok(Self { weight: w.get(&format!("{prefix}.weight"))?, bias: w.opt(&format!("{prefix}.bias")), stride, padding })
     }
 
     pub fn forward(&self, x: &Tensor) -> Result<Tensor> {
@@ -253,9 +241,7 @@ pub fn warp(img: &Tensor, flow: &Tensor) -> Result<Tensor> {
     let x1 = (&x0 + 1.0)?.clamp(0f32, (w - 1) as f32)?;
     let y1 = (&y0 + 1.0)?.clamp(0f32, (h - 1) as f32)?;
     let wf = w as f64;
-    let idx = |yy: &Tensor, xx: &Tensor| -> Result<Tensor> {
-        ((yy * wf)? + xx)?.flatten_all()?.to_dtype(DType::U32)
-    };
+    let idx = |yy: &Tensor, xx: &Tensor| -> Result<Tensor> { ((yy * wf)? + xx)?.flatten_all()?.to_dtype(DType::U32) };
     let flat = img.reshape((c, h * w))?;
     let g = |i: Tensor| -> Result<Tensor> { flat.index_select(&i, 1)?.to_dtype(DType::F32) };
     let v00 = g(idx(&y0, &x0)?)?;

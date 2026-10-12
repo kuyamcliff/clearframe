@@ -48,11 +48,7 @@ impl RrdbNet {
         let n = w.count_indexed("body.");
         let mut body = Vec::with_capacity(n);
         for i in 0..n {
-            body.push([
-                Rdb::load(w, &format!("body.{i}.rdb1"))?,
-                Rdb::load(w, &format!("body.{i}.rdb2"))?,
-                Rdb::load(w, &format!("body.{i}.rdb3"))?,
-            ]);
+            body.push([Rdb::load(w, &format!("body.{i}.rdb1"))?, Rdb::load(w, &format!("body.{i}.rdb2"))?, Rdb::load(w, &format!("body.{i}.rdb3"))?]);
         }
         Ok(Self {
             conv_first,

@@ -269,11 +269,7 @@ pub fn codec_profile(encoder: &str) -> Option<&'static CodecProfile> {
 
 /// Codecs present in this FFmpeg build. Hardware encoders are only listed when a test encode succeeds.
 pub fn available_codecs(tools: &FfmpegTools, test_hardware: bool) -> Vec<&'static CodecProfile> {
-    CODECS
-        .iter()
-        .filter(|c| tools.has_video_encoder(c.encoder))
-        .filter(|c| !c.hardware || (test_hardware && tools.test_encoder(c.encoder)))
-        .collect()
+    CODECS.iter().filter(|c| tools.has_video_encoder(c.encoder)).filter(|c| !c.hardware || (test_hardware && tools.test_encoder(c.encoder))).collect()
 }
 
 pub fn pix_fmt_bit_depth(p: &str) -> u32 {
@@ -428,7 +424,8 @@ mod tests {
         c.primaries = Some("bt2020".into());
         c.matrix = crate::color::YuvMatrix::Bt2020;
         c.content_light = Some("1000,400".into());
-        let s = VideoEncodeSettings { encoder: "libx265".into(), rate: RateControl::Quality { value: 20.0 }, preset: None, pix_fmt: "yuv420p10le".into(), profile: None, gop: None };
+        let s =
+            VideoEncodeSettings { encoder: "libx265".into(), rate: RateControl::Quality { value: 20.0 }, preset: None, pix_fmt: "yuv420p10le".into(), profile: None, gop: None };
         let a = s.args(&c);
         let p = a.iter().position(|x| x == "-x265-params").unwrap();
         assert!(a[p + 1].contains("hdr10=1"));

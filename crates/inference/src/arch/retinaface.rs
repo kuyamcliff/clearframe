@@ -149,11 +149,7 @@ impl RetinaFace {
                 for bi in 0..*n {
                     let p = format!("body.layer{}.{bi}", li + 1);
                     let s = if bi == 0 { *stride } else { 1 };
-                    let down = if bi == 0 {
-                        Some(Cbr::load(w, &format!("{p}.downsample.0"), &format!("{p}.downsample.1"), s, 0, 1, None)?)
-                    } else {
-                        None
-                    };
+                    let down = if bi == 0 { Some(Cbr::load(w, &format!("{p}.downsample.0"), &format!("{p}.downsample.1"), s, 0, 1, None)?) } else { None };
                     blocks.push(Bottleneck {
                         c1: Cbr::load(w, &format!("{p}.conv1"), &format!("{p}.bn1"), 1, 0, 1, Some(0.0))?,
                         c2: Cbr::load(w, &format!("{p}.conv2"), &format!("{p}.bn2"), s, 1, 1, Some(0.0))?,
@@ -167,10 +163,7 @@ impl RetinaFace {
         } else if w.contains("body.stage1.0.0.weight") {
             // MobileNetV1 0.25
             let conv_dw = |p: &str, inp: usize, stride: usize| -> Result<Vec<Cbr>> {
-                Ok(vec![
-                    Cbr::load(w, &format!("{p}.0"), &format!("{p}.1"), stride, 1, inp, Some(0.1))?,
-                    Cbr::load(w, &format!("{p}.3"), &format!("{p}.4"), 1, 0, 1, Some(0.1))?,
-                ])
+                Ok(vec![Cbr::load(w, &format!("{p}.0"), &format!("{p}.1"), stride, 1, inp, Some(0.1))?, Cbr::load(w, &format!("{p}.3"), &format!("{p}.4"), 1, 0, 1, Some(0.1))?])
             };
             let mut s1 = vec![Cbr::seq(w, "body.stage1.0", 2, 1, 1, Some(0.1))?];
             for (i, (inp, s)) in [(8, 1), (16, 2), (32, 1), (32, 2), (64, 1)].iter().enumerate() {
@@ -191,11 +184,7 @@ impl RetinaFace {
         let head = |name: &str, i: usize| Conv2d::load(w, &format!("{name}.{i}.conv1x1"), 1, 0);
         Ok(Self {
             backbone,
-            fpn_out: [
-                Cbr::seq(w, "fpn.output1", 1, 0, 1, Some(leaky))?,
-                Cbr::seq(w, "fpn.output2", 1, 0, 1, Some(leaky))?,
-                Cbr::seq(w, "fpn.output3", 1, 0, 1, Some(leaky))?,
-            ],
+            fpn_out: [Cbr::seq(w, "fpn.output1", 1, 0, 1, Some(leaky))?, Cbr::seq(w, "fpn.output2", 1, 0, 1, Some(leaky))?, Cbr::seq(w, "fpn.output3", 1, 0, 1, Some(leaky))?],
             merge1: Cbr::seq(w, "fpn.merge1", 1, 1, 1, Some(leaky))?,
             merge2: Cbr::seq(w, "fpn.merge2", 1, 1, 1, Some(leaky))?,
             ssh: [Ssh::load(w, "ssh1", leaky)?, Ssh::load(w, "ssh2", leaky)?, Ssh::load(w, "ssh3", leaky)?],
@@ -285,12 +274,7 @@ pub fn prior_boxes(h: usize, w: usize) -> Vec<[f32; 4]> {
         for i in 0..fh {
             for j in 0..fw {
                 for ms in min_sizes[k] {
-                    out.push([
-                        (j as f32 + 0.5) * *step as f32 / w as f32,
-                        (i as f32 + 0.5) * *step as f32 / h as f32,
-                        ms / w as f32,
-                        ms / h as f32,
-                    ]);
+                    out.push([(j as f32 + 0.5) * *step as f32 / w as f32, (i as f32 + 0.5) * *step as f32 / h as f32, ms / w as f32, ms / h as f32]);
                 }
             }
         }

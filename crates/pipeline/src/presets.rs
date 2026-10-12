@@ -112,7 +112,13 @@ impl Preset {
         let mut p = self.clone();
         p.builtin = false;
         p.favorite = false;
-        let f = PresetFile { format: PRESET_FORMAT.into(), schema_version: SCHEMA_VERSION, app_version: env!("CARGO_PKG_VERSION").into(), exported_at: chrono::Utc::now().to_rfc3339(), preset: p };
+        let f = PresetFile {
+            format: PRESET_FORMAT.into(),
+            schema_version: SCHEMA_VERSION,
+            app_version: env!("CARGO_PKG_VERSION").into(),
+            exported_at: chrono::Utc::now().to_rfc3339(),
+            preset: p,
+        };
         serde_json::to_string_pretty(&f).unwrap_or_default()
     }
 
@@ -165,7 +171,14 @@ fn stage(id: &str, op: Operation) -> Stage {
 fn x265_10bit(crf: f32) -> OutputSettings {
     OutputSettings {
         container: Container::Mp4,
-        video: VideoEncodeSettings { encoder: "libx265".into(), rate: RateControl::Quality { value: crf }, preset: Some("medium".into()), pix_fmt: "yuv420p10le".into(), profile: None, gop: None },
+        video: VideoEncodeSettings {
+            encoder: "libx265".into(),
+            rate: RateControl::Quality { value: crf },
+            preset: Some("medium".into()),
+            pix_fmt: "yuv420p10le".into(),
+            profile: None,
+            gop: None,
+        },
         ..Default::default()
     }
 }
@@ -208,7 +221,15 @@ pub fn builtin_presets() -> Vec<Preset> {
             "Enhance",
             "Real-ESRGAN General v3 with light denoise, to 1080p.",
             &["live action", "1080p"],
-            vec![stage("enhance", Operation::Enhance(EnhanceSettings { model_id: "xinntao.realesr-general-v3".into(), denoise: Some(0.5), target: SizeTarget::Height { height: 1080 }, ..Default::default() }))],
+            vec![stage(
+                "enhance",
+                Operation::Enhance(EnhanceSettings {
+                    model_id: "xinntao.realesr-general-v3".into(),
+                    denoise: Some(0.5),
+                    target: SizeTarget::Height { height: 1080 },
+                    ..Default::default()
+                }),
+            )],
             None,
         ),
         p(
@@ -220,7 +241,16 @@ pub fn builtin_presets() -> Vec<Preset> {
             vec![
                 stage("deinterlace", Operation::Deinterlace(DeinterlaceSettings::default())),
                 stage("denoise", Operation::Denoise(DenoiseSettings { strength: 12.0, ..Default::default() })),
-                stage("enhance", Operation::Enhance(EnhanceSettings { model_id: "xinntao.realesr-general-v3".into(), denoise: Some(0.3), target: SizeTarget::Height { height: 1080 }, strength: 0.8, ..Default::default() })),
+                stage(
+                    "enhance",
+                    Operation::Enhance(EnhanceSettings {
+                        model_id: "xinntao.realesr-general-v3".into(),
+                        denoise: Some(0.3),
+                        target: SizeTarget::Height { height: 1080 },
+                        strength: 0.8,
+                        ..Default::default()
+                    }),
+                ),
             ],
             None,
         ),
@@ -241,7 +271,12 @@ pub fn builtin_presets() -> Vec<Preset> {
             &["slow motion"],
             vec![stage(
                 "interpolate",
-                Operation::Interpolate(InterpolateSettings { target: FpsTarget::Multiply { factor: 4 }, slow_motion: 4.0, slow_motion_audio: SlowMotionAudio::StretchPreservePitch, ..Default::default() }),
+                Operation::Interpolate(InterpolateSettings {
+                    target: FpsTarget::Multiply { factor: 4 },
+                    slow_motion: 4.0,
+                    slow_motion_audio: SlowMotionAudio::StretchPreservePitch,
+                    ..Default::default()
+                }),
             )],
             None,
         ),

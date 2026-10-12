@@ -67,12 +67,25 @@ pub struct Progress {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
-    State { state: JobState, detail: String },
-    Plan { plan: Box<ExecutionPlan> },
+    State {
+        state: JobState,
+        detail: String,
+    },
+    Plan {
+        plan: Box<ExecutionPlan>,
+    },
     Progress(Progress),
-    Log { level: String, message: String },
-    Warning { message: String },
-    Resumed { pass: usize, from_frame: u64 },
+    Log {
+        level: String,
+        message: String,
+    },
+    Warning {
+        message: String,
+    },
+    Resumed {
+        pass: usize,
+        from_frame: u64,
+    },
     /// Throttled resource sample of the worker and its FFmpeg children.
     Resources(ResourceSample),
 }
@@ -493,7 +506,11 @@ pub fn run_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, st
         let v = ctx.info.video.as_ref().map(|v| v.start_time).unwrap_or(0.0);
         let a = ctx.info.audio.iter().map(|a| a.start_time).fold(v, f64::min);
         let off = v - a;
-        if off.abs() > 0.0005 && off < 10.0 { off } else { 0.0 }
+        if off.abs() > 0.0005 && off < 10.0 {
+            off
+        } else {
+            0.0
+        }
     } else {
         0.0
     };
@@ -539,10 +556,7 @@ pub fn run_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, st
     ctx.timings.validate_s = t.elapsed().as_secs_f64();
     if !report.ok {
         let _ = std::fs::remove_file(&tmp);
-        return Err(JobError::Failed(anyhow!(
-            "Export validation failed; your source file was not changed. {}",
-            report.problems.join("; ")
-        )));
+        return Err(JobError::Failed(anyhow!("Export validation failed; your source file was not changed. {}", report.problems.join("; "))));
     }
 
     // Finalise without overwriting.
@@ -625,7 +639,8 @@ fn decode_spec_for(ctx: &Ctx, pass: &PassPlan, pass_dir: &Path, filters: Vec<Str
         }
         let list = pass_dir.join("input.ffconcat");
         let prev_fps = ctx.plan.passes[prev].output.fps.as_f64();
-        let durs: Vec<f64> = segs.iter().map(|p| count_video_packets(ctx.tools, p).map(|n| n as f64 / prev_fps).ok_or_else(|| anyhow!("could not read {}", p.display()))).collect::<Result<_>>()?;
+        let durs: Vec<f64> =
+            segs.iter().map(|p| count_video_packets(ctx.tools, p).map(|n| n as f64 / prev_fps).ok_or_else(|| anyhow!("could not read {}", p.display()))).collect::<Result<_>>()?;
         clearframe_media::mux::concat_list(&segs, Some(&durs), &list).map_err(|e| anyhow!("{e}"))?;
         let mut d = DecodeSpec::new(list, pass.input.width as usize, pass.input.height as usize);
         d.input_args = vec!["-f".into(), "concat".into(), "-safe".into(), "0".into()];
@@ -705,7 +720,9 @@ fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, device: &clear
     let list_file = pass_dir.join("segments.csv");
     // Merge lists left behind by a run that was killed before it could merge them.
     let mut parts: Vec<PathBuf> = std::fs::read_dir(&pass_dir)
-        .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("segments.part") && n.ends_with(".csv"))).collect())
+        .map(|rd| {
+            rd.flatten().map(|e| e.path()).filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("segments.part") && n.ends_with(".csv"))).collect()
+        })
         .unwrap_or_default();
     parts.sort_by_key(|p| p.file_name().and_then(|n| n.to_str()).and_then(|n| n.trim_start_matches("segments.part").trim_end_matches(".csv").parse::<u64>().ok()).unwrap_or(0));
     for part in parts {
@@ -847,20 +864,18 @@ fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, device: &clear
 
     // Reader thread.
     let (rtx, rrx) = bounded::<std::result::Result<RawFrame, String>>(3);
-    let reader_handle = std::thread::spawn(move || {
-        loop {
-            match reader.read() {
-                Ok(Some(f)) => {
-                    if rtx.send(Ok(f)).is_err() {
-                        reader.kill();
-                        return;
-                    }
-                }
-                Ok(None) => return,
-                Err(e) => {
-                    let _ = rtx.send(Err(e.to_string()));
+    let reader_handle = std::thread::spawn(move || loop {
+        match reader.read() {
+            Ok(Some(f)) => {
+                if rtx.send(Ok(f)).is_err() {
+                    reader.kill();
                     return;
                 }
+            }
+            Ok(None) => return,
+            Err(e) => {
+                let _ = rtx.send(Err(e.to_string()));
+                return;
             }
         }
     });

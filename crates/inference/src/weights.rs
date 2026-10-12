@@ -16,10 +16,7 @@ impl Weights {
     /// Load a `.safetensors` file produced by the model installer.
     pub fn from_safetensors(path: &Path, device: &Device) -> Result<Self> {
         let map = candle_core::safetensors::load(path, device)?;
-        let map = map
-            .into_iter()
-            .map(|(k, v)| Ok((k, if v.dtype() == DType::F32 { v } else { v.to_dtype(DType::F32)? })))
-            .collect::<Result<HashMap<_, _>>>()?;
+        let map = map.into_iter().map(|(k, v)| Ok((k, if v.dtype() == DType::F32 { v } else { v.to_dtype(DType::F32)? }))).collect::<Result<HashMap<_, _>>>()?;
         Ok(Self { map, device: device.clone() })
     }
 
@@ -41,10 +38,7 @@ impl Weights {
     }
 
     pub fn get(&self, name: &str) -> Result<Tensor> {
-        self.map
-            .get(name)
-            .cloned()
-            .ok_or_else(|| candle_core::Error::Msg(format!("model weights are missing tensor `{name}`")))
+        self.map.get(name).cloned().ok_or_else(|| candle_core::Error::Msg(format!("model weights are missing tensor `{name}`")))
     }
 
     pub fn opt(&self, name: &str) -> Option<Tensor> {

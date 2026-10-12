@@ -190,11 +190,7 @@ pub fn build_mux_args(spec: &MuxSpec, info: &MediaInfo, list_file: &Path) -> (Ve
 
     // Audio
     let slow = spec.slow_motion > 1.0001;
-    let mut audio: Vec<&crate::probe::AudioStream> = info
-        .audio
-        .iter()
-        .filter(|s| spec.audio_streams.as_ref().map_or(true, |keep| keep.contains(&s.index)))
-        .collect();
+    let mut audio: Vec<&crate::probe::AudioStream> = info.audio.iter().filter(|s| spec.audio_streams.as_ref().map_or(true, |keep| keep.contains(&s.index))).collect();
     if matches!(spec.audio, AudioMode::None) || (slow && spec.slow_motion_audio == SlowMotionAudio::Mute) {
         if slow && !audio.is_empty() && spec.audio != AudioMode::None {
             report.warnings.push("Audio was removed because slow-motion output is set to mute audio.".into());
@@ -301,11 +297,7 @@ pub fn mux(tools: &FfmpegTools, spec: &MuxSpec, info: &MediaInfo) -> Result<MuxR
         return Err(MediaError::Invalid("no encoded video to assemble".into()));
     }
     if !spec.container.video_ok(&spec.video_family) {
-        return Err(MediaError::Invalid(format!(
-            "{} video cannot be stored in {}",
-            spec.video_family,
-            spec.container.extension().to_uppercase()
-        )));
+        return Err(MediaError::Invalid(format!("{} video cannot be stored in {}", spec.video_family, spec.container.extension().to_uppercase())));
     }
     std::fs::create_dir_all(&spec.work_dir)?;
     let list = spec.work_dir.join("concat.ffconcat");

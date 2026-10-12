@@ -24,8 +24,25 @@ pub fn clip(dir: &Path, name: &str, extra_video: &str, seconds: f64) -> PathBuf 
     let vf = if extra_video.is_empty() { "testsrc2=size=320x240:rate=30".to_string() } else { format!("testsrc2=size=320x240:rate=30,{extra_video}") };
     let secs = seconds.to_string();
     ffmpeg(&[
-        "-f", "lavfi", "-t", &secs, "-i", &vf, "-f", "lavfi", "-t", &secs, "-i", "sine=frequency=440:sample_rate=48000",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", p.to_str().unwrap(),
+        "-f",
+        "lavfi",
+        "-t",
+        &secs,
+        "-i",
+        &vf,
+        "-f",
+        "lavfi",
+        "-t",
+        &secs,
+        "-i",
+        "sine=frequency=440:sample_rate=48000",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        p.to_str().unwrap(),
     ]);
     p
 }
@@ -76,7 +93,11 @@ pub fn psnr(a: &Path, b: &Path) -> f64 {
     let s = String::from_utf8_lossy(&out.stderr);
     let line = s.lines().find(|l| l.contains("PSNR") && l.contains("average:")).unwrap_or_else(|| panic!("no psnr: {s}"));
     let v = line.split("average:").nth(1).unwrap().split_whitespace().next().unwrap();
-    if v == "inf" { 999.0 } else { v.parse().unwrap() }
+    if v == "inf" {
+        999.0
+    } else {
+        v.parse().unwrap()
+    }
 }
 
 pub fn lossless() -> OutputSettings {

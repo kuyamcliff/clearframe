@@ -140,13 +140,9 @@ impl Gfpgan {
             style_convs.push(StyleConv::load(w, &format!("stylegan_decoder.style_convs.{i}"), i % 2 == 0, noise(i + 1)?)?);
         }
         let n_rgb = w.count_indexed("stylegan_decoder.to_rgbs.");
-        let to_rgbs = (0..n_rgb)
-            .map(|i| ToRgb::load(w, &format!("stylegan_decoder.to_rgbs.{i}"), true))
-            .collect::<Result<Vec<_>>>()?;
+        let to_rgbs = (0..n_rgb).map(|i| ToRgb::load(w, &format!("stylegan_decoder.to_rgbs.{i}"), true)).collect::<Result<Vec<_>>>()?;
         let cond = |name: &str| -> Result<Vec<(Conv2d, Conv2d)>> {
-            (0..n_up)
-                .map(|i| Ok((Conv2d::load(w, &format!("{name}.{i}.0"), 1, 1)?, Conv2d::load(w, &format!("{name}.{i}.2"), 1, 1)?)))
-                .collect()
+            (0..n_up).map(|i| Ok((Conv2d::load(w, &format!("{name}.{i}.0"), 1, 1)?, Conv2d::load(w, &format!("{name}.{i}.2"), 1, 1)?))).collect()
         };
         let modw = w.get("stylegan_decoder.style_conv1.modulated_conv.modulation.weight")?;
         Ok(Self {

@@ -1,0 +1,133 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ClearFrame",
+  "version": "1.0.0",
+  "identifier": "io.github.kuyamcliff.clearframe",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "ClearFrame",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 600,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost",
+      "assetProtocol": {
+        "enable": true,
+        "scope": {
+          "allow": [],
+          "requireLiteralLeadingDot": false
+        }
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi",
+      "deb",
+      "rpm",
+      "appimage",
+      "dmg",
+      "app"
+    ],
+    "publisher": "ClearFrame contributors",
+    "copyright": "Copyright (c) 2026 ClearFrame contributors. MIT License.",
+    "category": "Video",
+    "shortDescription": "Local, open-source AI video enhancement",
+    "longDescription": "ClearFrame upscales, restores, denoises, deblurs, stabilizes and interpolates video locally with open models. No account, no subscription, works offline.",
+    "homepage": "https://github.com/kuyamcliff/clearframe",
+    "license": "MIT",
+    "licenseFile": "../../../LICENSE",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../../../MODEL_LICENSES.md": "MODEL_LICENSES.md"
+    },
+    "externalBin": [],
+    "fileAssociations": [
+      {
+        "ext": [
+          "cfproj"
+        ],
+        "name": "ClearFrame Project",
+        "description": "ClearFrame project",
+        "role": "Editor",
+        "mimeType": "application/x-clearframe-project"
+      },
+      {
+        "ext": [
+          "cframe"
+        ],
+        "name": "ClearFrame Preset",
+        "description": "ClearFrame preset",
+        "role": "Viewer",
+        "mimeType": "application/x-clearframe-preset"
+      }
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "headerImage": null,
+        "sidebarImage": null,
+        "template": null,
+        "startMenuFolder": "ClearFrame",
+        "installerHooks": "../../../packaging/windows/installer-hooks.nsh",
+        "compression": "lzma"
+      },
+      "wix": {
+        "language": "en-US"
+      },
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com"
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "ffmpeg",
+          "gstreamer1.0-libav",
+          "gstreamer1.0-plugins-good"
+        ],
+        "section": "video"
+      },
+      "rpm": {
+        "depends": [
+          "ffmpeg"
+        ]
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": null,
+      "entitlements": null
+    }
+  },
+  "plugins": {}
+}

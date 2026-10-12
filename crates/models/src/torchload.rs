@@ -121,10 +121,7 @@ impl Value {
     }
     fn as_usize_list(&self) -> Result<Vec<usize>> {
         match self {
-            Value::Tuple(v) | Value::List(v) => v
-                .iter()
-                .map(|x| x.as_int().and_then(|i| usize::try_from(i).map_err(|_| LoadError::Pickle("negative dim".into()))))
-                .collect(),
+            Value::Tuple(v) | Value::List(v) => v.iter().map(|x| x.as_int().and_then(|i| usize::try_from(i).map_err(|_| LoadError::Pickle("negative dim".into())))).collect(),
             other => Err(LoadError::Pickle(format!("expected tuple of ints, got {other:?}"))),
         }
     }
@@ -237,9 +234,7 @@ impl<'a> Machine<'a> {
             return Err(LoadError::Pickle("unsupported persistent id".into()));
         }
         let dtype = match &items[1] {
-            Value::Global(m, n) if m == "torch" => {
-                StorageType::from_class(n).ok_or_else(|| LoadError::DType(n.clone()))?
-            }
+            Value::Global(m, n) if m == "torch" => StorageType::from_class(n).ok_or_else(|| LoadError::DType(n.clone()))?,
             other => return Err(LoadError::DType(format!("{other:?}"))),
         };
         let key = match &items[2] {
@@ -284,9 +279,7 @@ impl<'a> Machine<'a> {
                 }
                 Ok(Value::Tensor(TensorRef { storage, offset, shape, stride }))
             }
-            ("torch._utils", "_rebuild_parameter") => {
-                args.into_iter().next().ok_or_else(|| LoadError::Pickle("_rebuild_parameter: no data".into()))
-            }
+            ("torch._utils", "_rebuild_parameter") => args.into_iter().next().ok_or_else(|| LoadError::Pickle("_rebuild_parameter: no data".into())),
             _ => Err(LoadError::Disallowed(format!("{module}.{name}"))),
         }
     }
@@ -561,14 +554,8 @@ fn decode_storage(bytes: &[u8], dtype: StorageType) -> Vec<f32> {
     match dtype {
         StorageType::F32 => bytes.chunks_exact(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect(),
         StorageType::F64 => bytes.chunks_exact(8).map(|c| f64::from_le_bytes(c.try_into().unwrap()) as f32).collect(),
-        StorageType::F16 => bytes
-            .chunks_exact(2)
-            .map(|c| half_to_f32(u16::from_le_bytes([c[0], c[1]])))
-            .collect(),
-        StorageType::BF16 => bytes
-            .chunks_exact(2)
-            .map(|c| f32::from_bits((u16::from_le_bytes([c[0], c[1]]) as u32) << 16))
-            .collect(),
+        StorageType::F16 => bytes.chunks_exact(2).map(|c| half_to_f32(u16::from_le_bytes([c[0], c[1]]))).collect(),
+        StorageType::BF16 => bytes.chunks_exact(2).map(|c| f32::from_bits((u16::from_le_bytes([c[0], c[1]]) as u32) << 16)).collect(),
         StorageType::I64 => bytes.chunks_exact(8).map(|c| i64::from_le_bytes(c.try_into().unwrap()) as f32).collect(),
         StorageType::I32 => bytes.chunks_exact(4).map(|c| i32::from_le_bytes(c.try_into().unwrap()) as f32).collect(),
         StorageType::U8 | StorageType::Bool => bytes.iter().map(|b| *b as f32).collect(),
@@ -774,9 +761,7 @@ fn load_legacy(bytes: &[u8], wrappers: &[&str]) -> Result<StateDict> {
         let numel = u64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap()) as usize;
         pos += 8;
         let dtype = *dtypes.get(&key).unwrap_or(&StorageType::F32);
-        let nbytes = numel
-            .checked_mul(dtype.size())
-            .ok_or_else(|| LoadError::Pickle("storage size overflow".into()))?;
+        let nbytes = numel.checked_mul(dtype.size()).ok_or_else(|| LoadError::Pickle("storage size overflow".into()))?;
         if pos + nbytes > bytes.len() {
             return Err(LoadError::Pickle("truncated storage data".into()));
         }
@@ -785,9 +770,7 @@ fn load_legacy(bytes: &[u8], wrappers: &[&str]) -> Result<StateDict> {
     }
     let mut tensors = Vec::with_capacity(refs.len());
     for (name, t) in refs {
-        let st = storages
-            .get(&t.storage.key)
-            .ok_or_else(|| LoadError::Pickle(format!("missing storage {}", t.storage.key)))?;
+        let st = storages.get(&t.storage.key).ok_or_else(|| LoadError::Pickle(format!("missing storage {}", t.storage.key)))?;
         tensors.push((name, materialize(&t, st)?));
     }
     Ok(StateDict { tensors })
@@ -851,12 +834,7 @@ mod tests {
     #[test]
     fn strided_materialize() {
         // 2x3 tensor stored transposed (stride 1,2)
-        let t = TensorRef {
-            storage: StorageRef { key: "0".into(), dtype: StorageType::F32, view_offset: 0 },
-            offset: 0,
-            shape: vec![2, 3],
-            stride: vec![1, 2],
-        };
+        let t = TensorRef { storage: StorageRef { key: "0".into(), dtype: StorageType::F32, view_offset: 0 }, offset: 0, shape: vec![2, 3], stride: vec![1, 2] };
         let st = vec![0., 1., 2., 3., 4., 5.];
         let d = materialize(&t, &st).unwrap();
         assert_eq!(d.data, vec![0., 2., 4., 1., 3., 5.]);

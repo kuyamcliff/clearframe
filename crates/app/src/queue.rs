@@ -150,7 +150,11 @@ impl App {
                     r.pressure_paused = true;
                 }
                 self.queue.send(id, "pause");
-                let _ = self.db.log_job_event(id, "warning", &format!("Paused because only {} MB of memory was available; it continues automatically when memory is freed.", sample.memory_available_mb));
+                let _ = self.db.log_job_event(
+                    id,
+                    "warning",
+                    &format!("Paused because only {} MB of memory was available; it continues automatically when memory is freed.", sample.memory_available_mb),
+                );
             }
         } else if ok_again {
             let held: Vec<String> = std::mem::take(&mut *self.queue.pressure_held.lock());
@@ -192,7 +196,11 @@ impl App {
             return;
         }
         if renders == 0 && need > 0 && sample.memory_available_mb < need {
-            let _ = self.db.log_job_event(&j.id, "warning", &format!("Starting with about {} MB available although about {need} MB is estimated; tiles are reduced to fit the memory budget.", sample.memory_available_mb));
+            let _ = self.db.log_job_event(
+                &j.id,
+                "warning",
+                &format!("Starting with about {} MB available although about {need} MB is estimated; tiles are reduced to fit the memory budget.", sample.memory_available_mb),
+            );
         }
         self.start_job(j.clone());
     }
@@ -234,7 +242,11 @@ impl App {
         let stdin = Arc::new(Mutex::new(child.stdin.take()));
         let stdout = child.stdout.take().ok_or_else(|| anyhow!("no worker output"))?;
         self.queue.running.lock().insert(j.id.clone(), Running { stdin, pid: child.id(), kind: j.kind, models: spec.models.keys().cloned().collect(), pressure_paused: false });
-        let _ = self.db.log_job_event(&j.id, "info", &format!("Started (worker pid {}, {} threads, budget {} MB, device {})", child.id(), spec.resources.threads, spec.resources.memory_budget_mb, spec.resources.device));
+        let _ = self.db.log_job_event(
+            &j.id,
+            "info",
+            &format!("Started (worker pid {}, {} threads, budget {} MB, device {})", child.id(), spec.resources.threads, spec.resources.memory_budget_mb, spec.resources.device),
+        );
         if j.state == JobState::WaitingForResources {
             self.set_state(&j.id, JobState::Queued, None);
         }
@@ -344,7 +356,10 @@ impl App {
         if s.notifications && kind == JobKind::Render {
             if let Ok(j) = self.db.job(id) {
                 if j.state.is_terminal() {
-                    self.emit(AppEvent::Notice { level: if j.state == JobState::Completed { "success".into() } else { "info".into() }, message: format!("{}: {}", j.name, j.state.as_str()) });
+                    self.emit(AppEvent::Notice {
+                        level: if j.state == JobState::Completed { "success".into() } else { "info".into() },
+                        message: format!("{}: {}", j.name, j.state.as_str()),
+                    });
                 }
             }
         }

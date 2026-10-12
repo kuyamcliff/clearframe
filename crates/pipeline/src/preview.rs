@@ -75,7 +75,16 @@ fn crop_raw(f: &RawFrame, x: u32, y: u32, w: u32, h: u32) -> RawFrame {
     RawFrame { width: w, height: h, data }
 }
 
-fn decode_at(tools: &FfmpegTools, info: &MediaInfo, plan: &ExecutionPlan, source: &PathBuf, time: f64, filters: Vec<String>, fmt: &plan::Format, frames: usize) -> Result<Vec<RawFrame>> {
+fn decode_at(
+    tools: &FfmpegTools,
+    info: &MediaInfo,
+    plan: &ExecutionPlan,
+    source: &PathBuf,
+    time: f64,
+    filters: Vec<String>,
+    fmt: &plan::Format,
+    frames: usize,
+) -> Result<Vec<RawFrame>> {
     let v = info.video()?;
     let tags = ColorTags::from_stream(v);
     let mut d = DecodeSpec::new(source.clone(), fmt.width as usize, fmt.height as usize);
@@ -122,7 +131,11 @@ pub fn render_still(tools: &FfmpegTools, info: &MediaInfo, req: &StillRequest, l
         match seg {
             Segment::Native { stage } => {
                 let sp = &plan.stages[*stage];
-                procs.push(Timed { inner: build_native(&enabled[sp.index].op, sp, &req.models, &dev, req.engine.precision, &req.resources)?, seconds: 0.0, stage_id: sp.stage_id.clone() });
+                procs.push(Timed {
+                    inner: build_native(&enabled[sp.index].op, sp, &req.models, &dev, req.engine.precision, &req.resources)?,
+                    seconds: 0.0,
+                    stage_id: sp.stage_id.clone(),
+                });
             }
             Segment::Ffmpeg { filters, input, output } => {
                 procs.push(Timed { inner: Box::new(FfmpegProc::new(tools, filters, input, output)?), seconds: 0.0, stage_id: "ffmpeg".into() });

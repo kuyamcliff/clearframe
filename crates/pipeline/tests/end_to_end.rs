@@ -62,7 +62,27 @@ fn passthrough_color_accuracy() {
     let t = need_ffmpeg!();
     let d = tempfile::tempdir().unwrap();
     let src = d.path().join("bars.mp4");
-    ffmpeg(&["-f", "lavfi", "-i", "smptehdbars=size=1280x720:rate=25", "-t", "1", "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv420p", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", src.to_str().unwrap()]);
+    ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-i",
+        "smptehdbars=size=1280x720:rate=25",
+        "-t",
+        "1",
+        "-c:v",
+        "libx264",
+        "-qp",
+        "0",
+        "-pix_fmt",
+        "yuv420p",
+        "-color_primaries",
+        "bt709",
+        "-color_trc",
+        "bt709",
+        "-colorspace",
+        "bt709",
+        src.to_str().unwrap(),
+    ]);
     let p = Pipeline::single(Operation::Grain(GrainSettings { strength: 0.0, ..Default::default() }));
     let mut out = OutputSettings::default();
     out.video.rate = clearframe_media::encode::RateControl::Quality { value: 4.0 };
@@ -128,7 +148,23 @@ fn deinterlace_bob_doubles_rate() {
     let t = need_ffmpeg!();
     let d = tempfile::tempdir().unwrap();
     let src = d.path().join("int.mkv");
-    ffmpeg(&["-f", "lavfi", "-i", "testsrc2=size=320x240:rate=50", "-vf", "tinterlace=mode=interleave_top,setfield=tff", "-t", "1", "-c:v", "libx264", "-flags", "+ildct+ilme", "-pix_fmt", "yuv420p", src.to_str().unwrap()]);
+    ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=320x240:rate=50",
+        "-vf",
+        "tinterlace=mode=interleave_top,setfield=tff",
+        "-t",
+        "1",
+        "-c:v",
+        "libx264",
+        "-flags",
+        "+ildct+ilme",
+        "-pix_fmt",
+        "yuv420p",
+        src.to_str().unwrap(),
+    ]);
     let info = probe(&t, &src).unwrap();
     assert!(info.video.as_ref().unwrap().is_interlaced_flagged(), "fixture should be flagged interlaced");
     let p = Pipeline::single(Operation::Deinterlace(DeinterlaceSettings { rate: DeinterlaceRate::Field, ..Default::default() }));
@@ -143,7 +179,19 @@ fn stabilize_auto_crop() {
     let t = need_ffmpeg!();
     let d = tempfile::tempdir().unwrap();
     let src = d.path().join("shaky.mp4");
-    ffmpeg(&["-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30,crop=560:300:x='40+30*sin(t*7)':y='30+20*cos(t*5)'", "-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p", src.to_str().unwrap()]);
+    ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=640x360:rate=30,crop=560:300:x='40+30*sin(t*7)':y='30+20*cos(t*5)'",
+        "-t",
+        "2",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        src.to_str().unwrap(),
+    ]);
     let p = Pipeline::single(Operation::Stabilize(StabilizeSettings::default()));
     let r = run(&t, &job(d.path(), &src, p, OutputSettings::default(), "stab")).unwrap();
     assert!(r.stabilize_zoom_percent.unwrap_or(0.0) > 0.0);
@@ -156,7 +204,19 @@ fn stabilize_after_native_stage_uses_two_passes() {
     let t = need_ffmpeg!();
     let d = tempfile::tempdir().unwrap();
     let src = d.path().join("shaky.mp4");
-    ffmpeg(&["-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25,crop=280:200:x='20+15*sin(t*6)':y='20+10*cos(t*4)'", "-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p", src.to_str().unwrap()]);
+    ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=320x240:rate=25,crop=280:200:x='20+15*sin(t*6)':y='20+10*cos(t*4)'",
+        "-t",
+        "1",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        src.to_str().unwrap(),
+    ]);
     let p = Pipeline {
         stages: vec![
             Stage::new(Operation::Grain(GrainSettings { strength: 0.1, ..Default::default() })),
@@ -172,7 +232,25 @@ fn hdr_tonemap_and_sdr_to_hdr() {
     let t = need_ffmpeg!();
     let d = tempfile::tempdir().unwrap();
     let src = d.path().join("sdr.mp4");
-    ffmpeg(&["-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25", "-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", src.to_str().unwrap()]);
+    ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=320x240:rate=25",
+        "-t",
+        "1",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-color_primaries",
+        "bt709",
+        "-color_trc",
+        "bt709",
+        "-colorspace",
+        "bt709",
+        src.to_str().unwrap(),
+    ]);
     let c = ColorSettings { mode: ColorMode::SdrToHdr, ..Default::default() };
     let mut out = OutputSettings::default();
     out.video = clearframe_media::encode::VideoEncodeSettings {
@@ -295,10 +373,35 @@ fn vfr_rotation_and_streams() {
     // Variable frame rate: drop every third frame with timestamps preserved.
     let vfr = d.path().join("vfr.mkv");
     ffmpeg(&[
-        "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30", "-f", "lavfi", "-i", "sine=frequency=300:sample_rate=44100",
-        "-f", "lavfi", "-i", "sine=frequency=600:sample_rate=44100",
-        "-t", "2", "-vf", "select='not(eq(mod(n,3),0))'", "-fps_mode", "vfr",
-        "-map", "0:v", "-map", "1:a", "-map", "2:a", "-c:v", "libx264", "-c:a", "pcm_s16le", vfr.to_str().unwrap(),
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=320x240:rate=30",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=300:sample_rate=44100",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=600:sample_rate=44100",
+        "-t",
+        "2",
+        "-vf",
+        "select='not(eq(mod(n,3),0))'",
+        "-fps_mode",
+        "vfr",
+        "-map",
+        "0:v",
+        "-map",
+        "1:a",
+        "-map",
+        "2:a",
+        "-c:v",
+        "libx264",
+        "-c:a",
+        "pcm_s16le",
+        vfr.to_str().unwrap(),
     ]);
     let sub = d.path().join("s.srt");
     std::fs::write(&sub, "1\n00:00:00,000 --> 00:00:01,000\nhello\n").unwrap();

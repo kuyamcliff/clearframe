@@ -83,7 +83,10 @@ fn candidate_dirs(configured: Option<&Path>, extra_bundled: &[PathBuf]) -> Vec<(
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            v.push((dir.to_path_buf(), ToolSource::Bundled));
+            // A package installed into /usr/bin is next to the system FFmpeg; that is not "bundled".
+            if !is_system_bin_dir(dir) {
+                v.push((dir.to_path_buf(), ToolSource::Bundled));
+            }
             v.push((dir.join("ffmpeg"), ToolSource::Bundled));
             // macOS app bundle: Contents/MacOS/<exe> -> Contents/Resources
             v.push((dir.join("../Resources"), ToolSource::Bundled));
@@ -96,6 +99,44 @@ fn candidate_dirs(configured: Option<&Path>, extra_bundled: &[PathBuf]) -> Vec<(
     if let Some(paths) = std::env::var_os("PATH") {
         for p in std::env::split_paths(&paths) {
             v.push((p, ToolSource::SystemPath));
+        }
+    }
+    // Apps started from the Finder/Explorer do not see the shell's PATH, so
+    // also look where package managers usually install FFmpeg.
+    for p in well_known_dirs() {
+        if !v.iter().any(|(d, _)| d == &p) {
+            v.push((p, ToolSource::SystemPath));
+        }
+    }
+    v
+}
+
+fn is_system_bin_dir(dir: &Path) -> bool {
+    !cfg!(windows) && ["/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin", "/opt/local/bin", "/snap/bin"].iter().any(|p| dir == Path::new(p))
+}
+
+fn well_known_dirs() -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = Vec::new();
+    if cfg!(windows) {
+        for var in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"] {
+            if let Some(pf) = std::env::var_os(var) {
+                v.push(PathBuf::from(&pf).join("ffmpeg").join("bin"));
+                v.push(PathBuf::from(&pf).join("FFmpeg").join("bin"));
+            }
+        }
+        if let Some(pd) = std::env::var_os("ProgramData") {
+            v.push(PathBuf::from(pd).join("chocolatey").join("bin"));
+        }
+        if let Some(home) = std::env::var_os("USERPROFILE") {
+            v.push(PathBuf::from(&home).join("scoop").join("shims"));
+        }
+        if let Some(la) = std::env::var_os("LOCALAPPDATA") {
+            v.push(PathBuf::from(la).join("Microsoft").join("WinGet").join("Links"));
+        }
+        v.push(PathBuf::from(r"C:\ffmpeg\bin"));
+    } else {
+        for p in ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "/usr/bin", "/snap/bin", "/var/lib/flatpak/exports/bin"] {
+            v.push(PathBuf::from(p));
         }
     }
     v
@@ -193,11 +234,7 @@ impl FfmpegTools {
         }
         let version = out.lines().next().unwrap_or("").replace("ffmpeg version ", "");
         let version = version.split(" Copyright").next().unwrap_or("").trim().to_string();
-        let configuration = out
-            .lines()
-            .find(|l| l.starts_with("configuration:"))
-            .map(|l| l.trim_start_matches("configuration:").trim().to_string())
-            .unwrap_or_default();
+        let configuration = out.lines().find(|l| l.starts_with("configuration:")).map(|l| l.trim_start_matches("configuration:").trim().to_string()).unwrap_or_default();
         let license_hint = if configuration.contains("--enable-nonfree") {
             "nonfree (not redistributable)".to_string()
         } else if configuration.contains("--enable-gpl") {
@@ -221,9 +258,7 @@ impl FfmpegTools {
             }
             let desc = parts.next().unwrap_or("").trim().to_string();
             if flags.starts_with('V') {
-                let is_hardware = ["nvenc", "qsv", "vaapi", "amf", "videotoolbox", "_mf", "v4l2m2m", "vulkan"]
-                    .iter()
-                    .any(|h| name.contains(h));
+                let is_hardware = ["nvenc", "qsv", "vaapi", "amf", "videotoolbox", "_mf", "v4l2m2m", "vulkan"].iter().any(|h| name.contains(h));
                 video_encoders.push(EncoderInfo { name: name.to_string(), description: desc, is_hardware });
             } else if flags.starts_with('A') {
                 audio_encoders.push(name.to_string());

@@ -105,7 +105,10 @@ impl App {
         let cache = cache::report(&paths, &self.protected_cache_entries(false), s.low_disk_warning_mb);
         let models = self.models.storage();
         let mut warnings = Vec::new();
-        if !models.models_dir_exists {
+        // A default folder that was never used is created on first install; only warn when
+        // a chosen folder disappeared or installed models went missing with it.
+        let lost = !paths.models_is_default || self.models.status().iter().any(|m| m.state == clearframe_models::manager::ModelState::Missing);
+        if !models.models_dir_exists && lost {
             warnings.push(format!("The models folder {} is missing. Choose its new location or reinstall models.", paths.models_dir.display()));
         }
         for (label, free) in [("cache", cache.free_bytes), ("models", models.free_bytes)] {
@@ -116,7 +119,9 @@ impl App {
             }
         }
         StorageOverview {
-            data_bytes: fsutil::dir_size(&paths.data_dir).saturating_sub(if paths.models_dir.starts_with(&paths.data_dir) { models.total_bytes } else { 0 }).saturating_sub(if paths.cache_dir.starts_with(&paths.data_dir) { cache.total_bytes } else { 0 }),
+            data_bytes: fsutil::dir_size(&paths.data_dir)
+                .saturating_sub(if paths.models_dir.starts_with(&paths.data_dir) { models.total_bytes } else { 0 })
+                .saturating_sub(if paths.cache_dir.starts_with(&paths.data_dir) { cache.total_bytes } else { 0 }),
             data_free: fsutil::free_space(&paths.data_dir),
             relocation_in_progress: self.storage_busy.load(Ordering::SeqCst),
             paths,
@@ -208,7 +213,11 @@ impl App {
             return Ok(format!("Now using {}. The previous folder was left unchanged.", dest.display()));
         }
         if mode == RelocationMode::ClearDisposableAndMove {
-            let r = cache::clear(&paths, &[CacheArea::Previews, CacheArea::Thumbnails, CacheArea::Proxies, CacheArea::Temp, CacheArea::Downloads], &self.protected_cache_entries(false));
+            let r = cache::clear(
+                &paths,
+                &[CacheArea::Previews, CacheArea::Thumbnails, CacheArea::Proxies, CacheArea::Temp, CacheArea::Downloads],
+                &self.protected_cache_entries(false),
+            );
             log::info!("cleared {} MB of cache before moving", r.freed_bytes / 1_000_000);
         }
         let journal = paths.config_dir.join(JOURNAL);

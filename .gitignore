@@ -8,3 +8,7 @@ dist/
 /apps/desktop/src-tauri/binaries/
 /test-output/
 *.secret.key
+/apps/desktop/src-tauri/ffmpeg/
+/apps/desktop/test-results/
+/apps/desktop/playwright-report/
+/reference/

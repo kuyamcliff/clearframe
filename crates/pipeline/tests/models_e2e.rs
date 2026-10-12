@@ -79,7 +79,12 @@ fn enhance_denoise_deblur_face_interpolate() {
         stages: vec![
             Stage::new(Operation::Denoise(DenoiseSettings { engine: DenoiseEngine::Ffdnet, strength: 10.0, ..Default::default() })),
             Stage::new(Operation::Deblur(DeblurSettings { strength: 0.5, ..Default::default() })),
-            Stage::new(Operation::Enhance(EnhanceSettings { model_id: "xinntao.realesr-general-v3".into(), denoise: Some(0.5), target: SizeTarget::Height { height: 360 }, ..Default::default() })),
+            Stage::new(Operation::Enhance(EnhanceSettings {
+                model_id: "xinntao.realesr-general-v3".into(),
+                denoise: Some(0.5),
+                target: SizeTarget::Height { height: 360 },
+                ..Default::default()
+            })),
             Stage::new(Operation::FaceRestore(FaceSettings::default())),
             Stage::new(Operation::Interpolate(InterpolateSettings::default())),
         ],
@@ -126,6 +131,7 @@ fn smoke_tests_accept_real_and_reject_mismatched_weights() {
     assert!(clearframe_pipeline::smoke::smoke_test("auto", &f("ffdnet_color")).unwrap().starts_with("ffdnet"));
     assert!(clearframe_pipeline::smoke::smoke_test("rife", &f("rife426")).is_ok());
     assert!(clearframe_pipeline::smoke::smoke_test("rrdbnet", &f("realesr-animevideov3")).is_err());
-    let face: std::collections::BTreeMap<String, PathBuf> = [("restorer".to_string(), m.join("GFPGANv1.4.safetensors")), ("detector".to_string(), m.join("detection_mobilenet0.25_Final.safetensors"))].into_iter().collect();
+    let face: std::collections::BTreeMap<String, PathBuf> =
+        [("restorer".to_string(), m.join("GFPGANv1.4.safetensors")), ("detector".to_string(), m.join("detection_mobilenet0.25_Final.safetensors"))].into_iter().collect();
     assert!(clearframe_pipeline::smoke::smoke_test("gfpgan", &face).is_ok());
 }

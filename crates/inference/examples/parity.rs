@@ -2,9 +2,9 @@
 //! usage: parity <refs_dir> <safetensors_dir>
 use std::path::Path;
 
+use candle_core::Tensor;
 use clearframe_inference::arch::{drunet::DruNet, ffdnet::FfdNet, gfpgan::Gfpgan, nafnet::NafNet, retinaface::RetinaFace, rife::Rife, rrdb::RrdbNet, srvgg::SrVggCompact};
 use clearframe_inference::{Device, Weights};
-use candle_core::Tensor;
 
 fn read(dir: &Path, name: &str) -> (Vec<Tensor>, Vec<f32>, serde_json::Value) {
     let meta: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join(format!("{name}.json"))).unwrap()).unwrap();
@@ -45,13 +45,17 @@ fn main() {
     let mut all = true;
     let run = |n: &str| only.as_deref().map_or(true, |o| n.starts_with(o));
     for (name, file) in [("animevideov3", "realesr-animevideov3"), ("general_x4v3", "realesr-general-x4v3")] {
-        if !run(name) { continue; }
+        if !run(name) {
+            continue;
+        }
         let (i, o, _) = read(refs, name);
         let m = SrVggCompact::load(&w(&format!("{file}.safetensors"))).unwrap();
         all &= cmp(name, &m.forward(&i[0]).unwrap(), &o, 1e-3);
     }
     for (name, file) in [("x4plus", "RealESRGAN_x4plus"), ("anime6b", "RealESRGAN_x4plus_anime_6B"), ("x2plus", "RealESRGAN_x2plus")] {
-        if !run(name) { continue; }
+        if !run(name) {
+            continue;
+        }
         let (i, o, _) = read(refs, name);
         let m = RrdbNet::load(&w(&format!("{file}.safetensors"))).unwrap();
         all &= cmp(name, &m.forward(&i[0]).unwrap(), &o, 2e-3);
@@ -82,7 +86,9 @@ fn main() {
         all &= cmp("gfpgan", &m.forward(&i[0]).unwrap(), &o, 5e-3);
     }
     for (name, file) in [("retina_r50", "detection_Resnet50_Final"), ("retina_mnet", "detection_mobilenet0.25_Final")] {
-        if !run(name) { continue; }
+        if !run(name) {
+            continue;
+        }
         let m = RetinaFace::load(&w(&format!("{file}.safetensors"))).unwrap();
         let (i, lo, _) = read(refs, &format!("{name}_loc"));
         let (_, co, _) = read(refs, &format!("{name}_conf"));

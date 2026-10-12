@@ -64,11 +64,7 @@ pub fn apply_rules(sd: StateDict, rules: &KeyRules) -> StateDict {
 
 /// Load a checkpoint and write it as safetensors. Returns the number of tensors written.
 pub fn checkpoint_to_safetensors(src: &Path, dst: &Path, rules: &KeyRules) -> Result<usize, ConvertError> {
-    let wrappers: Vec<&str> = if rules.wrappers.is_empty() {
-        torchload::DEFAULT_WRAPPERS.to_vec()
-    } else {
-        rules.wrappers.iter().map(|s| s.as_str()).collect()
-    };
+    let wrappers: Vec<&str> = if rules.wrappers.is_empty() { torchload::DEFAULT_WRAPPERS.to_vec() } else { rules.wrappers.iter().map(|s| s.as_str()).collect() };
     let sd = torchload::load_checkpoint(src, &wrappers)?;
     let sd = apply_rules(sd, rules);
     write_safetensors(&sd, dst)
@@ -84,17 +80,11 @@ pub fn write_safetensors(sd: &StateDict, dst: &Path) -> Result<usize, ConvertErr
             return Err(ConvertError::NonFinite(name.clone()));
         }
     }
-    let bytes: Vec<(String, Vec<usize>, Vec<u8>)> = sd
-        .tensors
-        .iter()
-        .map(|(n, t)| (n.clone(), t.shape.clone(), t.data.iter().flat_map(|v| v.to_le_bytes()).collect()))
-        .collect();
+    let bytes: Vec<(String, Vec<usize>, Vec<u8>)> = sd.tensors.iter().map(|(n, t)| (n.clone(), t.shape.clone(), t.data.iter().flat_map(|v| v.to_le_bytes()).collect())).collect();
     let views: Vec<(String, safetensors::tensor::TensorView)> = bytes
         .iter()
         .map(|(n, shape, data)| {
-            safetensors::tensor::TensorView::new(safetensors::Dtype::F32, shape.clone(), data)
-                .map(|v| (n.clone(), v))
-                .map_err(|e| ConvertError::SafeTensors(e.to_string()))
+            safetensors::tensor::TensorView::new(safetensors::Dtype::F32, shape.clone(), data).map(|v| (n.clone(), v)).map_err(|e| ConvertError::SafeTensors(e.to_string()))
         })
         .collect::<Result<_, _>>()?;
     let mut meta = HashMap::new();

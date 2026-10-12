@@ -169,10 +169,7 @@ impl AppPaths {
     }
 
     pub fn storage_config(&self) -> StorageConfig {
-        StorageConfig {
-            models_dir: (!self.models_is_default).then(|| self.models_dir.clone()),
-            cache_dir: (!self.cache_is_default).then(|| self.cache_dir.clone()),
-        }
+        StorageConfig { models_dir: (!self.models_is_default).then(|| self.models_dir.clone()), cache_dir: (!self.cache_is_default).then(|| self.cache_dir.clone()) }
     }
 
     /// Persist new locations atomically.

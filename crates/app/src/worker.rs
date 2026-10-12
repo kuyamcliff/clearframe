@@ -53,7 +53,7 @@ fn emit<T: Serialize>(v: &T) {
 
 fn apply_threads(threads: u32) {
     if threads > 0 {
-            // candle's CPU kernels use rayon's global pool: size it before any work starts.
+        // candle's CPU kernels use rayon's global pool: size it before any work starts.
         let _ = rayon::ThreadPoolBuilder::new().num_threads(threads as usize).build_global();
         clearframe_media::tools::set_default_threads(threads as usize);
     }
@@ -120,7 +120,11 @@ pub fn run_worker(envelope_path: &Path) -> i32 {
         Err(JobError::Resources(m)) => (ResultKind::Resources, m, None, 0),
         Err(JobError::Failed(e)) => {
             let m = format!("{e:#}");
-            let hint = if clearframe_pipeline::processors::is_oom(&m) { " The device ran out of memory: lower the memory budget or tile size in Settings > Performance, or use the CPU." } else { "" };
+            let hint = if clearframe_pipeline::processors::is_oom(&m) {
+                " The device ran out of memory: lower the memory budget or tile size in Settings > Performance, or use the CPU."
+            } else {
+                ""
+            };
             (ResultKind::Failed, format!("{m}{hint}"), None, 1)
         }
     };

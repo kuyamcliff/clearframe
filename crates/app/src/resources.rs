@@ -25,11 +25,17 @@ pub fn apply_process_priority(p: ProcessPriority) -> String {
         };
         // SAFETY: setpriority only reads its integer arguments.
         let r = unsafe { libc::setpriority(libc::PRIO_PROCESS, 0, nice) };
-        if r == 0 { format!("nice {nice}") } else { "priority unchanged (not permitted)".into() }
+        if r == 0 {
+            format!("nice {nice}")
+        } else {
+            "priority unchanged (not permitted)".into()
+        }
     }
     #[cfg(windows)]
     {
-        use windows_sys::Win32::System::Threading::{GetCurrentProcess, SetPriorityClass, ABOVE_NORMAL_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS, IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS};
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentProcess, SetPriorityClass, ABOVE_NORMAL_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS, IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS,
+        };
         let class = match p {
             ProcessPriority::Low => IDLE_PRIORITY_CLASS,
             ProcessPriority::BelowNormal => BELOW_NORMAL_PRIORITY_CLASS,
@@ -38,7 +44,11 @@ pub fn apply_process_priority(p: ProcessPriority) -> String {
         };
         // SAFETY: GetCurrentProcess returns a pseudo-handle valid for this call.
         let ok = unsafe { SetPriorityClass(GetCurrentProcess(), class) };
-        if ok != 0 { format!("priority class {p:?}") } else { "priority unchanged".into() }
+        if ok != 0 {
+            format!("priority class {p:?}")
+        } else {
+            "priority unchanged".into()
+        }
     }
     #[cfg(not(any(unix, windows)))]
     {
