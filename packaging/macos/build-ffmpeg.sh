@@ -148,7 +148,7 @@ EOF
     --enable-libx264 --enable-libx265 --enable-libzimg --enable-libvidstab --enable-libdav1d
     --extra-cflags="$CFLAGS -I$P/include" --extra-ldflags="$LDFLAGS -L$P/lib")
   if [ "$OS" = Darwin ]; then
-    conf+=(--enable-videotoolbox --enable-audiotoolbox --enable-zlib --enable-bzlib --enable-iconv --extra-libs="-lc++")
+    conf+=(--enable-videotoolbox --enable-audiotoolbox --enable-zlib --enable-bzlib --enable-iconv --extra-libs="-lc++ -liconv")
     [ "$CROSS" = 1 ] && conf+=(--enable-cross-compile --arch="$arch" --target-os=darwin --cc=clang --cxx=clang++)
   else
     conf+=(--extra-libs="-lstdc++ -lm -lpthread")
