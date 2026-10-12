@@ -34,49 +34,7 @@ use crate::plan::{self, ExecutionPlan, FilterCaps, ModelLookup, PassPlan, PlanOp
 use crate::processors::{build_native, FfmpegProc, Frame, Timed};
 use crate::spec::*;
 
-/// Job lifecycle states (persisted by the application).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum JobState {
-    Queued,
-    WaitingForResources,
-    Preparing,
-    Previewing,
-    Processing,
-    Encoding,
-    Validating,
-    Completed,
-    Paused,
-    Cancelled,
-    Failed,
-    Recoverable,
-}
-
-impl JobState {
-    pub fn is_terminal(self) -> bool {
-        matches!(self, JobState::Completed | JobState::Cancelled | JobState::Failed)
-    }
-    /// Allowed transitions (validated by the application before persisting).
-    pub fn can_transition_to(self, next: JobState) -> bool {
-        use JobState::*;
-        if self == next {
-            return true;
-        }
-        match self {
-            Queued => matches!(next, Preparing | WaitingForResources | Cancelled | Failed | Paused),
-            WaitingForResources => matches!(next, Preparing | Queued | Cancelled | Failed | Paused),
-            Preparing => matches!(next, Previewing | Processing | Cancelled | Failed | Paused | Recoverable),
-            Previewing => matches!(next, Processing | Encoding | Completed | Cancelled | Failed),
-            Processing => matches!(next, Encoding | Cancelled | Failed | Paused | Recoverable),
-            Encoding => matches!(next, Validating | Cancelled | Failed | Recoverable),
-            Validating => matches!(next, Completed | Failed | Recoverable),
-            Paused | Recoverable => matches!(next, Queued | Preparing | Cancelled | Failed),
-            Failed => matches!(next, Queued),
-            Cancelled => matches!(next, Queued),
-            Completed => false,
-        }
-    }
-}
+pub use clearframe_core::jobs::JobState;
 
 /// Time spent per phase.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -115,6 +73,80 @@ pub enum Event {
     Log { level: String, message: String },
     Warning { message: String },
     Resumed { pass: usize, from_frame: u64 },
+    /// Throttled resource sample of the worker and its FFmpeg children.
+    Resources(ResourceSample),
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ResourceSample {
+    /// Resident memory of the worker plus child processes (MB).
+    pub process_memory_mb: u64,
+    /// CPU use of the worker plus children (100 = one full core).
+    pub process_cpu_percent: f32,
+    pub system_memory_used_mb: u64,
+    pub system_memory_total_mb: u64,
+    pub system_memory_available_mb: u64,
+    pub backend: String,
+    pub stage: String,
+    pub free_disk_mb: Option<u64>,
+}
+
+/// Samples resource use of this process tree at most once per interval.
+pub struct ResourceMonitor {
+    sys: sysinfo::System,
+    pid: sysinfo::Pid,
+    last: Option<Instant>,
+}
+
+impl Default for ResourceMonitor {
+    fn default() -> Self {
+        Self { sys: sysinfo::System::new(), pid: sysinfo::get_current_pid().unwrap_or(sysinfo::Pid::from(0)), last: None }
+    }
+}
+
+impl ResourceMonitor {
+    pub fn sample(&mut self, backend: &str, stage: &str, disk: Option<&Path>) -> Option<ResourceSample> {
+        if self.last.is_some_and(|l| l.elapsed() < std::time::Duration::from_secs(2)) {
+            return None;
+        }
+        self.last = Some(Instant::now());
+        self.sys.refresh_memory();
+        self.sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        let mut mem = 0u64;
+        let mut cpu = 0f32;
+        for p in self.sys.processes().values() {
+            if p.pid() == self.pid || p.parent() == Some(self.pid) {
+                mem += p.memory();
+                cpu += p.cpu_usage();
+            }
+        }
+        Some(ResourceSample {
+            process_memory_mb: mem / (1 << 20),
+            process_cpu_percent: cpu,
+            system_memory_used_mb: self.sys.used_memory() / (1 << 20),
+            system_memory_total_mb: self.sys.total_memory() / (1 << 20),
+            system_memory_available_mb: self.sys.available_memory() / (1 << 20),
+            backend: backend.to_string(),
+            stage: stage.to_string(),
+            free_disk_mb: disk.and_then(fsutil::free_space).map(|b| b / 1_000_000),
+        })
+    }
+}
+
+/// Resolve the compute device from job resources ("auto", "cpu", "cuda:N", "metal:N").
+pub fn select_device(res: &JobResources, engine: &EngineSettings) -> std::result::Result<(BackendKind, clearframe_inference::Device), String> {
+    let d = res.device.trim().to_ascii_lowercase();
+    let parse = |p: &str| d.strip_prefix(p).and_then(|n| n.parse::<usize>().ok());
+    if d == "cpu" {
+        return Ok((BackendKind::Cpu, clearframe_inference::Device::Cpu));
+    }
+    if let Some(i) = parse("cuda:") {
+        return device::create(BackendKind::Cuda, i).map(|x| (BackendKind::Cuda, x));
+    }
+    if let Some(i) = parse("metal:") {
+        return device::create(BackendKind::Metal, i).map(|x| (BackendKind::Metal, x));
+    }
+    device::select(engine.backend)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,6 +155,8 @@ pub struct JobReport {
     pub app_version: String,
     pub ffmpeg_version: String,
     pub backend: String,
+    #[serde(default)]
+    pub resources: JobResources,
     pub source: PathBuf,
     pub source_fingerprint: String,
     pub output: PathBuf,
@@ -154,6 +188,9 @@ pub enum JobError {
     Paused,
     #[error("{0}")]
     Invalid(String),
+    /// Stopped at a safe point because a resource ran out (disk space). Resumable.
+    #[error("{0}")]
+    Resources(String),
     #[error("{0:#}")]
     Failed(anyhow::Error),
 }
@@ -256,9 +293,10 @@ fn plan_key(spec: &JobSpec, fingerprint: &str) -> String {
     format!("{:016x}", h.finish())
 }
 
-/// Model facts derived from resolved models (used when the caller has no registry).
+/// Model facts derived from resolved models (used inside workers).
 pub struct ResolvedLookup<'a> {
     pub models: &'a BTreeMap<String, ResolvedModel>,
+    /// Optional scale overrides (otherwise `ResolvedModel::scale`).
     pub scales: BTreeMap<String, u32>,
 }
 
@@ -268,7 +306,7 @@ impl ModelLookup for ResolvedLookup<'_> {
         Some(plan::ModelFacts {
             id: id.to_string(),
             display_name: id.to_string(),
-            scale: *self.scales.get(id).unwrap_or(&1),
+            scale: *self.scales.get(id).unwrap_or(&m.scale.max(1)),
             installed: true,
             mb_per_megapixel: 1500.0,
             weights_mb: 100.0,
@@ -308,6 +346,8 @@ struct Ctx<'a> {
     started: Instant,
     total_units: f64,
     done_units: f64,
+    backend_label: String,
+    monitor: ResourceMonitor,
 }
 
 impl Ctx<'_> {
@@ -380,6 +420,8 @@ pub fn run_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, st
         started,
         total_units,
         done_units: 0.0,
+        backend_label: String::new(),
+        monitor: ResourceMonitor::default(),
     };
     for i in ctx.plan.issues.clone() {
         if i.severity == plan::Severity::Warning {
@@ -388,7 +430,8 @@ pub fn run_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, st
     }
 
     // Device
-    let (backend, device) = device::select(spec.engine.backend).map_err(|e| JobError::Invalid(format!("the selected compute backend is unavailable: {e}")))?;
+    let (backend, device) = select_device(&spec.resources, &spec.engine).map_err(|e| JobError::Invalid(format!("the selected compute device is unavailable: {e}")))?;
+    ctx.backend_label = backend.label().to_string();
     if spec.engine.backend.is_none() && backend == BackendKind::Cpu && ctx.plan.stages.iter().any(|s| !s.models.is_empty()) {
         ctx.log("Using CPU inference. AI processing on CPU is slow; a GPU build (CUDA or Metal) is much faster.");
     }
@@ -521,6 +564,7 @@ pub fn run_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, st
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         ffmpeg_version: tools.version.clone(),
         backend: backend.label().to_string(),
+        resources: spec.resources.clone(),
         source: spec.source.clone(),
         source_fingerprint: fingerprint,
         output: dest.clone(),
@@ -659,6 +703,19 @@ fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, device: &clear
 
     // 2. Resume point.
     let list_file = pass_dir.join("segments.csv");
+    // Merge lists left behind by a run that was killed before it could merge them.
+    let mut parts: Vec<PathBuf> = std::fs::read_dir(&pass_dir)
+        .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("segments.part") && n.ends_with(".csv"))).collect())
+        .unwrap_or_default();
+    parts.sort_by_key(|p| p.file_name().and_then(|n| n.to_str()).and_then(|n| n.trim_start_matches("segments.part").trim_end_matches(".csv").parse::<u64>().ok()).unwrap_or(0));
+    for part in parts {
+        if let Ok(extra) = std::fs::read_to_string(&part) {
+            let mut cur = std::fs::read_to_string(&list_file).unwrap_or_default();
+            cur.push_str(&extra);
+            let _ = std::fs::write(&list_file, cur);
+        }
+        let _ = std::fs::remove_file(&part);
+    }
     let mut done_segments = read_segment_list(&list_file);
     // Drop list entries whose files are missing or empty.
     done_segments.retain(|(n, _, _)| std::fs::metadata(seg_dir.join(n)).map(|m| m.len() > 0).unwrap_or(false));
@@ -724,7 +781,7 @@ fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, device: &clear
             Segment::Native { stage } => {
                 let sp = &ctx.plan.stages[*stage];
                 let op = &enabled[sp.index].op;
-                let p = build_native(op, sp, &spec.models, device, spec.engine.precision).map_err(JobError::Failed)?;
+                let p = build_native(op, sp, &spec.models, device, spec.engine.precision, &spec.resources).map_err(JobError::Failed)?;
                 procs.push(Timed { inner: p, seconds: 0.0, stage_id: sp.stage_id.clone() });
             }
             Segment::Ffmpeg { filters, input, output } => {
@@ -850,6 +907,22 @@ fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, device: &clear
                 wtx.send(f.into_raw()).map_err(|_| JobError::Failed(anyhow!("the encoder stopped unexpectedly")))?;
                 ctx.timings.encode_wait_s += t.elapsed().as_secs_f64();
                 written += 1;
+            }
+            // Resource sample and disk-space guard (throttled to every 2 s).
+            let stage_name = procs.iter().max_by(|a, b| a.seconds.partial_cmp(&b.seconds).unwrap_or(std::cmp::Ordering::Equal)).map(|p| p.inner.name()).unwrap_or_default();
+            let backend_label = ctx.backend_label.clone();
+            if let Some(sample) = ctx.monitor.sample(&backend_label, &stage_name, Some(&spec.work_dir)) {
+                let min = spec.resources.min_free_disk_mb;
+                let dest_free = spec.destination.parent().and_then(fsutil::free_space).map(|b| b / 1_000_000);
+                let low = [sample.free_disk_mb, dest_free].into_iter().flatten().min();
+                ctx.emit(Event::Resources(sample));
+                if let Some(free) = low {
+                    if min > 0 && free < min {
+                        return Err(JobError::Resources(format!(
+                            "Paused: only {free} MB of disk space is left (minimum {min} MB). Free some space and resume; finished segments are kept."
+                        )));
+                    }
+                }
             }
             // Progress at most ~4 times a second.
             if last_emit.elapsed().as_millis() >= 250 {

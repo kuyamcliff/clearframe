@@ -7,8 +7,8 @@ use crate::tools::{run_capture, FfmpegTools};
 use crate::MediaError;
 
 /// Extract one frame at `time` as PNG bytes, scaled to at most `max_width` (keeping aspect).
-pub fn frame_png(tools: &FfmpegTools, path: &Path, time: f64, max_width: Option<u32>) -> Result<Vec<u8>, MediaError> {
-    let dir = tempfile_dir()?;
+pub fn frame_png(tools: &FfmpegTools, path: &Path, time: f64, max_width: Option<u32>, temp: &Path) -> Result<Vec<u8>, MediaError> {
+    let dir = tempfile_dir(temp)?;
     let out = dir.join("frame.png");
     let mut c = tools.ffmpeg_cmd();
     c.args(["-v", "error", "-y", "-ss", &format!("{:.6}", time.max(0.0)), "-i"]).arg(path);
@@ -27,11 +27,11 @@ pub fn frame_png(tools: &FfmpegTools, path: &Path, time: f64, max_width: Option<
 }
 
 /// Evenly spaced thumbnails (time, PNG bytes).
-pub fn thumbnails(tools: &FfmpegTools, path: &Path, duration: f64, count: usize, height: u32) -> Result<Vec<(f64, Vec<u8>)>, MediaError> {
+pub fn thumbnails(tools: &FfmpegTools, path: &Path, duration: f64, count: usize, height: u32, temp: &Path) -> Result<Vec<(f64, Vec<u8>)>, MediaError> {
     let mut v = Vec::new();
     for i in 0..count {
         let t = duration * (i as f64 + 0.5) / count as f64;
-        let dir = tempfile_dir()?;
+        let dir = tempfile_dir(temp)?;
         let out = dir.join("t.jpg");
         let mut c = tools.ffmpeg_cmd();
         c.args(["-v", "error", "-y", "-ss", &format!("{t:.3}"), "-i"]).arg(path);
@@ -61,8 +61,9 @@ pub fn proxy_clip(tools: &FfmpegTools, src: &Path, start: f64, duration: f64, ma
     Ok(())
 }
 
-fn tempfile_dir() -> Result<std::path::PathBuf, MediaError> {
-    let d = std::env::temp_dir().join(format!("clearframe-still-{}-{}", std::process::id(), unique()));
+/// A unique directory inside the caller's managed temp area (never the system temp dir).
+fn tempfile_dir(temp: &Path) -> Result<std::path::PathBuf, MediaError> {
+    let d = temp.join(format!("clearframe-still-{}-{}", std::process::id(), unique()));
     std::fs::create_dir_all(&d)?;
     Ok(d)
 }

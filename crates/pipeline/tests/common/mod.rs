@@ -45,6 +45,8 @@ pub fn job(dir: &Path, source: &Path, pipeline: Pipeline, output: OutputSettings
         segment_seconds: 1.0,
         write_sidecar: true,
         preview: false,
+        resources: Default::default(),
+        estimated_memory_mb: 0.0,
     }
 }
 

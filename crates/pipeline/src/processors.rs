@@ -69,6 +69,14 @@ pub trait Processor: Send {
     }
 }
 
+const MIN_TILE: usize = 64;
+
+/// Whether an inference error message indicates memory exhaustion.
+pub fn is_oom(msg: &str) -> bool {
+    let m = msg.to_ascii_lowercase();
+    m.contains("out of memory") || m.contains("cuda_error_out_of_memory") || m.contains("failed to allocate") || m.contains("allocation failed") || m.contains("insufficient memory")
+}
+
 /// Image model stage (enhance / denoise / deblur) with optional strength blend.
 pub struct ImageProc {
     label: String,
@@ -76,6 +84,8 @@ pub struct ImageProc {
     params: ImageParams,
     /// 0..1: amount of model output blended over the (resized) input.
     mix: f32,
+    oom_fallback: bool,
+    oom_retries: u32,
 }
 
 impl Processor for ImageProc {
@@ -84,7 +94,20 @@ impl Processor for ImageProc {
     }
     fn push(&mut self, f: Frame, out: &mut Vec<Frame>) -> Result<()> {
         let (idx, img) = f.into_img();
-        let res = self.model.process(&img, &self.params).map_err(|e| anyhow!("{}: {e}", self.label))?;
+        let res = loop {
+            match self.model.process(&img, &self.params) {
+                Ok(r) => break r,
+                Err(e) if self.oom_fallback && is_oom(&e.to_string()) && self.model.tile > MIN_TILE => {
+                    // Device ran out of memory: retry this frame with smaller tiles.
+                    let old = if self.model.tile == 0 { img.width.max(img.height) } else { self.model.tile };
+                    self.model.tile = (old / 2).max(MIN_TILE);
+                    self.model.tile_pad = self.model.tile_pad.min(self.model.tile / 4).max(8);
+                    log::warn!("{}: out of memory, retrying with {}px tiles", self.label, self.model.tile);
+                    self.oom_retries += 1;
+                }
+                Err(e) => return Err(anyhow!("{}: {e}", self.label)),
+            }
+        };
         let res = if self.mix < 0.999 {
             let base = if (res.width, res.height) != (img.width, img.height) { img.resize_bilinear(res.width, res.height) } else { img };
             base.blend(&res, self.mix.clamp(0.0, 1.0))
@@ -96,6 +119,9 @@ impl Processor for ImageProc {
     }
     fn finish(&mut self, _out: &mut Vec<Frame>) -> Result<()> {
         Ok(())
+    }
+    fn stats(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({ "tile": self.model.tile, "oom_retries": self.oom_retries }))
     }
 }
 
@@ -279,16 +305,36 @@ fn model<'a>(models: &'a BTreeMap<String, ResolvedModel>, id: &str) -> Result<&'
     models.get(id).ok_or_else(|| anyhow!("model {id} is not installed"))
 }
 
-/// Default tile when the user chose automatic, scaled to the device.
-fn auto_tile(arch_default: usize, device: &Device) -> usize {
-    match device {
+/// Default tile when the user chose automatic, scaled to the device and
+/// limited so one tile's working memory fits the job's memory budget.
+fn auto_tile(arch_default: usize, device: &Device, res: &JobResources, mb_per_mp: f64) -> usize {
+    let mut t = match device {
         Device::Cpu => arch_default,
         _ => arch_default.max(512),
+    };
+    let budget = match device {
+        Device::Cpu => res.memory_budget_mb,
+        _ if res.vram_budget_mb > 0 => res.vram_budget_mb,
+        _ => res.memory_budget_mb,
+    };
+    if budget > 0 && mb_per_mp > 0.0 {
+        // Keep half the budget for frame buffers, decoder and encoder.
+        let mp = (budget as f64 * 0.5 / mb_per_mp).max(0.004);
+        let side = (mp * 1e6).sqrt() as usize;
+        if t == 0 || side < t {
+            t = side.max(MIN_TILE);
+        }
     }
+    t
+}
+
+/// Tile size limited by the memory budget (for models whose default is whole-frame).
+pub fn budget_tile(res: &JobResources, mb_per_mp: f64) -> usize {
+    auto_tile(0, &Device::Cpu, res, mb_per_mp)
 }
 
 /// Build the native processor for a stage.
-pub fn build_native(op: &Operation, sp: &StagePlan, models: &BTreeMap<String, ResolvedModel>, device: &Device, precision: Precision) -> Result<Box<dyn Processor>> {
+pub fn build_native(op: &Operation, sp: &StagePlan, models: &BTreeMap<String, ResolvedModel>, device: &Device, precision: Precision, res: &JobResources) -> Result<Box<dyn Processor>> {
     Ok(match op {
         Operation::Enhance(e) => {
             let m = model(models, &e.model_id)?;
@@ -302,7 +348,7 @@ pub fn build_native(op: &Operation, sp: &StagePlan, models: &BTreeMap<String, Re
             if e.tile_size > 0 {
                 im.tile = e.tile_size as usize;
             } else {
-                im.tile = auto_tile(im.tile, device);
+                im.tile = auto_tile(im.tile, device, res, m.memory_per_megapixel_mb);
             }
             if e.tile_pad > 0 {
                 im.tile_pad = e.tile_pad as usize;
@@ -312,7 +358,7 @@ pub fn build_native(op: &Operation, sp: &StagePlan, models: &BTreeMap<String, Re
             if sp.input.width * scale != expect {
                 anyhow::bail!("model {} scale x{scale} does not match the plan", m.id);
             }
-            Box::new(ImageProc { label: format!("Enhance ({})", m.id), model: im, params: ImageParams::default(), mix: e.strength })
+            Box::new(ImageProc { label: format!("Enhance ({})", m.id), model: im, params: ImageParams::default(), mix: e.strength, oom_fallback: res.oom_tile_fallback, oom_retries: 0 })
         }
         Operation::Denoise(d) => {
             let id = op.required_models().into_iter().next().ok_or_else(|| anyhow!("denoise engine has no model"))?;
@@ -320,15 +366,15 @@ pub fn build_native(op: &Operation, sp: &StagePlan, models: &BTreeMap<String, Re
             let w = load_weights(m, "weights", device)?;
             let _ = d.engine;
             let mut im = ImageModel::load(&w, precision).map_err(|e| anyhow!("{}: {e}", m.id))?;
-            im.tile = auto_tile(im.tile, device);
-            Box::new(ImageProc { label: format!("Denoise ({})", m.id), model: im, params: ImageParams { noise_sigma: d.strength / 255.0 }, mix: d.mix })
+            im.tile = auto_tile(im.tile, device, res, m.memory_per_megapixel_mb);
+            Box::new(ImageProc { label: format!("Denoise ({})", m.id), model: im, params: ImageParams { noise_sigma: d.strength / 255.0 }, mix: d.mix, oom_fallback: res.oom_tile_fallback, oom_retries: 0 })
         }
         Operation::Deblur(d) => {
             let m = model(models, &d.model_id)?;
             let w = load_weights(m, "weights", device)?;
             let mut im = ImageModel::load(&w, precision).map_err(|e| anyhow!("{}: {e}", m.id))?;
-            im.tile = auto_tile(im.tile, device).min(512);
-            Box::new(ImageProc { label: format!("Deblur ({})", m.id), model: im, params: ImageParams::default(), mix: d.strength })
+            im.tile = auto_tile(im.tile, device, res, m.memory_per_megapixel_mb).min(512);
+            Box::new(ImageProc { label: format!("Deblur ({})", m.id), model: im, params: ImageParams::default(), mix: d.strength, oom_fallback: res.oom_tile_fallback, oom_retries: 0 })
         }
         Operation::FaceRestore(f) => {
             let m = model(models, &f.model_id)?;
@@ -371,6 +417,19 @@ mod tests {
         for (a, b) in img.data.iter().zip(&back.data) {
             assert!((a - b).abs() < 1e-4);
         }
+    }
+
+    #[test]
+    fn tiles_shrink_with_memory_budget() {
+        let mut r = JobResources::default();
+        assert_eq!(auto_tile(512, &Device::Cpu, &r, 1000.0), 512);
+        r.memory_budget_mb = 200; // 0.1 MP per tile at 1000 MB/MP
+        let t = auto_tile(512, &Device::Cpu, &r, 1000.0);
+        assert!(t < 512 && t >= 300, "{t}");
+        r.memory_budget_mb = 1;
+        assert_eq!(auto_tile(512, &Device::Cpu, &r, 1000.0), MIN_TILE);
+        assert!(is_oom("CUDA_ERROR_OUT_OF_MEMORY"));
+        assert!(!is_oom("shape mismatch"));
     }
 
     #[test]

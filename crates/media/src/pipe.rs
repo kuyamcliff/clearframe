@@ -140,7 +140,7 @@ impl DecodeSpec {
             c.current_dir(d);
         }
         c.args(["-v", "error"]);
-        if let Some(t) = self.threads {
+        if let Some(t) = self.threads.or_else(crate::tools::default_threads) {
             c.args(["-threads", &t.to_string()]);
         }
         if let Some(s) = self.start {
@@ -280,6 +280,9 @@ impl EncodeSpec {
             vf.push(format!("setsar={}", sar.replace(':', "/")));
         }
         c.args(["-vf", &vf.join(",")]);
+        if let Some(t) = crate::tools::default_threads() {
+            c.args(["-threads", &t.to_string()]);
+        }
         c.args(self.video.args(&self.color));
         c.args(self.color.ffmpeg_args());
         match &self.output {

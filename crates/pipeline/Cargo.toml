@@ -25,6 +25,7 @@ parking_lot.workspace = true
 rayon.workspace = true
 image.workspace = true
 chrono.workspace = true
+sysinfo.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -640,6 +640,47 @@ pub struct ResolvedModel {
     pub files: BTreeMap<String, PathBuf>,
     /// role -> sha256 of the converted file.
     pub sha256: BTreeMap<String, String>,
+    /// Network architecture id (from the catalog).
+    #[serde(default)]
+    pub architecture: String,
+    /// Output scale factor (super-resolution models).
+    #[serde(default = "one")]
+    pub scale: u32,
+    /// Working memory per input megapixel (catalog estimate), used to size tiles.
+    #[serde(default = "default_mb_per_mp")]
+    pub memory_per_megapixel_mb: f64,
+}
+
+fn default_mb_per_mp() -> f64 {
+    1500.0
+}
+
+/// Resource limits applied to one job (resolved from the Performance settings).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct JobResources {
+    /// Worker threads for inference and FFmpeg (0 = automatic).
+    pub threads: u32,
+    /// Memory budget for this job in MB (0 = unlimited); used to size model tiles.
+    pub memory_budget_mb: u64,
+    /// GPU memory budget for model tiles in MB (0 = automatic).
+    pub vram_budget_mb: u64,
+    /// Retry with smaller tiles when a device runs out of memory.
+    pub oom_tile_fallback: bool,
+    /// Pause the job when free disk space falls below this (MB).
+    pub min_free_disk_mb: u64,
+    /// "auto", "cpu", "cuda:N", "metal:N".
+    pub device: String,
+}
+
+impl Default for JobResources {
+    fn default() -> Self {
+        Self { threads: 0, memory_budget_mb: 0, vram_budget_mb: 0, oom_tile_fallback: true, min_free_disk_mb: 1024, device: "auto".into() }
+    }
+}
+
+fn one() -> u32 {
+    1
 }
 
 /// Seconds in the source timeline.
@@ -682,6 +723,11 @@ pub struct JobSpec {
     /// Skip mux/validation and produce a quick preview file instead.
     #[serde(default)]
     pub preview: bool,
+    #[serde(default)]
+    pub resources: JobResources,
+    /// Planner's low peak-memory estimate (MB), used by the scheduler.
+    #[serde(default)]
+    pub estimated_memory_mb: f64,
 }
 
 fn default_segment() -> f64 {

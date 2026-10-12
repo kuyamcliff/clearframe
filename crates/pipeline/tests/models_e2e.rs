@@ -25,7 +25,8 @@ fn resolved(dir: &PathBuf, id: &str, files: &[(&str, &str)]) -> (String, Resolve
         h.insert(role.to_string(), sha(&p));
         f.insert(role.to_string(), p);
     }
-    (id.to_string(), ResolvedModel { id: id.into(), version: "test".into(), files: f, sha256: h })
+    let scale = if id.contains("realesr") { 4 } else { 1 };
+    (id.to_string(), ResolvedModel { id: id.into(), version: "test".into(), files: f, sha256: h, architecture: String::new(), scale, memory_per_megapixel_mb: 1500.0 })
 }
 
 macro_rules! setup {
@@ -114,4 +115,17 @@ fn anime_upscale_quality_vs_bicubic() {
     let p_bic = psnr(&hi, &bic);
     eprintln!("PSNR model {p_model:.2} dB vs bicubic {p_bic:.2} dB");
     assert!(p_model > p_bic, "model {p_model} should beat bicubic {p_bic} on clean synthetic line art");
+}
+
+#[test]
+fn smoke_tests_accept_real_and_reject_mismatched_weights() {
+    let Some(m) = models_dir() else { return };
+    let f = |n: &str| -> std::collections::BTreeMap<String, PathBuf> { [("weights".to_string(), m.join(format!("{n}.safetensors")))].into_iter().collect() };
+    let ok = clearframe_pipeline::smoke::smoke_test("srvgg_compact", &f("realesr-animevideov3")).unwrap();
+    assert!(ok.contains("x4"), "{ok}");
+    assert!(clearframe_pipeline::smoke::smoke_test("auto", &f("ffdnet_color")).unwrap().starts_with("ffdnet"));
+    assert!(clearframe_pipeline::smoke::smoke_test("rife", &f("rife426")).is_ok());
+    assert!(clearframe_pipeline::smoke::smoke_test("rrdbnet", &f("realesr-animevideov3")).is_err());
+    let face: std::collections::BTreeMap<String, PathBuf> = [("restorer".to_string(), m.join("GFPGANv1.4.safetensors")), ("detector".to_string(), m.join("detection_mobilenet0.25_Final.safetensors"))].into_iter().collect();
+    assert!(clearframe_pipeline::smoke::smoke_test("gfpgan", &face).is_ok());
 }

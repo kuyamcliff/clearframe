@@ -1,0 +1,44 @@
+[package]
+name = "clearframe-app"
+description = "ClearFrame application services shared by the desktop app and CLI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+cuda = ["clearframe-pipeline/cuda"]
+metal = ["clearframe-pipeline/metal"]
+accelerate = ["clearframe-pipeline/accelerate"]
+
+[dependencies]
+clearframe-core.workspace = true
+clearframe-media.workspace = true
+clearframe-models.workspace = true
+clearframe-inference.workspace = true
+clearframe-pipeline.workspace = true
+clearframe-hardware.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+crossbeam-channel.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+sha2.workspace = true
+hex.workspace = true
+ureq.workspace = true
+dirs.workspace = true
+sysinfo.workspace = true
+rayon.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_System_Threading", "Win32_Foundation"] }
+
+[dev-dependencies]
+tempfile.workspace = true

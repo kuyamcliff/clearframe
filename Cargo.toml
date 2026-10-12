@@ -6,6 +6,9 @@ members = [
     "crates/inference",
     "crates/media",
     "crates/pipeline",
+    "crates/hardware",
+    "crates/app",
+    "crates/cli",
 ]
 
 [workspace.package]
@@ -31,13 +34,13 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 dirs = "5"
 tempfile = "3"
-log = "0.4"
+log = { version = "0.4", features = ["std"] }
 parking_lot = "0.12"
 crossbeam-channel = "0.5"
 rayon = "1"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 base64 = "0.22"
-ureq = { version = "2", default-features = false, features = ["tls", "native-certs"] }
+ureq = { version = "2", default-features = false, features = ["tls", "native-certs", "json"] }
 sysinfo = "0.32"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 clap = { version = "4", features = ["derive"] }
@@ -49,6 +52,7 @@ clearframe-models = { path = "crates/models" }
 clearframe-inference = { path = "crates/inference" }
 clearframe-pipeline = { path = "crates/pipeline" }
 clearframe-hardware = { path = "crates/hardware" }
+clearframe-app = { path = "crates/app" }
 
 [profile.release]
 lto = "thin"

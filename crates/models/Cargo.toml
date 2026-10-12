@@ -14,12 +14,14 @@ hex.workspace = true
 zip.workspace = true
 safetensors.workspace = true
 ed25519-dalek.workspace = true
+rand_core = { version = "0.6", features = ["getrandom"] }
 base64.workspace = true
 ureq.workspace = true
 chrono.workspace = true
 log.workspace = true
 fs2.workspace = true
 clearframe-core.workspace = true
+parking_lot.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -51,6 +51,21 @@ const EXE: &str = ".exe";
 #[cfg(not(windows))]
 const EXE: &str = "";
 
+static DEFAULT_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Limit threads used by every FFmpeg process this process starts (0 = FFmpeg default).
+/// Applied as `-threads` for decoders/encoders and `-filter_threads` for filter graphs.
+pub fn set_default_threads(n: usize) {
+    DEFAULT_THREADS.store(n, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn default_threads() -> Option<usize> {
+    match DEFAULT_THREADS.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => None,
+        n => Some(n),
+    }
+}
+
 /// Environment variable to point at a directory containing ffmpeg and ffprobe.
 pub const ENV_FFMPEG_DIR: &str = "CLEARFRAME_FFMPEG_DIR";
 
@@ -262,6 +277,9 @@ impl FfmpegTools {
     pub fn ffmpeg_cmd(&self) -> Command {
         let mut c = Command::new(&self.ffmpeg);
         c.args(["-nostdin", "-hide_banner"]);
+        if let Some(t) = default_threads() {
+            c.args(["-filter_threads", &t.to_string()]);
+        }
         hide_console(&mut c);
         c
     }

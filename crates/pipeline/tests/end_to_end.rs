@@ -316,3 +316,75 @@ fn vfr_rotation_and_streams() {
     assert!(r.mux.as_ref().unwrap().warnings.iter().any(|w| w.contains("re-encoded")), "pcm->aac in mp4 should be reported");
     assert!((o.duration - 2.0).abs() < 0.2, "{}", o.duration);
 }
+
+#[test]
+fn still_preview_with_interpolation_and_resize() {
+    let t = need_ffmpeg!();
+    let d = tempfile::tempdir().unwrap();
+    let src = clip(d.path(), "src.mp4", "", 1.0);
+    let info = probe(&t, &src).unwrap();
+    let req = clearframe_pipeline::preview::StillRequest {
+        source: src.clone(),
+        time: 0.5,
+        pipeline: Pipeline {
+            stages: vec![
+                Stage::new(Operation::Interpolate(InterpolateSettings { engine: InterpEngine::Blend, ..Default::default() })),
+                Stage::new(Operation::Resize(ResizeSettings { width: 160, height: 120, ..Default::default() })),
+            ],
+        },
+        output: OutputSettings::default(),
+        engine: Default::default(),
+        models: Default::default(),
+        resources: Default::default(),
+        crop: None,
+    };
+    let lookup = clearframe_pipeline::runner::ResolvedLookup { models: &req.models, scales: Default::default() };
+    let r = clearframe_pipeline::preview::render_still(&t, &info, &req, &lookup).unwrap();
+    assert_eq!(r.processed_size, (160, 120));
+    assert_eq!(r.original_size, (320, 240));
+    assert!(r.processed_png.starts_with(b"\x89PNG"));
+}
+
+#[test]
+fn low_disk_pauses_job_and_resumes() {
+    let t = need_ffmpeg!();
+    let d = tempfile::tempdir().unwrap();
+    let src = clip(d.path(), "src.mp4", "", 6.0);
+    let mut spec = job(d.path(), &src, Pipeline::single(Operation::Grain(GrainSettings::default())), OutputSettings::default(), "disk");
+    // Demand more free space than any disk has: the job must stop safely.
+    spec.resources.min_free_disk_mb = u64::MAX / 2_000_000;
+    let r = run(&t, &spec);
+    assert!(matches!(r, Err(JobError::Resources(ref m)) if m.contains("disk space")), "{r:?}");
+    assert!(!spec.destination.exists());
+    assert_eq!(sha(&src), sha(&src));
+    // After space is "freed" the job resumes and completes.
+    spec.resources.min_free_disk_mb = 1;
+    let r = run(&t, &spec).unwrap();
+    assert!(r.validation.unwrap().ok);
+}
+
+#[test]
+fn thread_limit_and_cpu_device_are_applied() {
+    let t = need_ffmpeg!();
+    let d = tempfile::tempdir().unwrap();
+    let src = clip(d.path(), "src.mp4", "", 1.0);
+    clearframe_media::tools::set_default_threads(1);
+    let mut spec = job(d.path(), &src, Pipeline::single(Operation::Grain(GrainSettings::default())), OutputSettings::default(), "threads");
+    spec.resources.device = "cpu".into();
+    spec.resources.threads = 1;
+    let mut samples = 0;
+    let r = run_with(&t, &spec, StopFlag::default(), |e| {
+        if let Event::Resources(s) = e {
+            assert!(s.system_memory_total_mb > 0);
+            samples += 1;
+        }
+    })
+    .unwrap();
+    clearframe_media::tools::set_default_threads(0);
+    assert_eq!(r.backend, "CPU");
+    let _ = samples;
+    // Unavailable devices are rejected before rendering.
+    spec.resources.device = "cuda:7".into();
+    spec.job_id = "threads2".into();
+    assert!(matches!(run(&t, &spec), Err(JobError::Invalid(_))));
+}

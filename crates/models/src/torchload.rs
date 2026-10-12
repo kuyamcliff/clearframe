@@ -728,7 +728,7 @@ fn read_zip_entry<R: Read + Seek>(zip: &mut zip::ZipArchive<R>, name: &str, limi
 
 fn load_legacy(bytes: &[u8], wrappers: &[&str]) -> Result<StateDict> {
     let mut pos = 0usize;
-    let mut next = |pos: &mut usize| -> Result<Value> {
+    let next = |pos: &mut usize| -> Result<Value> {
         let (v, n) = unpickle(&bytes[*pos..])?;
         *pos += n;
         Ok(v)
