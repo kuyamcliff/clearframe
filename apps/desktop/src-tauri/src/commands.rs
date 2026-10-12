@@ -458,6 +458,18 @@ fn allow_asset(h: AppHandle, path: PathBuf) {
     allow_file(&h, &path);
 }
 
+/// Files passed on the command line (file associations, "Open with"). Returned once.
+pub struct StartupFiles(pub std::sync::Mutex<Vec<PathBuf>>);
+
+#[tauri::command]
+fn startup_files(h: AppHandle, files: State<'_, StartupFiles>) -> Vec<PathBuf> {
+    let v = std::mem::take(&mut *files.0.lock().unwrap());
+    for p in &v {
+        allow_file(&h, p);
+    }
+    v
+}
+
 pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         app_info,
@@ -507,5 +519,6 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         update_catalog,
         refresh_tools,
         allow_asset,
+        startup_files,
     ]
 }

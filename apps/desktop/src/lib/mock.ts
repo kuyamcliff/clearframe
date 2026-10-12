@@ -30,7 +30,7 @@ declare global {
 export async function mockPick(_title: string, folder: boolean, _multiple: boolean): Promise<string[]> {
   const q = window.__cfMockPick;
   if (q && q.length) return q.shift()!;
-  return [folder ? "/home/demo/ClearFrame Exports" : "/home/demo/Videos/holiday clip.mp4"];
+  return [folder ? "/home/demo/ClipFX Enhance Exports" : "/home/demo/Videos/holiday clip.mp4"];
 }
 export async function mockSave(defaultPath: string): Promise<string | null> {
   const q = window.__cfMockSave;
@@ -38,23 +38,38 @@ export async function mockSave(defaultPath: string): Promise<string | null> {
   return defaultPath;
 }
 
-function svg(label: string, hue: number, w = 640, h = 360): string {
-  const s = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue},55%,35%)"/><stop offset="1" stop-color="hsl(${(hue + 60) % 360},60%,18%)"/></linearGradient></defs>
-<rect width="100%" height="100%" fill="url(#g)"/><circle cx="${w * 0.68}" cy="${h * 0.42}" r="${h * 0.18}" fill="hsla(${(hue + 30) % 360},70%,70%,.5)"/>
-<text x="24" y="${h - 24}" font-family="sans-serif" font-size="22" fill="#fff" opacity=".85">${label}</text></svg>`;
-  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(s);
+/** Procedural landscape used as a stand-in frame; `soft` adds blur and noise (the "original"). */
+function scene(t: number, soft: boolean, W0 = 1280, H0 = 720): string {
+  const w = 1280, h = 720;
+  const sun = 0.25 + ((t * 0.03) % 0.5);
+  const fx = soft
+    ? `<filter id="f"><feGaussianBlur stdDeviation="2.6"/><feComponentTransfer><feFuncR type="linear" slope=".92"/><feFuncG type="linear" slope=".92"/><feFuncB type="linear" slope=".95"/></feComponentTransfer></filter>
+<filter id="n"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="${Math.round(t * 10)}"/><feColorMatrix values="0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .22 0"/></filter>`
+    : `<filter id="f"><feComponentTransfer><feFuncR type="linear" slope="1.06" intercept="-.02"/><feFuncG type="linear" slope="1.06" intercept="-.02"/><feFuncB type="linear" slope="1.04"/></feComponentTransfer></filter>`;
+  const trees = Array.from({ length: 14 }, (_, i) => {
+    const x = (i * 97 + 40) % w, s = 0.7 + ((i * 37) % 10) / 14, y = h * 0.66 + ((i * 53) % 40);
+    return `<path d="M${x} ${y - 120 * s}l${34 * s} ${120 * s}h${-68 * s}z" fill="#1f4d2b"/><path d="M${x} ${y - 160 * s}l${26 * s} ${80 * s}h${-52 * s}z" fill="#2c6b3a"/>`;
+  }).join("");
+  const W = W0, H = H0;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 1280 720"><defs>${fx}
+<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2d5f9a"/><stop offset=".6" stop-color="#f2b880"/><stop offset="1" stop-color="#f6d6a8"/></linearGradient>
+<linearGradient id="hill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4f7a4a"/><stop offset="1" stop-color="#26422a"/></linearGradient></defs>
+<g filter="url(#f)"><rect width="100%" height="100%" fill="url(#sky)"/>
+<circle cx="${w * sun}" cy="${h * 0.42}" r="${h * 0.09}" fill="#fff3d0"/>
+<path d="M0 ${h * 0.6} C ${w * 0.2} ${h * 0.45}, ${w * 0.35} ${h * 0.62}, ${w * 0.55} ${h * 0.52} S ${w * 0.85} ${h * 0.5}, ${w} ${h * 0.58} V ${h} H 0 Z" fill="#6f8fa8" opacity=".7"/>
+<path d="M0 ${h * 0.7} C ${w * 0.25} ${h * 0.6}, ${w * 0.45} ${h * 0.75}, ${w * 0.7} ${h * 0.64} S ${w} ${h * 0.7}, ${w} ${h * 0.7} V ${h} H 0 Z" fill="url(#hill)"/>
+${trees}<rect y="${h * 0.86}" width="100%" height="${h * 0.14}" fill="#1c3322"/></g>
+${soft ? `<rect width="100%" height="100%" filter="url(#n)"/>` : ""}</svg>`;
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
 }
 
 export function mockFileUrl(path: string): string {
-  if (path.startsWith("mock://")) {
-    const [kind, arg] = path.slice(7).split("/");
-    const t = parseFloat(arg || "0");
-    if (kind === "processed") return svg(`Processed (demo) ${t.toFixed(2)}s`, 200 + t * 7);
-    if (kind === "thumb") return svg("", 190 + t * 9, 160, 90);
-    return svg(`Original (demo) ${t.toFixed(2)}s`, 200 + t * 7);
-  }
-  return "";
+  if (!path.startsWith("mock://")) return "";
+  const [kind, arg] = path.slice(7).split("/");
+  const t = parseFloat(arg || "0");
+  if (kind === "processed") return scene(t, false, 2560, 1440);
+  if (kind === "thumb") return scene(t, false, 160, 90);
+  return scene(t, true);
 }
 
 const now = () => new Date().toISOString();
@@ -64,12 +79,12 @@ const defaultSettings = (): Settings => structuredClone(settingsFixture) as unkn
 
 const state = {
   settings: defaultSettings(),
-  models: structuredClone(modelsFixture) as unknown as ModelCard[],
+  models: (structuredClone(modelsFixture) as unknown as ModelCard[]).map((c) => ({ ...c, capability: { level: "cpu_fallback_only" as const, backend: "cpu", reason: "Runs on the CPU here (no GPU backend in this build)" } })),
   presets: structuredClone(presetsFixture) as unknown as Preset[],
   jobs: [] as JobRecord[],
   queuePaused: false,
-  modelsDir: "/home/demo/.local/share/ClearFrame/models",
-  cacheDir: "/home/demo/.cache/ClearFrame",
+  modelsDir: "/home/demo/.local/share/ClipFX Enhance/models",
+  cacheDir: "/home/demo/.cache/ClipFX Enhance",
   cacheBytes: { previews: 120e6, thumbnails: 8e6, proxies: 300e6, downloads: 0, temp: 2e6, jobs: 50e6 } as Record<CacheArea, number>,
   recent: [] as { path: string; kind: string; title: string; opened_at: string }[],
   timers: new Map<string, number>(),
@@ -79,7 +94,7 @@ if (typeof window !== "undefined") window.__cfMock = state;
 function resolvePlan(p: Settings["performance"]) {
   const cores = 8, ram = 16384;
   const threads = p.mode === "balanced" ? 6 : p.mode === "high_performance" ? 7 : p.mode === "maximum" ? 8 : Math.max(1, p.cpu_threads || cores - p.reserve_cpu_threads);
-  const reserve = p.memory_preset === "more_for_others" ? ram / 2 : p.memory_preset === "balanced" ? 4096 : p.memory_preset === "prioritize_clear_frame" ? 2048 : ram - p.memory_budget_mb;
+  const reserve = p.memory_preset === "more_for_others" ? ram / 2 : p.memory_preset === "balanced" ? 4096 : p.memory_preset === "prioritize_app" ? 2048 : ram - p.memory_budget_mb;
   const budget = p.memory_preset === "custom" ? p.memory_budget_mb : ram - reserve;
   return {
     threads, priority: p.mode === "balanced" ? "below_normal" : p.mode === "custom" ? p.priority : "normal", memory_budget_mb: budget,
@@ -176,8 +191,8 @@ function baseName(p: string) {
 
 function makeJob(n: NewJob, kind: "render" | "preview" = "render"): JobRecord {
   const id = `demo-${seq++}`;
-  const folder = n.folder ?? "/home/demo/Videos/ClearFrame";
-  const name = n.file_name ?? baseName(n.source).replace(/\.[^.]+$/, "") + "_enhanced." + n.output.container;
+  const folder = n.folder ?? "/home/demo/Videos/ClipFX Enhance";
+  const name = (n.file_name ?? baseName(n.source).replace(/\.[^.]+$/, "") + "_enhanced") + "." + n.output.container;
   const j: JobRecord = {
     id, kind, name, state: "queued", source: n.source, destination: `${folder}/${name}`, spec_json: JSON.stringify({ pipeline: n.pipeline }),
     created_at: now(), updated_at: now(), started_at: null, finished_at: null, progress: 0, progress_json: null, detail: null, error: null,
@@ -200,8 +215,8 @@ function storage(): StorageOverview {
   const cacheTotal = Object.values(state.cacheBytes).reduce((a, b) => a + b, 0);
   return {
     paths: {
-      data_dir: "/home/demo/.local/share/ClearFrame", models_dir: state.modelsDir, cache_dir: state.cacheDir, logs_dir: "/home/demo/.local/share/ClearFrame/logs",
-      config_dir: "/home/demo/.config/ClearFrame", models_is_default: state.modelsDir.endsWith("ClearFrame/models"), cache_is_default: state.cacheDir.endsWith(".cache/ClearFrame"),
+      data_dir: "/home/demo/.local/share/ClipFX Enhance", models_dir: state.modelsDir, cache_dir: state.cacheDir, logs_dir: "/home/demo/.local/share/ClipFX Enhance/logs",
+      config_dir: "/home/demo/.config/ClipFX Enhance", models_is_default: state.modelsDir.endsWith("ClipFX Enhance/models"), cache_is_default: state.cacheDir.endsWith(".cache/ClipFX Enhance"),
     },
     models: { models_dir: state.modelsDir, models_dir_exists: true, total_bytes: modelsTotal, per_model: per, staging_bytes: 0, free_bytes: 120e9 },
     cache: {
@@ -313,7 +328,7 @@ export async function mockInvoke(cmd: string, a: Record<string, any> = {}): Prom
           stages: n.pipeline.stages.filter((s) => s.enabled).map((s, i) => ({ stage_id: s.id, index: i, label: s.type, exec: { kind: "native" }, input: fmt, output: s.type === "enhance" ? out : fmt, notes: [], models: s.settings?.model_id ? [s.settings.model_id] : [] })),
           estimates: { peak_memory_mb: [900, 1600], output_size_mb: [40, 90], work_disk_mb: [200, 400], output_frames: 375, input_frames: 375 },
         },
-        destination: `${n.folder ?? "/home/demo/Videos/ClearFrame"}/${n.file_name ?? baseName(n.source).replace(/\.[^.]+$/, "") + "_enhanced." + n.output.container}`,
+        destination: `${n.folder ?? "/home/demo/Videos/ClipFX Enhance"}/${(n.file_name ?? baseName(n.source).replace(/\.[^.]+$/, "") + "_enhanced") + "." + n.output.container}`,
         destination_folder_ok: { Ok: null }, free_bytes: 120e9,
       };
     }
@@ -326,7 +341,7 @@ export async function mockInvoke(cmd: string, a: Record<string, any> = {}): Prom
     case "collect_videos":
       return a.paths;
     case "default_export_folder":
-      return "/home/demo/Videos/ClearFrame";
+      return "/home/demo/Videos/ClipFX Enhance";
     case "jobs_list":
       return state.jobs.filter((j) => a.includePreviews || j.kind === "render").map((j) => ({ ...j }));
     case "job_events":
@@ -437,8 +452,8 @@ export async function mockInvoke(cmd: string, a: Record<string, any> = {}): Prom
     case "storage_cancel":
       return null;
     case "storage_reset":
-      if (a.kind === "models") state.modelsDir = "/home/demo/.local/share/ClearFrame/models";
-      else state.cacheDir = "/home/demo/.cache/ClearFrame";
+      if (a.kind === "models") state.modelsDir = "/home/demo/.local/share/ClipFX Enhance/models";
+      else state.cacheDir = "/home/demo/.cache/ClipFX Enhance";
       return null;
     case "cache_clear": {
       let freed = 0;
@@ -488,7 +503,7 @@ export async function mockInvoke(cmd: string, a: Record<string, any> = {}): Prom
     }
     case "new_project":
       return {
-        format: "clearframe-project", schema_version: 1, name: a.name, source: { path: a.source, fingerprint: "", size_bytes: 0 }, pipeline: { stages: [] },
+        format: "clipfx-project", schema_version: 1, name: a.name, source: { path: a.source, fingerprint: "", size_bytes: 0 }, pipeline: { stages: [] },
         output: (await mockInvoke("operation_defaults")).output, range: null, preview_range: null, export: { folder: null, file_name: null },
         engine: { backend: null, precision: "fp32" }, models: {}, job_ids: [], preset_id: null, notes: "", created_at: now(), updated_at: now(),
       };
@@ -498,7 +513,7 @@ export async function mockInvoke(cmd: string, a: Record<string, any> = {}): Prom
       return a.req.project;
     case "project_open": {
       const p = (state as any).projects?.[a.path];
-      if (!p) throw "Not a ClearFrame project (demo mode can only reopen projects saved in this session).";
+      if (!p) throw "Not a ClipFX Enhance project (demo mode can only reopen projects saved in this session).";
       return { project: p, source_found: true, source_changed: false, suggested_source: null, missing_models: [], migrated_from: null, backup_path: null };
     }
     case "recent_list":
@@ -508,7 +523,7 @@ export async function mockInvoke(cmd: string, a: Record<string, any> = {}): Prom
       else state.recent = state.recent.filter((r) => r.path !== a.path);
       return null;
     case "diagnostics":
-      return `ClearFrame diagnostics (demo mode)\nredacted: ${a.redact}\n`;
+      return `ClipFX Enhance diagnostics (demo mode)\nredacted: ${a.redact}\n`;
     case "write_text_file":
       return null;
     case "check_update":
@@ -518,6 +533,8 @@ export async function mockInvoke(cmd: string, a: Record<string, any> = {}): Prom
     case "refresh_tools":
     case "allow_asset":
       return null;
+    case "startup_files":
+      return [];
   }
   throw `demo backend: unknown command ${cmd}`;
 }

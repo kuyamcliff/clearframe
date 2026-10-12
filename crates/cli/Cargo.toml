@@ -1,12 +1,12 @@
 [package]
 name = "clearframe-cli"
-description = "ClearFrame command-line interface and processing worker"
+description = "ClipFX Enhance command-line interface and processing worker"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "clearframe"
+name = "clipfx"
 path = "src/main.rs"
 
 [features]

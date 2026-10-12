@@ -1,6 +1,6 @@
-# Contributing to ClearFrame
+# Contributing to ClipFX Enhance
 
-Thanks for helping. ClearFrame is free software for everyone, so contributions must keep it
+Thanks for helping. ClipFX Enhance is free software for everyone, so contributions must keep it
 free: no paid services, accounts, telemetry, remote inference or dependencies under
 non-open-source licenses (`cargo deny check licenses` enforces this for Rust crates).
 
@@ -13,7 +13,7 @@ non-open-source licenses (`cargo deny check licenses` enforces this for Rust cra
 - Never mark something as working because a button exists: features need tests that
   exercise real behaviour.
 - Tests must use temporary folders (`tempfile`, `--data-root`, `mktemp -d`) and must never
-  touch a real user's ClearFrame data.
+  touch a real user's ClipFX Enhance data.
 - The UI must be honest. Show what was measured, what is estimated and what is not
   available on this machine.
 
@@ -46,8 +46,8 @@ regenerate `MODEL_LICENSES.md` (a test checks it).
 2. Add a catalog entry with HTTPS URLs from the original publisher, SHA-256, sizes, licenses,
    training-data notes and limitations. Only add models whose license permits free use and
    redistribution of results for personal use. State commercial restrictions accurately.
-3. Run `clearframe catalog validate model-catalog/catalog.json` and the model tests with
-   `CLEARFRAME_TEST_MODELS=1`.
+3. Run `clipfx catalog validate model-catalog/catalog.json` and the model tests with
+   `CLIPFX_TEST_MODELS=1`.
 
 ## Pull requests
 

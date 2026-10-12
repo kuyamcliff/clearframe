@@ -48,7 +48,7 @@ pub fn init(dir: &Path, name: &str) {
     let _ = std::fs::create_dir_all(dir);
     let path = dir.join(format!("{name}.log"));
     let file = std::fs::OpenOptions::new().create(true).append(true).open(&path).ok();
-    let level = std::env::var("CLEARFRAME_LOG").ok().and_then(|l| l.parse().ok()).unwrap_or(log::LevelFilter::Info);
+    let level = std::env::var("CLIPFX_LOG").ok().and_then(|l| l.parse().ok()).unwrap_or(log::LevelFilter::Info);
     if log::set_boxed_logger(Box::new(FileLogger { path, file: Mutex::new(file), level })).is_ok() {
         log::set_max_level(level);
     }

@@ -76,7 +76,7 @@ with smaller tiles.
 ## Storage and resources
 
 See [storage.md](storage.md). Resource limits (threads, priority, memory budget, device) are
-resolved from Settings → Performance into a `ResourcePlan` and passed to each worker. The
+resolved from Preferences → Performance into a `ResourcePlan` and passed to each worker. The
 worker configures rayon, FFmpeg `-threads`/`-filter_threads`, process priority and tile
 sizes from it. The scheduler starts jobs only while their estimated memory fits the budget.
 It pauses them at a safe point under system memory pressure, or when free disk space drops

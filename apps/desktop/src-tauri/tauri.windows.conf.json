@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "mainBinaryName": "ClearFrame",
+  "mainBinaryName": "ClipFXEnhance",
   "bundle": {
     "resources": {
       "../../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",

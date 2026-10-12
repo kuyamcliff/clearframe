@@ -2,7 +2,7 @@ import { api, pickFile, pickSave, VIDEO_EXTENSIONS } from "../lib/ipc";
 import { basename, dirname, stem } from "../lib/format";
 import { openSource, setPipeline, toast, useStore } from "../state/store";
 
-const FILTER = [{ name: "ClearFrame project", extensions: ["cfproj"] }];
+const FILTER = [{ name: "ClipFX Enhance project", extensions: ["cfxproj"] }];
 
 export async function openProjectFile(path?: string) {
   const p = path ?? (await pickFile("Open project", FILTER))[0];
@@ -27,10 +27,10 @@ export async function openProjectFile(path?: string) {
   setPipeline(pr.pipeline, false);
   useStore.setState({
     output: pr.output, range: pr.range, engine: pr.engine, exportFolder: pr.export.folder, exportFileName: pr.export.file_name,
-    projectPath: p, projectName: pr.name, dirty: false, history: { past: [], future: [] },
+    projectPath: p, projectName: pr.name, dirty: false, history: { past: [], future: [] }, dialog: null,
   });
   if (r.migrated_from !== null) toast("info", `Project upgraded from format ${r.migrated_from}. A backup was kept${r.backup_path ? ` at ${r.backup_path}` : ""}.`);
-  if (r.missing_models.length) toast("warning", `This project uses models that are not installed: ${r.missing_models.join(", ")}.`, { label: "Model Library", run: () => useStore.setState({ view: "models" }) });
+  if (r.missing_models.length) toast("warning", `This project uses models that are not installed: ${r.missing_models.join(", ")}.`, { label: "Models", run: () => useStore.setState({ dialog: "models" }) });
 }
 
 export async function saveProject(saveAs = false) {
@@ -38,9 +38,9 @@ export async function saveProject(saveAs = false) {
   if (!s.sourcePath || !s.output) return;
   let path = s.projectPath;
   if (!path || saveAs) {
-    path = await pickSave("Save project", `${dirname(s.sourcePath)}/${stem(s.sourcePath)}.cfproj`, FILTER);
+    path = await pickSave("Save project", `${dirname(s.sourcePath)}/${stem(s.sourcePath)}.cfxproj`, FILTER);
     if (!path) return;
-    if (!path.toLowerCase().endsWith(".cfproj")) path += ".cfproj";
+    if (!path.toLowerCase().endsWith(".cfxproj")) path += ".cfxproj";
   }
   const name = s.projectName ?? stem(path);
   const base = await api.newProject(s.sourcePath, name);

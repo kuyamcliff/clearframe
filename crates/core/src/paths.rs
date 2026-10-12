@@ -5,9 +5,9 @@
 //!
 //! | | Windows | macOS | Linux |
 //! |---|---|---|---|
-//! | data (DB, logs, models) | `%LOCALAPPDATA%\ClearFrame` | `~/Library/Application Support/ClearFrame` | `$XDG_DATA_HOME/ClearFrame` (`~/.local/share/ClearFrame`) |
-//! | cache | `%LOCALAPPDATA%\ClearFrame\cache` | `~/Library/Caches/ClearFrame` | `$XDG_CACHE_HOME/ClearFrame` (`~/.cache/ClearFrame`) |
-//! | storage config | `%LOCALAPPDATA%\ClearFrame\storage.json` | `~/Library/Application Support/ClearFrame/storage.json` | `$XDG_CONFIG_HOME/ClearFrame/storage.json` |
+//! | data (DB, logs, models) | `%LOCALAPPDATA%\ClipFX Enhance` | `~/Library/Application Support/ClipFX Enhance` | `$XDG_DATA_HOME/ClipFX Enhance` (`~/.local/share/ClipFX Enhance`) |
+//! | cache | `%LOCALAPPDATA%\ClipFX Enhance\cache` | `~/Library/Caches/ClipFX Enhance` | `$XDG_CACHE_HOME/ClipFX Enhance` (`~/.cache/ClipFX Enhance`) |
+//! | storage config | `%LOCALAPPDATA%\ClipFX Enhance\storage.json` | `~/Library/Application Support/ClipFX Enhance/storage.json` | `$XDG_CONFIG_HOME/ClipFX Enhance/storage.json` |
 //!
 //! The model and cache locations are user-configurable and recorded in
 //! `storage.json`, which lives outside both so it survives relocations.
@@ -16,8 +16,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const APP_DIR: &str = "ClearFrame";
-pub const EXPORTS_DIR: &str = "ClearFrame Exports";
+pub const APP_DIR: &str = "ClipFX Enhance";
+pub const EXPORTS_DIR: &str = "ClipFX Enhance Exports";
 pub const STORAGE_FILE: &str = "storage.json";
 
 /// User-chosen locations (None = platform default).
@@ -92,7 +92,7 @@ pub fn platform_defaults() -> (PathBuf, PathBuf, PathBuf) {
     let fallback = || std::env::temp_dir().join(APP_DIR);
     let data = dirs::data_local_dir().map(|d| d.join(APP_DIR)).unwrap_or_else(fallback);
     let cache = if cfg!(windows) {
-        // %LOCALAPPDATA%\ClearFrame\cache
+        // %LOCALAPPDATA%\ClipFX Enhance\cache
         data.join("cache")
     } else {
         dirs::cache_dir().map(|d| d.join(APP_DIR)).unwrap_or_else(|| data.join("cache"))
@@ -143,7 +143,7 @@ impl AppPaths {
     }
 
     pub fn database(&self) -> PathBuf {
-        self.data_dir.join("clearframe.sqlite3")
+        self.data_dir.join("clipfx.sqlite3")
     }
 
     pub fn storage_file(&self) -> PathBuf {
@@ -207,7 +207,7 @@ pub fn load_storage_config(config_dir: &Path) -> StorageConfig {
     std::fs::read(config_dir.join(STORAGE_FILE)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-/// The documented default export folder: `<Videos>/ClearFrame Exports`, falling
+/// The documented default export folder: `<Videos>/ClipFX Enhance Exports`, falling
 /// back to Documents, then the home directory.
 pub fn default_export_dir() -> PathBuf {
     dirs::video_dir().or_else(dirs::document_dir).or_else(dirs::home_dir).unwrap_or_else(std::env::temp_dir).join(EXPORTS_DIR)

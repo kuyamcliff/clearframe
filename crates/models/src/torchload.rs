@@ -1,7 +1,7 @@
 //! Safe loader for PyTorch checkpoint files (`.pth` / `.pkl`).
 //!
 //! PyTorch checkpoints are Python pickles. Loading them with Python's `pickle`
-//! module can execute arbitrary code, so ClearFrame never does that. Instead this
+//! module can execute arbitrary code, so ClipFX Enhance never does that. Instead this
 //! module implements a small, *restricted* pickle virtual machine:
 //!
 //! * only the opcodes needed to describe nested dicts/lists/tuples of tensors are

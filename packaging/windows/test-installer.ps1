@@ -1,14 +1,14 @@
 # Installer lifecycle test for the NSIS setup. Run on a disposable Windows
 # machine or CI runner as Administrator (the installer is per-machine):
 #
-#   pwsh packaging/windows/test-installer.ps1 -Installer <ClearFrame_x.y.z_x64-setup.exe>
+#   pwsh packaging/windows/test-installer.ps1 -Installer <ClipFX Enhance_x.y.z_x64-setup.exe>
 #
 # Covers: silent install, self-test of the installed app (FFmpeg found, user
 # folders writable), upgrade over an existing install keeping user data,
 # uninstall keeping user data, and install into a custom folder containing
 # spaces and non-ASCII characters.
 #
-# It writes only a marker file inside %LOCALAPPDATA%\ClearFrame and removes it
+# It writes only a marker file inside %LOCALAPPDATA%\ClipFX Enhance and removes it
 # at the end; it refuses to run if that folder already holds real user data
 # unless -AllowExistingData is given.
 param(
@@ -17,17 +17,17 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $Installer = (Resolve-Path $Installer).Path
-$data = Join-Path $env:LOCALAPPDATA "ClearFrame"
-$defaultDir = Join-Path $env:ProgramFiles "ClearFrame"
-$customDir = Join-Path $env:ProgramFiles "ClearFrame Test Ünïcode Dir"
+$data = Join-Path $env:LOCALAPPDATA "ClipFX Enhance"
+$defaultDir = Join-Path $env:ProgramFiles "ClipFX Enhance"
+$customDir = Join-Path $env:ProgramFiles "ClipFX Enhance Test Ünïcode Dir"
 $results = [System.Collections.Generic.List[string]]::new()
 
 function Step($name) { Write-Host "`n=== $name ===" }
 function Pass($name) { $results.Add("PASS  $name"); Write-Host "PASS  $name" -ForegroundColor Green }
 function Fail($name) { $results.Add("FAIL  $name"); throw "FAIL  $name" }
 
-if ((Test-Path (Join-Path $data "clearframe.db")) -and -not $AllowExistingData) {
-  throw "$data already contains ClearFrame data. Run this test on a clean machine or pass -AllowExistingData."
+if ((Test-Path (Join-Path $data "clipfx.sqlite3")) -and -not $AllowExistingData) {
+  throw "$data already contains ClipFX Enhance data. Run this test on a clean machine or pass -AllowExistingData."
 }
 
 function Install([string]$dir) {
@@ -48,8 +48,8 @@ function Uninstall([string]$dir) {
 }
 
 function SelfTest([string]$dir) {
-  $exe = Join-Path $dir "ClearFrame.exe"
-  if (-not (Test-Path $exe)) { throw "ClearFrame.exe missing in $dir" }
+  $exe = Join-Path $dir "ClipFXEnhance.exe"
+  if (-not (Test-Path $exe)) { throw "ClipFXEnhance.exe missing in $dir" }
   $out = Join-Path ([System.IO.Path]::GetTempPath()) ("cf-selftest-" + [guid]::NewGuid() + ".json")
   $p = Start-Process -FilePath $exe -ArgumentList @("--self-test", "`"$out`"") -Wait -PassThru
   $json = Get-Content $out -Raw | ConvertFrom-Json
@@ -61,14 +61,14 @@ function SelfTest([string]$dir) {
 try {
   Step "fresh silent install"
   Install ""
-  if (-not (Test-Path (Join-Path $defaultDir "ClearFrame.exe"))) { Fail "installed into Program Files" }
+  if (-not (Test-Path (Join-Path $defaultDir "ClipFXEnhance.exe"))) { Fail "installed into Program Files" }
   Pass "installed into $defaultDir"
   $r = SelfTest $defaultDir
   if (-not $r.ffmpeg) { Fail "bundled FFmpeg found ($($r.ffmpeg_error))" }
   if ($r.ffmpeg.source -ne "bundled") { Fail "FFmpeg comes from the install folder (got $($r.ffmpeg.source))" }
   if (-not ($r.ffmpeg.vidstab -and $r.ffmpeg.zscale)) { Fail "FFmpeg has vid.stab and zscale" }
   Pass "self-test: FFmpeg $($r.ffmpeg.version) bundled, folders writable"
-  if (-not ($r.paths.models_dir -like "$data*")) { Fail "models live under %LOCALAPPDATA%\ClearFrame (got $($r.paths.models_dir))" }
+  if (-not ($r.paths.models_dir -like "$data*")) { Fail "models live under %LOCALAPPDATA%\ClipFX Enhance (got $($r.paths.models_dir))" }
   Pass "per-user data in $($r.paths.data_dir)"
   if (Get-ChildItem -Path $defaultDir -Recurse -Include *.db, models, cache -ErrorAction SilentlyContinue) { Fail "no user data inside Program Files" }
   Pass "no user data inside Program Files"
@@ -85,7 +85,7 @@ try {
 
   Step "silent uninstall keeps user data"
   Uninstall $defaultDir
-  if (Test-Path (Join-Path $defaultDir "ClearFrame.exe")) { Fail "program files removed" }
+  if (Test-Path (Join-Path $defaultDir "ClipFXEnhance.exe")) { Fail "program files removed" }
   if (-not (Test-Path $marker)) { Fail "uninstall keeps user data" }
   Pass "uninstall removed the program and kept user data"
 
@@ -95,7 +95,7 @@ try {
   if (-not (Test-Path $marker)) { Fail "reinstall finds existing data" }
   Pass "custom folder install works and reuses existing data"
   Uninstall $customDir
-  if (Test-Path (Join-Path $customDir "ClearFrame.exe")) { Fail "custom folder uninstall" }
+  if (Test-Path (Join-Path $customDir "ClipFXEnhance.exe")) { Fail "custom folder uninstall" }
   Pass "custom folder uninstall"
 }
 finally {

@@ -396,7 +396,7 @@ pub fn run_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, st
     let started = Instant::now();
     events(Event::State { state: JobState::Preparing, detail: "Reading source".into() });
     if spec.schema_version > SCHEMA_VERSION {
-        return Err(JobError::Invalid(format!("job was created by a newer ClearFrame (schema {})", spec.schema_version)));
+        return Err(JobError::Invalid(format!("job was created by a newer ClipFX Enhance (schema {})", spec.schema_version)));
     }
     let (info, plan) = plan_job(tools, spec, lookup, None).map_err(JobError::Failed)?;
     if plan.has_errors() {
@@ -601,7 +601,7 @@ pub fn run_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, st
         mux: Some(mux_report),
     };
     if spec.write_sidecar {
-        let side = PathBuf::from(format!("{}.clearframe.json", dest.display()));
+        let side = PathBuf::from(format!("{}.clipfx.json", dest.display()));
         if !side.exists() {
             let _ = std::fs::write(&side, serde_json::to_vec_pretty(&report).unwrap_or_default());
         }

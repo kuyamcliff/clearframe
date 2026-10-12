@@ -1,9 +1,9 @@
 # Model licenses
 
-ClearFrame's own code is MIT licensed. The AI models it can download are separate works with their own licenses.
-Nothing below is bundled with ClearFrame: each model is downloaded from its original publisher only when you press **Install**, and its license is shown in the Model Library before you do.
+ClipFX Enhance's own code is MIT licensed. The AI models it can download are separate works with their own licenses.
+Nothing below is bundled with ClipFX Enhance: each model is downloaded from its original publisher only when you press **Install**, and its license is shown in the Model Library before you do.
 
-**Your responsibility:** some licenses restrict commercial use of the weights or of results. ClearFrame shows what each publisher states; it is not legal advice. Check the original license before using output commercially.
+**Your responsibility:** some licenses restrict commercial use of the weights or of results. ClipFX Enhance shows what each publisher states; it is not legal advice. Check the original license before using output commercially.
 
 This file is generated from `model-catalog/catalog.json` (a test checks that it stays in sync).
 
@@ -126,7 +126,7 @@ This file is generated from `model-catalog/catalog.json` (a test checks that it 
 - Source: https://github.com/TencentARC/GFPGAN
 - Weights license: Apache-2.0 (GFPGAN); MIT (RetinaFace via facexlib); code license: Apache-2.0
 - Training data: FFHQ (CC BY-NC-SA 4.0); RetinaFace on WIDER FACE.
-- Notes: GFPGAN's repository license lists third-party components; ClearFrame uses the 'clean' architecture that needs no custom CUDA operators. The model was trained on FFHQ, whose images are under CC BY-NC-SA 4.0 — review this if your use is commercial.
+- Notes: GFPGAN's repository license lists third-party components; ClipFX Enhance uses the 'clean' architecture that needs no custom CUDA operators. The model was trained on FFHQ, whose images are under CC BY-NC-SA 4.0 — review this if your use is commercial.
 - File `GFPGANv1.4.pth` (restorer): https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth — sha256 `e2cd4703ab14f4d01fd1383a8a8b266f9a5833dacee8e6a79d3bf21a1b6be5ad`
 - File `detection_Resnet50_Final.pth` (detector): https://github.com/xinntao/facexlib/releases/download/v0.1.0/detection_Resnet50_Final.pth — sha256 `6d1de9c2944f2ccddca5f5e010ea5ae64a39845a86311af6fdf30841b0a5a16d`
 

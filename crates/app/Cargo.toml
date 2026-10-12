@@ -1,6 +1,6 @@
 [package]
 name = "clearframe-app"
-description = "ClearFrame application services shared by the desktop app and CLI"
+description = "ClipFX Enhance application services shared by the desktop app and CLI"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

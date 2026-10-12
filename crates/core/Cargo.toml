@@ -1,6 +1,6 @@
 [package]
 name = "clearframe-core"
-description = "ClearFrame core: settings, persistence, jobs, projects, presets"
+description = "ClipFX Enhance core: settings, persistence, jobs, projects, presets"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

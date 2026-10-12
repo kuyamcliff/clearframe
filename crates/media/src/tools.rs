@@ -67,7 +67,7 @@ pub fn default_threads() -> Option<usize> {
 }
 
 /// Environment variable to point at a directory containing ffmpeg and ffprobe.
-pub const ENV_FFMPEG_DIR: &str = "CLEARFRAME_FFMPEG_DIR";
+pub const ENV_FFMPEG_DIR: &str = "CLIPFX_FFMPEG_DIR";
 
 fn candidate_dirs(configured: Option<&Path>, extra_bundled: &[PathBuf]) -> Vec<(PathBuf, ToolSource)> {
     let mut v = Vec::new();
@@ -93,7 +93,7 @@ fn candidate_dirs(configured: Option<&Path>, extra_bundled: &[PathBuf]) -> Vec<(
             v.push((dir.join("../Resources/ffmpeg"), ToolSource::Bundled));
             // Linux AppImage / deb: /usr/bin/<exe> -> /usr/lib/<app>
             v.push((dir.join("../lib/clearframe"), ToolSource::Bundled));
-            v.push((dir.join("../lib/ClearFrame"), ToolSource::Bundled));
+            v.push((dir.join("../lib/ClipFX Enhance"), ToolSource::Bundled));
         }
     }
     if let Some(paths) = std::env::var_os("PATH") {
@@ -145,7 +145,7 @@ fn well_known_dirs() -> Vec<PathBuf> {
 /// Tauri sidecar naming: `ffmpeg-<target-triple>[.exe]` next to the executable.
 fn sidecar_names(base: &str) -> Vec<String> {
     let mut names = vec![format!("{base}{EXE}")];
-    if let Some(triple) = option_env!("CLEARFRAME_TARGET_TRIPLE") {
+    if let Some(triple) = option_env!("CLIPFX_TARGET_TRIPLE") {
         names.push(format!("{base}-{triple}{EXE}"));
     }
     names

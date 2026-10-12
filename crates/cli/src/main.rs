@@ -1,4 +1,4 @@
-//! `clearframe` command-line interface. Also the isolated processing worker
+//! `clipfx` command-line interface. Also the isolated processing worker
 //! (`--worker <job.json>`, `--still <request.json> <out-dir>`).
 
 use std::collections::BTreeMap;
@@ -17,7 +17,7 @@ use clearframe_core::paths::CacheArea;
 use clearframe_pipeline::spec::{OutputSettings, Pipeline, TimeRange};
 
 #[derive(Parser)]
-#[command(name = "clearframe", version, about = "ClearFrame — local, open-source video enhancement")]
+#[command(name = "clipfx", version, about = "ClipFX Enhance — local, open-source video enhancement")]
 struct Cli {
     /// Keep all data under this folder (portable mode / testing).
     #[arg(long, global = true)]
@@ -122,7 +122,7 @@ enum ModelsCmd {
     Verify {
         id: String,
     },
-    /// Re-scan the models folder (detects files removed outside ClearFrame).
+    /// Re-scan the models folder (detects files removed outside ClipFX Enhance).
     Refresh,
     /// Import a custom ESRGAN-family checkpoint.
     Import {
@@ -235,7 +235,7 @@ fn open_app(cli: &Cli, quiet: bool) -> Result<Arc<App>> {
         }
     }
     let app = App::open(cli.data_root.as_deref(), WorkerCommand::current_exe(), bundled, sink)?;
-    clearframe_app::logging::init(&app.paths().logs_dir, "clearframe");
+    clearframe_app::logging::init(&app.paths().logs_dir, "clipfx");
     Ok(app)
 }
 
@@ -390,7 +390,7 @@ fn run(cli: Cli) -> Result<bool> {
             let (pl, out): (Pipeline, OutputSettings) = match (preset, pipeline) {
                 (Some(p), _) => {
                     let all = app.presets();
-                    let pr = all.iter().find(|x| &x.id == p || x.name.eq_ignore_ascii_case(p)).ok_or_else(|| anyhow!("preset {p} not found (see `clearframe presets list`)"))?;
+                    let pr = all.iter().find(|x| &x.id == p || x.name.eq_ignore_ascii_case(p)).ok_or_else(|| anyhow!("preset {p} not found (see `clipfx presets list`)"))?;
                     (pr.pipeline.clone(), pr.output.clone().unwrap_or_default())
                 }
                 (None, Some(f)) => {
@@ -474,7 +474,7 @@ fn run(cli: Cli) -> Result<bool> {
                     let (p, missing) = app.import_preset(file)?;
                     println!("imported {} ({})", p.name, p.id);
                     for m in missing {
-                        println!("needs model {m} (install with `clearframe models install {m}`)");
+                        println!("needs model {m} (install with `clipfx models install {m}`)");
                     }
                 }
             }

@@ -23,7 +23,7 @@ fn main() {
             ));
         }
         Some("--version") => {
-            println!("ClearFrame {}", env!("CARGO_PKG_VERSION"));
+            println!("ClipFX Enhance {}", env!("CARGO_PKG_VERSION"));
             return;
         }
         Some("--self-test") => {
@@ -51,7 +51,10 @@ fn main() {
         _ => {}
     }
 
+    let startup: Vec<std::path::PathBuf> = args.iter().skip(1).filter(|a| !a.starts_with('-')).map(std::path::PathBuf::from).filter(|p| p.is_file()).collect();
+
     tauri::Builder::default()
+        .manage(commands::StartupFiles(std::sync::Mutex::new(startup)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
@@ -65,8 +68,8 @@ fn main() {
                 dirs.push(r.join("ffmpeg"));
             }
             let state = App::open(None, WorkerCommand::current_exe(), dirs, sink).map_err(|e| e.to_string())?;
-            clearframe_app::logging::init(&state.paths().logs_dir, "clearframe");
-            log::info!("ClearFrame {} starting", env!("CARGO_PKG_VERSION"));
+            clearframe_app::logging::init(&state.paths().logs_dir, "clipfx");
+            log::info!("ClipFX Enhance {} starting", env!("CARGO_PKG_VERSION"));
             commands::allow_cache_assets(app.handle(), &state);
             state.start_scheduler();
             app.manage(state);
@@ -82,7 +85,7 @@ fn main() {
         })
         .invoke_handler(commands::handler())
         .run(tauri::generate_context!())
-        .expect("error while running ClearFrame");
+        .expect("error while running ClipFX Enhance");
 }
 
 fn bundled_dirs() -> Vec<std::path::PathBuf> {

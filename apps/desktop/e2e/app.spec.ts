@@ -1,208 +1,199 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // Behavioural UI tests against the in-browser demo backend (src/lib/mock.ts).
-// They check what the interface does and promises; the engine itself is
-// covered by the Rust test suites.
-
-async function start(page: Page) {
-  await page.goto("/");
-  await page.getByRole("button", { name: /^Start$/ }).click();
-}
-
-async function openVideo(page: Page, path = "/home/demo/Videos/holiday clip.mp4") {
-  await page.evaluate((p) => (window.__cfMockPick = [[p]]), path);
-  await page.getByRole("button", { name: "Open video…" }).click();
-}
+// The engine itself is covered by the Rust test suites.
 
 const mock = (page: Page) => page.evaluate(() => JSON.parse(JSON.stringify({ ...window.__cfMock, timers: undefined })));
 
-test("onboarding never installs models that were not ticked", async ({ page }) => {
+async function openVideo(page: Page, path = "/home/demo/Videos/holiday clip.mp4", scratch = true) {
+  await page.evaluate((p) => (window.__cfMockPick = [[p]]), path);
+  await page.getByRole("button", { name: "Browse" }).click();
+  if (scratch) await page.getByRole("button", { name: "Start editing" }).click();
+}
+
+test.beforeEach(async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("dialog", { name: "Welcome to ClearFrame" })).toBeVisible();
-  await page.getByRole("button", { name: /^Start$/ }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByText("Drop videos here").waitFor();
+});
+
+test("demo mode is labelled and nothing is installed on start", async ({ page }) => {
+  await expect(page.getByText("Demo", { exact: true })).toBeVisible();
   const m = await mock(page);
   expect(m.models.every((c: any) => c.state === "not_installed" && !c.in_progress)).toBe(true);
-  expect(m.settings.onboarding_complete).toBe(true);
 });
 
-test("demo mode is clearly labelled", async ({ page }) => {
-  await start(page);
-  await expect(page.getByRole("status").filter({ hasText: "Demo mode" })).toBeVisible();
+test("opening a video offers presets or a blank start", async ({ page }) => {
+  await openVideo(page, undefined, false);
+  const dlg = page.getByRole("dialog", { name: "How do you want to edit?" });
+  await expect(dlg).toBeVisible();
+  await dlg.getByTestId("preset-builtin.stabilize").click();
+  await expect(dlg).toHaveCount(0);
+  await expect(page.getByTestId("fx")).toContainText("Stabilization");
+  await expect(page.getByTestId("sec-stabilize").getByRole("switch")).toHaveAttribute("aria-checked", "true");
 });
 
-test("export is blocked until the required model is installed, then queues and completes", async ({ page }) => {
-  await start(page);
+test("export is blocked until the model is installed, then queues and completes", async ({ page }) => {
   await openVideo(page);
-  await expect(page.getByText("1280×720").first()).toBeVisible();
-  await page.getByTestId("task-enhance").getByRole("switch").click();
-  await expect(page.getByTestId("plan-summary")).toContainText("is not installed");
-  await expect(page.getByTestId("open-export")).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Preview frame" })).toBeDisabled();
+  await page.getByTestId("sec-enhance").getByRole("switch").click();
+  await expect(page.getByTestId("issues")).toContainText("AnimeVideo v3 is not installed");
+  await expect(page.getByTestId("export-as")).toBeDisabled();
+  await expect(page.getByTestId("render")).toBeEnabled();
 
-  await page.getByRole("button", { name: /Install \(/ }).click();
-  await expect(page.getByTestId("plan-summary")).not.toContainText("is not installed", { timeout: 10_000 });
-  await expect(page.getByTestId("open-export")).toBeEnabled();
+  await page.getByRole("button", { name: /^Install AnimeVideo v3 ·/ }).click();
+  await expect(page.getByTestId("issues")).toHaveCount(0, { timeout: 10_000 });
+  await page.getByTestId("render").click();
+  await expect(page.getByAltText("Preview")).toBeVisible();
 
-  await page.getByRole("button", { name: "Preview frame" }).click();
-  await expect(page.getByAltText("Processed")).toBeVisible();
-
-  await page.getByTestId("open-export").click();
-  await expect(page.getByTestId("destination")).toContainText("holiday clip_enhanced.mp4");
-  await page.getByTestId("confirm-export").click();
-  await page.getByRole("button", { name: "Queue", exact: true }).click();
-  const job = page.locator(".job").first();
-  await expect(job).toContainText("Completed", { timeout: 15_000 });
-  await expect(job.getByRole("button", { name: "Show file" })).toBeVisible();
+  await page.evaluate(() => (window.__cfMockSave = ["/home/demo/Out/holiday final.mp4"]));
+  await page.getByTestId("export-as").click();
+  await page.getByRole("button", { name: /Export queue/ }).click();
+  const queue = page.getByTestId("queue");
+  await expect(queue).toContainText("holiday final.mp4");
+  await expect(queue).toContainText("Done", { timeout: 15_000 });
+  await expect(queue.getByRole("button", { name: "Show file" })).toBeVisible();
 });
 
-test("an unreadable video shows an error instead of crashing", async ({ page }) => {
-  await start(page);
-  await openVideo(page, "/home/demo/missing file.mp4");
-  await expect(page.getByRole("alert")).toContainText("could not be opened");
-  await expect(page.getByRole("button", { name: "Choose another file…" })).toBeVisible();
+test("an unreadable video shows an error", async ({ page }) => {
+  await openVideo(page, "/home/demo/missing file.mp4", false);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("alert").first()).toContainText("Could not open");
+  await expect(page.getByRole("button", { name: "Choose another file" })).toBeVisible();
 });
 
-test("model install can be paused, resumed and cancelled; uninstall explains usage", async ({ page }) => {
-  await start(page);
-  await page.getByRole("button", { name: "Model Library", exact: true }).click();
-  const card = page.getByTestId("model-xinntao.realesrgan-x4plus");
-  await card.getByRole("button", { name: "Install" }).click();
-  await card.getByRole("button", { name: "Pause" }).click();
-  await expect(card.getByTestId("model-state")).toHaveText("Paused");
-  await card.getByRole("button", { name: "Discard" }).click();
-  await expect(card.getByTestId("model-state")).toHaveText("Not installed");
+test("model library: pause, discard, install and uninstall with usage check", async ({ page }) => {
+  await page.getByRole("button", { name: "Models", exact: true }).click();
+  const dlg = page.getByRole("dialog", { name: "Models" });
+  await dlg.getByTestId("model-xinntao.realesrgan-x4plus").click();
+  const detail = dlg.getByTestId("model-detail");
+  await detail.getByRole("button", { name: "Install" }).click();
+  await detail.getByRole("button", { name: "Pause" }).click();
+  await expect(dlg.getByTestId("model-xinntao.realesrgan-x4plus").getByTestId("model-state")).toHaveText("Paused");
+  await detail.getByRole("button", { name: "Discard" }).click();
+  await expect(dlg.getByTestId("model-xinntao.realesrgan-x4plus").getByTestId("model-state")).toHaveText("Not installed");
 
-  const anime = page.getByTestId("model-xinntao.realesr-animevideo-v3");
-  await anime.getByRole("button", { name: "Install" }).click();
-  await expect(anime.getByTestId("model-state")).toHaveText("Installed", { timeout: 10_000 });
-  await anime.getByRole("button", { name: "Uninstall" }).click();
-  const dlg = page.getByRole("dialog");
-  await expect(dlg).toContainText("Used by");
-  await expect(dlg).toContainText("Preset:");
-  await dlg.getByRole("button", { name: "Keep" }).click();
-  await expect(anime.getByTestId("model-state")).toHaveText("Installed");
-  await anime.getByRole("button", { name: "Uninstall" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Uninstall" }).click();
-  await expect(anime.getByTestId("model-state")).toHaveText("Not installed");
+  await dlg.getByTestId("model-xinntao.realesr-animevideo-v3").click();
+  await detail.getByRole("button", { name: "Install" }).click();
+  await expect(dlg.getByTestId("model-xinntao.realesr-animevideo-v3").getByTestId("model-state")).toHaveText("Installed", { timeout: 10_000 });
+  await detail.getByRole("button", { name: "Uninstall" }).click();
+  const confirm = page.getByRole("dialog", { name: /Uninstall/ });
+  await expect(confirm).toContainText("Preset:");
+  await confirm.getByRole("button", { name: "Uninstall" }).click();
+  await expect(dlg.getByTestId("model-xinntao.realesr-animevideo-v3").getByTestId("model-state")).toHaveText("Not installed");
 });
 
-test("changing the cache location shows a plan and progress, then switches", async ({ page }) => {
-  await start(page);
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Storage & cache" }).click();
+test("moving the cache shows a plan and progress, then switches", async ({ page }) => {
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page.getByRole("navigation", { name: "Preferences sections" }).getByRole("button", { name: "Storage" }).click();
   await page.getByTestId("loc-cache").getByRole("button", { name: "Change…" }).click();
   await expect(page.getByTestId("start-move")).toBeDisabled();
-  await page.evaluate(() => (window.__cfMockPick = [["/mnt/big disk/ClearFrame cache"]]));
-  await page.getByRole("dialog").getByRole("button", { name: "Choose…" }).click();
-  await expect(page.getByRole("dialog")).toContainText("to move");
+  await page.evaluate(() => (window.__cfMockPick = [["/mnt/big disk/ClipFX cache"]]));
+  const dlg = page.getByRole("dialog", { name: "Move cache" });
+  await dlg.getByRole("button", { name: "Browse" }).click();
+  await expect(dlg).toContainText("files");
   await page.getByTestId("start-move").click();
-  await expect(page.getByRole("dialog")).toContainText("Moved to /mnt/big disk/ClearFrame cache", { timeout: 10_000 });
-  await page.getByRole("dialog").getByRole("button", { name: "Close" }).last().click();
-  await expect(page.getByTestId("loc-cache")).toContainText("/mnt/big disk/ClearFrame cache");
+  await expect(dlg).toContainText("Moved to /mnt/big disk/ClipFX cache", { timeout: 10_000 });
+  await dlg.getByRole("button", { name: "Done" }).click();
+  await expect(page.getByTestId("loc-cache")).toContainText("/mnt/big disk/ClipFX cache");
   await expect(page.getByTestId("loc-cache")).toContainText("custom");
 });
 
 test("a destination inside the current folder is refused", async ({ page }) => {
-  await start(page);
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Storage & cache" }).click();
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page.getByRole("navigation", { name: "Preferences sections" }).getByRole("button", { name: "Storage" }).click();
   await page.getByTestId("loc-models").getByRole("button", { name: "Change…" }).click();
-  await page.evaluate(() => (window.__cfMockPick = [["/home/demo/.local/share/ClearFrame/models/sub"]]));
-  await page.getByRole("dialog").getByRole("button", { name: "Choose…" }).click();
-  await expect(page.getByRole("dialog")).toContainText("inside the current folder");
+  await page.evaluate(() => (window.__cfMockPick = [["/home/demo/.local/share/ClipFX Enhance/models/sub"]]));
+  await page.getByRole("dialog", { name: "Move models" }).getByRole("button", { name: "Browse" }).click();
+  await expect(page.getByRole("dialog", { name: "Move models" })).toContainText("inside the current folder");
   await expect(page.getByTestId("start-move")).toBeDisabled();
 });
 
 test("clearing the cache keeps unfinished job data unless asked", async ({ page }) => {
-  await start(page);
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Storage & cache" }).click();
-  await page.getByRole("checkbox", { name: "Select Job work files (segments, intermediates)" }).check();
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page.getByRole("navigation", { name: "Preferences sections" }).getByRole("button", { name: "Storage" }).click();
+  await page.getByTestId("cache-table").getByText("Job work files").click();
   await page.getByTestId("clear-cache").click();
-  await expect(page.getByRole("status").filter({ hasText: "Freed" })).toContainText("Kept 1 item");
+  await expect(page.getByRole("status").filter({ hasText: "Freed" })).toContainText("kept 1 in use");
   const m = await mock(page);
   expect(m.cacheBytes.jobs).toBeGreaterThan(0);
   expect(m.cacheBytes.previews).toBe(0);
 });
 
-test("performance mode and memory preset persist", async ({ page }) => {
-  await start(page);
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Performance" }).click();
-  await page.getByRole("radio", { name: /Maximum/ }).click();
-  await page.getByRole("group", { name: "Memory preset" }).getByRole("button", { name: "More for other apps" }).click();
+test("performance mode and memory priority persist", async ({ page }) => {
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page.getByRole("navigation", { name: "Preferences sections" }).getByRole("button", { name: "Performance" }).click();
+  await page.getByRole("group", { name: "Performance mode" }).getByRole("button", { name: "Maximum" }).click();
+  await page.getByRole("group", { name: "Memory preset" }).getByRole("button", { name: "Other apps" }).click();
   await expect(page.getByTestId("monitor")).toBeVisible();
   await expect.poll(async () => (await mock(page)).settings.performance.mode).toBe("maximum");
   await expect.poll(async () => (await mock(page)).settings.performance.memory_preset).toBe("more_for_others");
-  await page.getByRole("radio", { name: /Custom/ }).click();
+  await page.getByRole("group", { name: "Performance mode" }).getByRole("button", { name: "Custom" }).click();
   await expect(page.getByLabel("CPU threads", { exact: true })).toBeVisible();
 });
 
-test("presets apply to the pipeline and user presets can be saved and deleted", async ({ page }) => {
-  await start(page);
+test("presets popover applies, creates and deletes presets", async ({ page }) => {
   await openVideo(page);
   await page.getByRole("button", { name: "Presets", exact: true }).click();
-  await page.getByTestId("preset-builtin.stabilize").getByRole("button", { name: "Use" }).click();
-  await expect(page.getByText("Based on preset: Stabilize (auto crop)")).toBeVisible();
-  await expect(page.getByTestId("task-stabilize").getByRole("switch")).toHaveAttribute("aria-checked", "true");
+  await page.getByTestId("preset-builtin.smooth-60").click();
+  await expect(page.getByTestId("sec-interpolate").getByRole("switch")).toHaveAttribute("aria-checked", "true");
 
-  await page.getByRole("button", { name: "Save as preset" }).click();
-  await page.getByLabel("Name").fill("My steady look");
-  await page.getByRole("button", { name: "Save preset" }).click();
   await page.getByRole("button", { name: "Presets", exact: true }).click();
-  const mine = page.locator(".card", { hasText: "My steady look" });
+  await page.getByRole("button", { name: "Create new" }).click();
+  await page.getByLabel("Name").fill("My smooth look");
+  await page.getByRole("button", { name: "Save" }).click();
+  const pop = page.getByRole("dialog", { name: "Presets" });
+  const mine = pop.locator(".item", { hasText: "My smooth look" });
   await expect(mine).toBeVisible();
-  await expect(page.getByTestId("preset-builtin.stabilize").getByRole("button", { name: "Delete" })).toHaveCount(0);
-  await mine.getByRole("button", { name: "Delete" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Delete preset" }).click();
-  await expect(page.locator(".card", { hasText: "My steady look" })).toHaveCount(0);
+  await mine.getByRole("button", { name: /More for/ }).click();
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+  await page.getByRole("dialog", { name: /Delete/ }).getByRole("button", { name: "Delete" }).click();
+  await expect(pop.locator(".item", { hasText: "My smooth look" })).toHaveCount(0);
 });
 
-test("undo and redo restore pipeline edits", async ({ page }) => {
-  await start(page);
+test("undo and redo restore adjustments", async ({ page }) => {
   await openVideo(page);
-  const sw = page.getByTestId("task-grain").getByRole("switch");
+  const sw = page.getByTestId("sec-grain").getByRole("switch");
   await sw.click();
   await expect(sw).toHaveAttribute("aria-checked", "true");
-  await page.getByRole("button", { name: "Undo" }).click();
+  await page.keyboard.press("Control+z");
   await expect(sw).toHaveAttribute("aria-checked", "false");
   await page.keyboard.press("Control+Shift+Z");
   await expect(sw).toHaveAttribute("aria-checked", "true");
 });
 
-test("advanced pipeline editor reorders and removes stages", async ({ page }) => {
-  await start(page);
+test("a second enhancement pass can be added and removed", async ({ page }) => {
   await openVideo(page);
-  await page.getByRole("button", { name: "Pipeline" }).click();
-  for (const label of ["Film grain", "Deinterlace"]) {
-    await page.getByRole("button", { name: "Add stage" }).click();
-    await page.getByRole("menuitem", { name: label }).click();
-  }
-  const rows = page.locator(".stage-row");
-  await expect(rows).toHaveCount(2);
-  await expect(rows.nth(0)).toContainText("Film grain");
-  await rows.nth(1).getByRole("button", { name: "Move up" }).click();
-  await expect(rows.nth(0)).toContainText("Deinterlace");
-  await rows.nth(1).getByRole("button", { name: "Remove stage" }).click();
-  await expect(rows).toHaveCount(1);
+  await page.getByTestId("sec-enhance").getByRole("switch").click();
+  await page.getByRole("button", { name: "Add second enhancement" }).click();
+  await expect(page.getByTestId("sec-enhance")).toContainText("Second enhancement");
+  await page.getByTestId("sec-enhance").getByRole("button", { name: "Remove pass" }).click();
+  await expect(page.getByTestId("sec-enhance")).not.toContainText("Second enhancement");
 });
 
-test("queue items can be paused, resumed and cancelled with confirmation", async ({ page }) => {
-  await start(page);
+test("queue items pause, cancel with confirmation and retry", async ({ page }) => {
   await openVideo(page);
-  await page.getByTestId("task-grain").getByRole("switch").click();
+  await page.getByTestId("sec-grain").getByRole("switch").click();
   await page.evaluate(() => (window.__cfMock!.queuePaused = true));
-  await page.getByTestId("open-export").click();
-  await page.getByTestId("confirm-export").click();
-  await page.getByRole("button", { name: "Queue", exact: true }).click();
-  const job = page.locator(".job").first();
-  await expect(job).toContainText("Queued");
-  await job.getByRole("button", { name: "Pause" }).click();
-  await expect(job).toContainText("Paused");
-  await job.getByRole("button", { name: "Cancel" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Cancel export" }).click();
-  await expect(job).toContainText("Cancelled");
-  await job.getByRole("button", { name: "Retry" }).click();
-  await expect(job).toContainText("Queued");
+  await page.getByTestId("quick-export").click();
+  await page.getByRole("button", { name: /Export queue/ }).click();
+  const q = page.getByTestId("queue");
+  await expect(q).toContainText("Queued");
+  await q.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(q).toContainText("Paused");
+  await q.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.getByRole("dialog", { name: "Cancel this export?" }).getByRole("button", { name: "Cancel export" }).click();
+  await expect(q).toContainText("Cancelled");
+  await q.getByRole("button", { name: "Retry" }).click();
+  await expect(q).toContainText("Queued");
+});
+
+test("sources panel lists opened videos and switches between them", async ({ page }) => {
+  await openVideo(page);
+  await page.getByRole("button", { name: /^Sources/ }).click();
+  await page.evaluate(() => (window.__cfMockPick = [["/home/demo/Videos/second take.mp4"]]));
+  await page.getByRole("button", { name: "Add videos" }).click();
+  await page.getByRole("button", { name: "Start editing" }).click();
+  const panel = page.getByTestId("sources");
+  await expect(panel).toContainText("holiday clip.mp4");
+  await expect(panel).toContainText("second take.mp4");
+  await expect(page.locator(".crumbs")).toContainText("second take.mp4");
 });

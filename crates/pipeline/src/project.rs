@@ -1,4 +1,4 @@
-//! Project files (`.cfproj`): portable JSON describing a source, pipeline,
+//! Project files (`.cfxproj`): portable JSON describing a source, pipeline,
 //! ranges and export settings. Sources are referenced, never embedded.
 
 use std::path::{Path, PathBuf};
@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::spec::*;
 
-pub const PROJECT_FORMAT: &str = "clearframe-project";
-pub const PROJECT_EXTENSION: &str = "cfproj";
+pub const PROJECT_FORMAT: &str = "clipfx-project";
+pub const PROJECT_EXTENSION: &str = "cfxproj";
 const MAX_PROJECT_BYTES: u64 = 4 << 20;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -68,9 +68,9 @@ pub struct Project {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
-    #[error("not a ClearFrame project: {0}")]
+    #[error("not a ClipFX Enhance project: {0}")]
     Format(String),
-    #[error("this project was saved by a newer version of ClearFrame (schema {0})")]
+    #[error("this project was saved by a newer version of ClipFX Enhance (schema {0})")]
     TooNew(u32),
     #[error("invalid project: {0}")]
     Invalid(String),
@@ -139,7 +139,7 @@ impl Project {
             self.source.relative_path = src.strip_prefix(dir).ok().map(|r| r.to_string_lossy().replace('\\', "/"));
         }
         let data = serde_json::to_vec_pretty(self).map_err(|e| ProjectError::Invalid(e.to_string()))?;
-        let tmp = path.with_extension("cfproj.tmp");
+        let tmp = path.with_extension("cfxproj.tmp");
         std::fs::write(&tmp, data)?;
         std::fs::rename(&tmp, path)?;
         Ok(())
@@ -224,7 +224,7 @@ mod tests {
         let mut p = Project::new("Test", &src);
         p.source.fingerprint = clearframe_core::fsutil::quick_fingerprint(&src).unwrap();
         p.pipeline = Pipeline::single(Operation::Enhance(EnhanceSettings::default()));
-        let pf = d.path().join("test.cfproj");
+        let pf = d.path().join("test.cfxproj");
         p.save(&pf).unwrap();
         let r = Project::open(&pf, &|_| false).unwrap();
         assert!(r.source_found);
@@ -238,8 +238,8 @@ mod tests {
         let moved = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(moved.path().join("media")).unwrap();
         std::fs::rename(&src, moved.path().join("media/clip.mp4")).unwrap();
-        std::fs::rename(&pf, moved.path().join("test.cfproj")).unwrap();
-        let r = Project::open(&moved.path().join("test.cfproj"), &|_| true).unwrap();
+        std::fs::rename(&pf, moved.path().join("test.cfxproj")).unwrap();
+        let r = Project::open(&moved.path().join("test.cfxproj"), &|_| true).unwrap();
         assert!(!r.source_found);
         assert!(r.suggested_source.unwrap().ends_with("clip.mp4"));
     }
@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn migrates_v0_with_backup() {
         let d = tempfile::tempdir().unwrap();
-        let pf = d.path().join("old.cfproj");
+        let pf = d.path().join("old.cfxproj");
         std::fs::write(&pf, r#"{"name":"Old","source":{"path":"/nope.mp4"},"stages":[{"id":"g","type":"grain","settings":{}}]}"#).unwrap();
         let r = Project::open(&pf, &|_| true).unwrap();
         assert_eq!(r.migrated_from, Some(0));
@@ -259,8 +259,8 @@ mod tests {
     #[test]
     fn rejects_future_and_garbage() {
         let d = tempfile::tempdir().unwrap();
-        let pf = d.path().join("f.cfproj");
-        std::fs::write(&pf, r#"{"format":"clearframe-project","schema_version":42}"#).unwrap();
+        let pf = d.path().join("f.cfxproj");
+        std::fs::write(&pf, r#"{"format":"clipfx-project","schema_version":42}"#).unwrap();
         assert!(matches!(Project::open(&pf, &|_| true), Err(ProjectError::TooNew(42))));
         std::fs::write(&pf, "not json").unwrap();
         assert!(Project::open(&pf, &|_| true).is_err());

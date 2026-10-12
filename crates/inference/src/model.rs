@@ -8,7 +8,7 @@ use crate::image::RgbImage;
 use crate::tiling::{pad_to_multiple, process_tiled};
 use crate::weights::Weights;
 
-/// Network architectures ClearFrame ships reviewed adapters for.
+/// Network architectures ClipFX Enhance ships reviewed adapters for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum Architecture {

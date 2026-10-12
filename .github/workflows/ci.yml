@@ -44,10 +44,10 @@ jobs:
         shell: pwsh
         run: |
           ./packaging/windows/fetch-ffmpeg.ps1
-          "CLEARFRAME_FFMPEG_DIR=$((Resolve-Path apps/desktop/src-tauri/ffmpeg).Path)" >> $env:GITHUB_ENV
+          "CLIPFX_FFMPEG_DIR=$((Resolve-Path apps/desktop/src-tauri/ffmpeg).Path)" >> $env:GITHUB_ENV
       - name: Frontend placeholder for the desktop crate
         shell: bash
-        run: mkdir -p apps/desktop/dist && [ -f apps/desktop/dist/index.html ] || echo '<!doctype html><title>ClearFrame</title>' > apps/desktop/dist/index.html
+        run: mkdir -p apps/desktop/dist && [ -f apps/desktop/dist/index.html ] || echo '<!doctype html><title>ClipFX Enhance</title>' > apps/desktop/dist/index.html
       - name: Format
         if: runner.os == 'Linux'
         run: cargo fmt --all --check
@@ -61,7 +61,7 @@ jobs:
       - name: Model tests (downloads public weights, verified by SHA-256)
         if: runner.os == 'Linux'
         env:
-          CLEARFRAME_TEST_MODELS: "1"
+          CLIPFX_TEST_MODELS: "1"
         run: cargo test -p clearframe-pipeline --test models_e2e -- --test-threads=1
 
   frontend:
@@ -183,7 +183,7 @@ jobs:
       - name: Install the .deb and run its self-test
         run: |
           sudo apt-get install -y ./target/release/bundle/deb/*.deb
-          HOME=$(mktemp -d) xvfb-run -a clearframe-desktop --self-test "$RUNNER_TEMP/selftest.json" || (cat "$RUNNER_TEMP/selftest.json"; exit 1)
+          HOME=$(mktemp -d) xvfb-run -a clipfx-enhance --self-test "$RUNNER_TEMP/selftest.json" || (cat "$RUNNER_TEMP/selftest.json"; exit 1)
           cat "$RUNNER_TEMP/selftest.json"
           sudo apt-get remove -y clear-frame
       - uses: actions/upload-artifact@v4

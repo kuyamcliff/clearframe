@@ -1,4 +1,4 @@
-//! Compare ClearFrame model adapters with PyTorch reference outputs.
+//! Compare ClipFX Enhance model adapters with PyTorch reference outputs.
 //! usage: parity <refs_dir> <safetensors_dir>
 use std::path::Path;
 

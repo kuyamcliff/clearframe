@@ -20,7 +20,7 @@ pub enum DbError {
     Transition { from: String, to: String },
     #[error("not found: {0}")]
     NotFound(String),
-    #[error("the database was created by a newer version of ClearFrame (schema {0})")]
+    #[error("the database was created by a newer version of ClipFX Enhance (schema {0})")]
     TooNew(i64),
 }
 
@@ -406,7 +406,7 @@ impl Db {
     pub fn recover_interrupted(&self) -> Result<Vec<String>> {
         let ids: Vec<String> = self.jobs(true)?.into_iter().filter(|j| j.state.is_active()).map(|j| j.id).collect();
         for id in &ids {
-            self.set_job_state(id, JobState::Recoverable, Some("ClearFrame closed while this job was running"))?;
+            self.set_job_state(id, JobState::Recoverable, Some("ClipFX Enhance closed while this job was running"))?;
         }
         Ok(ids)
     }

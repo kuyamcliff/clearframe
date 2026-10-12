@@ -1,4 +1,4 @@
-//! Application-level tests with real worker processes (the `clearframe` binary),
+//! Application-level tests with real worker processes (the `clipfx` binary),
 //! synthetic media and synthetic model weights. All data lives in temp folders.
 
 use std::path::{Path, PathBuf};
@@ -19,7 +19,7 @@ fn have_ffmpeg() -> bool {
 }
 
 fn worker() -> WorkerCommand {
-    WorkerCommand { program: PathBuf::from(env!("CARGO_BIN_EXE_clearframe")), args: vec!["--worker".into()] }
+    WorkerCommand { program: PathBuf::from(env!("CARGO_BIN_EXE_clipfx")), args: vec!["--worker".into()] }
 }
 
 fn open(root: &Path) -> Arc<App> {
@@ -237,7 +237,7 @@ fn cache_relocation_with_paused_job_and_safe_clear() {
     assert!(app.paths().job_dir(&j.id).join("state.json").is_file());
     assert!(!app.paths().cache(CacheArea::Previews).join("old.mp4").exists());
     // Move the cache to a new folder (with spaces/Unicode).
-    let new_cache = d.path().join("Externe Platte/ClearFrame Cache ü");
+    let new_cache = d.path().join("Externe Platte/ClipFX Enhance Cache ü");
     let plan = app.plan_relocation(StorageKind::Cache, &new_cache);
     assert!(plan.plan.problems.is_empty(), "{:?}", plan.plan.problems);
     let old_cache = app.paths().cache_dir.clone();
@@ -271,7 +271,7 @@ fn models_folder_move_and_custom_model_render_offline() {
     let scale = app.resolve_models(&Pipeline::single(Operation::Enhance(EnhanceSettings { model_id: id.clone(), ..Default::default() }))).unwrap()[&id].scale;
     assert_eq!(scale, 4);
     // Move the models folder to "another drive".
-    let dest = d.path().join("D drive/ClearFrame Models");
+    let dest = d.path().join("D drive/ClipFX Enhance Models");
     app.relocate_blocking(StorageKind::Models, &dest, RelocationMode::Move).unwrap();
     assert!(app.models.resolve(&id).unwrap().1["weights"].starts_with(&dest));
     // Offline: break networking for this process and its workers; local processing still works.

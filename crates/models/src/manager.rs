@@ -14,13 +14,13 @@
 //! ```
 //!
 //! The filesystem is the source of truth: a model whose folder or files were
-//! deleted outside ClearFrame is reported as `missing`, a model whose files
+//! deleted outside ClipFX Enhance is reported as `missing`, a model whose files
 //! changed is `broken`; neither is ever used for processing.
 //!
 //! Install: preflight (platform, disk space) -> download to the cache's
 //! staging area with resumable range requests -> SHA-256 verification -> safe
 //! extraction -> conversion with reviewed code -> smoke inference -> atomic
-//! move into place. Nothing from a model package is ever executed. ClearFrame
+//! move into place. Nothing from a model package is ever executed. ClipFX Enhance
 //! has no separate model runtimes (inference is built into the application),
 //! so there is nothing shared to deduplicate between model folders.
 
@@ -51,7 +51,7 @@ pub enum ModelState {
     Testing,
     Installed,
     UpdateAvailable,
-    /// Files or the folder were removed outside ClearFrame.
+    /// Files or the folder were removed outside ClipFX Enhance.
     Missing,
     /// Files exist but do not match their recorded checksums or sizes.
     Broken,
@@ -253,7 +253,7 @@ impl ModelManager {
             root: RwLock::new(models_dir),
             staging_root: RwLock::new(staging_dir),
             catalog: RwLock::new(catalog),
-            user_agent: format!("ClearFrame/{}", env!("CARGO_PKG_VERSION")),
+            user_agent: format!("ClipFX-Enhance/{}", env!("CARGO_PKG_VERSION")),
         }
     }
 
@@ -303,7 +303,7 @@ impl ModelManager {
         let mut rec = match (meta, known) {
             (Some(m), _) => m,
             (None, Some(mut k)) => {
-                // Folder or metadata removed outside ClearFrame.
+                // Folder or metadata removed outside ClipFX Enhance.
                 k.state = ModelState::Missing;
                 k.error = Some(format!("The model folder {} is missing.", dir.display()));
                 return Some(k);

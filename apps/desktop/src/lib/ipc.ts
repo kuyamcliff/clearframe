@@ -186,4 +186,5 @@ export const api = {
   updateCatalog: () => call<string>("update_catalog"),
   refreshTools: () => call<void>("refresh_tools"),
   allowAsset: (path: string) => call<void>("allow_asset", { path }),
+  startupFiles: () => call<string[]>("startup_files"),
 };

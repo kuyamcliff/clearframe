@@ -75,7 +75,7 @@ pub struct SystemSample {
     pub memory_total_mb: u64,
     pub memory_used_mb: u64,
     pub memory_available_mb: u64,
-    /// ClearFrame app + worker processes.
+    /// ClipFX Enhance app + worker processes.
     pub clearframe_memory_mb: u64,
     pub clearframe_cpu_percent: f32,
     pub gpus: Vec<GpuSample>,

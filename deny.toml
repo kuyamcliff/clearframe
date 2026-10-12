@@ -1,5 +1,5 @@
 # cargo-deny: every dependency must use an open-source license compatible
-# with distributing ClearFrame under MIT. No paid or proprietary crates.
+# with distributing ClipFX Enhance under MIT. No paid or proprietary crates.
 [graph]
 all-features = false
 

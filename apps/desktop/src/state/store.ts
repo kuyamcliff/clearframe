@@ -2,14 +2,17 @@ import { create } from "zustand";
 
 import { api, notify, onEvent, type CodecEntry, type HardwareReport, type OperationDefaults } from "../lib/ipc";
 import { basename } from "../lib/format";
+import { addStageCanonical } from "../lib/ops";
 import type {
-  AppEvent, AppInfo, ClipPreview, EngineSettings, InstallProgress, JobRecord, ModelCard, NewJob, OutputSettings, Pipeline,
+  AppEvent, AppInfo, ClipPreview, OperationType, EngineSettings, InstallProgress, JobRecord, ModelCard, NewJob, OutputSettings, Pipeline,
   Preset, Progress, ResourceSample, Settings, SourceInfo, StillPreview, TimeRange,
 } from "../lib/types";
 
-export type View = "workspace" | "queue" | "presets" | "models" | "settings";
+export type Panel = "sources" | "queue" | null;
+export type DialogKind = "models" | "prefs" | "start" | null;
 export type SettingsSection = "general" | "export" | "storage" | "performance" | "advanced" | "diagnostics" | "about";
 export type CompareMode = "split" | "side" | "original" | "processed";
+export type Zoom = "fit" | "1" | "2";
 
 export interface Toast { id: number; level: "info" | "success" | "warning" | "error"; message: string; action?: { label: string; run: () => void } }
 
@@ -26,8 +29,15 @@ export interface State {
   codecs: CodecEntry[];
   hardware: HardwareReport | null;
 
-  view: View;
+  panel: Panel;
+  dialog: DialogKind;
   settingsSection: SettingsSection;
+  sideTab: "adjust" | "codec";
+  sideOpen: boolean;
+  zoom: Zoom;
+  muted: boolean;
+  sources: string[];
+  modelFocus: string | null;
 
   // workspace
   sourcePath: string | null;
@@ -42,6 +52,7 @@ export interface State {
   stillBusy: boolean;
   stillError: string | null;
   clip: ClipPreview | null;
+  clipRange: TimeRange | null;
   clipError: string | null;
 
   // edit state
@@ -66,7 +77,6 @@ export interface State {
   presets: Preset[];
   storageProgress: StorageProgress | null;
   toasts: Toast[];
-  exportOpen: boolean;
 }
 
 const emptyPipeline: Pipeline = { stages: [] };
@@ -79,8 +89,15 @@ export const useStore = create<State>(() => ({
   defaults: null,
   codecs: [],
   hardware: null,
-  view: "workspace",
+  panel: null,
+  dialog: null,
   settingsSection: "general",
+  sideTab: "adjust",
+  sideOpen: true,
+  zoom: "fit",
+  muted: true,
+  sources: [],
+  modelFocus: null,
   sourcePath: null,
   source: null,
   sourceLoading: false,
@@ -93,6 +110,7 @@ export const useStore = create<State>(() => ({
   stillBusy: false,
   stillError: null,
   clip: null,
+  clipRange: null,
   clipError: null,
   pipeline: emptyPipeline,
   history: { past: [], future: [] },
@@ -113,7 +131,6 @@ export const useStore = create<State>(() => ({
   presets: [],
   storageProgress: null,
   toasts: [],
-  exportOpen: false,
 }));
 
 const set = useStore.setState;
@@ -254,10 +271,10 @@ function onJobTransition(prev: JobRecord | undefined, j: JobRecord) {
   const s = get().settings;
   if (j.state === "completed") {
     toast("success", `Finished: ${basename(j.destination)}`, { label: "Show", run: () => api.openPath(j.destination).catch(errorToast) });
-    if (s?.notifications && document.hidden) notify("ClearFrame: export finished", basename(j.destination));
+    if (s?.notifications && document.hidden) notify("ClipFX Enhance: export finished", basename(j.destination));
   } else if (j.state === "failed") {
     toast("error", `Failed: ${j.name}${j.error ? ` — ${j.error}` : ""}`);
-    if (s?.notifications && document.hidden) notify("ClearFrame: export failed", j.name);
+    if (s?.notifications && document.hidden) notify("ClipFX Enhance: export failed", j.name);
   }
 }
 
@@ -343,7 +360,19 @@ export function redo() {
 export function applyPreset(p: Preset) {
   setPipeline(structuredClone(p.pipeline));
   set((s) => ({ output: p.output ? structuredClone(p.output) : s.output, presetName: p.name }));
-  toast("info", `Applied preset “${p.name}”.`);
+}
+
+export function clearPipeline() {
+  setPipeline({ stages: [] });
+  set({ presetName: null });
+}
+
+/** Turn an operation on, adding it with defaults at its canonical position if needed. */
+export function enableOp(type: OperationType, on = true) {
+  const { pipeline, defaults } = get();
+  const stage = pipeline.stages.find((s) => s.type === type);
+  if (stage) setPipeline({ stages: pipeline.stages.map((s) => (s.type === type ? { ...s, enabled: on } : s)) });
+  else if (on && defaults) setPipeline(addStageCanonical(pipeline, type, defaults[type].settings));
 }
 
 export function currentJob(overrides: Partial<NewJob> = {}): NewJob | null {
@@ -367,17 +396,14 @@ export function currentJob(overrides: Partial<NewJob> = {}): NewJob | null {
 // ---------- sources ----------
 
 export async function openSource(path: string) {
-  set({ sourcePath: path, source: null, sourceLoading: true, sourceError: null, still: null, clip: null, stillError: null, clipError: null, playhead: 0, range: null, view: "workspace" });
+  set((s) => ({ sourcePath: path, source: null, sourceLoading: true, sourceError: null, still: null, clip: null, stillError: null, clipError: null, playhead: 0, range: null, sources: s.sources.includes(path) ? s.sources : [...s.sources, path] }));
   try {
     const info = await api.sourceInfo(path, true);
     if (get().sourcePath !== path) return;
     set({ source: info, sourceLoading: false, playhead: Math.min(info.info.duration / 3, info.info.duration) });
     const il = info.interlace;
     const hasDeint = get().pipeline.stages.some((s) => s.type === "deinterlace");
-    if (il && il.tff + il.bff > il.progressive && !hasDeint) {
-      toast("warning", "This video looks interlaced. Add Deinterlace for clean results.");
-    }
-    if (info.info.video?.variable_frame_rate) toast("info", "Variable frame rate detected: output will be converted to a constant frame rate.");
+    if (il && il.tff + il.bff > il.progressive && !hasDeint) toast("warning", "Interlaced video detected.", { label: "Deinterlace", run: () => enableOp("deinterlace") });
   } catch (e) {
     if (get().sourcePath !== path) return;
     set({ sourceLoading: false, sourceError: e instanceof Error ? e.message : String(e) });
@@ -385,7 +411,7 @@ export async function openSource(path: string) {
 }
 
 export function closeSource() {
-  set({ sourcePath: null, source: null, sourceError: null, still: null, clip: null, range: null, projectPath: null, projectName: null, dirty: false });
+  set((s) => ({ sources: s.sources.filter((x) => x !== s.sourcePath), sourcePath: null, source: null, sourceError: null, still: null, clip: null, range: null, projectPath: null, projectName: null, dirty: false }));
 }
 
 let stillSeq = 0;
@@ -405,12 +431,12 @@ export async function renderStill() {
   }
 }
 
-export async function renderClip() {
+export async function renderClip(seconds?: number) {
   const s = get();
   const job = currentJob();
   if (!job || !s.settings) return;
-  const dur = Math.min(s.settings.preview_seconds, Math.max(0.1, (s.source?.info.duration ?? 0) - s.playhead));
-  set({ clipError: null });
+  const dur = Math.min(seconds ?? s.settings.preview_seconds, Math.max(0.1, (s.source?.info.duration ?? 0) - s.playhead));
+  set({ clipError: null, clipRange: { start: s.playhead, end: s.playhead + dur } });
   try {
     const r = await api.previewClip(job, s.playhead, dur);
     set({ clip: r });

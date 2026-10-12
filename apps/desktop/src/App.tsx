@@ -1,121 +1,129 @@
 import { useEffect, useState } from "react";
-import { Boxes, Clapperboard, FolderOpen, ListVideo, Save, Settings as SettingsIcon, Sparkles } from "lucide-react";
+import { Blend, Boxes, ChevronRight, Columns2, FolderInput, Layers, PanelRightClose, PanelRightOpen, RectangleHorizontal, Settings as Gear, Sparkles, SquareSplitHorizontal } from "lucide-react";
 
-import { Confirm, Modal, Notice, Toasts } from "./components/ui";
+import { Confirm, Toasts, useMenu, type MenuItem } from "./components/ui";
 import { api, inTauri, onFileDrop, VIDEO_EXTENSIONS } from "./lib/ipc";
-import { bytes } from "./lib/format";
-import { cardId, cardName } from "./lib/ops";
-import { boot, errorToast, openSource, redo, renderClip, renderStill, saveSettings, toast, undo, useStore, type View } from "./state/store";
-import { ExportDialog } from "./views/ExportDialog";
-import { ModelsView } from "./views/Models";
-import { PresetsView } from "./views/Presets";
+import { basename, timecode } from "./lib/format";
+import { boot, clearPipeline, refreshPresets, closeSource, errorToast, openSource, redo, renderClip, renderStill, toast, undo, useStore, type CompareMode } from "./state/store";
+import { ModelsDialog } from "./views/Models";
+import { chooseVideos, Player } from "./views/Player";
+import { PreferencesDialog } from "./views/Preferences";
+import { PresetsPopover, StartDialog } from "./views/Presets";
 import { openProjectFile, saveProject } from "./views/Projects";
-import { QueueView } from "./views/Queue";
-import { SettingsView } from "./views/Settings";
-import { chooseVideo, Workspace } from "./views/Workspace";
+import { exportNow, Sidebar } from "./views/Sidebar";
 
-const NAV: { view: View; label: string; icon: typeof Clapperboard }[] = [
-  { view: "workspace", label: "Workspace", icon: Clapperboard },
-  { view: "queue", label: "Queue", icon: ListVideo },
-  { view: "presets", label: "Presets", icon: Sparkles },
-  { view: "models", label: "Model Library", icon: Boxes },
-  { view: "settings", label: "Settings", icon: SettingsIcon },
-];
+const RUNNING = ["preparing", "previewing", "processing", "encoding", "validating"];
 
-const ACTIVE = ["preparing", "previewing", "processing", "encoding", "validating", "queued", "waiting_for_resources"];
-
-function Nav() {
-  const view = useStore((s) => s.view);
-  const active = useStore((s) => s.jobs.filter((j) => j.kind === "render" && ACTIVE.includes(j.state)).length);
-  const problems = useStore((s) => s.models.filter((m) => m.state === "missing" || m.state === "broken").length);
-  return (
-    <nav className="nav" aria-label="Main">
-      {NAV.map(({ view: v, label, icon: I }) => (
-        <button key={v} aria-label={label} title={label} aria-current={view === v ? "page" : undefined} onClick={() => useStore.setState({ view: v })}>
-          <I size={22} />
-          {v === "queue" && active > 0 && <span className="badge-dot">{active}</span>}
-          {v === "models" && problems > 0 && <span className="badge-dot" style={{ background: "var(--err)" }}>!</span>}
-        </button>
-      ))}
-    </nav>
-  );
+function menus(): Record<string, MenuItem[]> {
+  const s = useStore.getState();
+  const has = !!s.source;
+  const mode = (c: CompareMode) => () => useStore.setState({ compare: c });
+  return {
+    File: [
+      { label: "Open video…", onClick: () => chooseVideos().catch(errorToast) },
+      { label: "Open project…", onClick: () => openProjectFile().catch(errorToast) },
+      { label: "Save project", onClick: () => saveProject(false).catch(errorToast), disabled: !has, sep: true },
+      { label: "Save project as…", onClick: () => saveProject(true).catch(errorToast), disabled: !has },
+      { label: "Close video", onClick: closeSource, disabled: !s.sourcePath, sep: true },
+    ],
+    Edit: [
+      { label: "Undo", onClick: undo, disabled: !s.history.past.length },
+      { label: "Redo", onClick: redo, disabled: !s.history.future.length },
+      { label: "Clear adjustments", onClick: clearPipeline, disabled: !s.pipeline.stages.length, sep: true },
+      { label: "Clear in/out", onClick: () => useStore.setState({ range: null }), disabled: !s.range },
+    ],
+    View: [
+      { label: "Original", onClick: mode("original") },
+      { label: "Preview", onClick: mode("processed") },
+      { label: "Split", onClick: mode("split") },
+      { label: "Side by side", onClick: mode("side") },
+      { label: s.sideOpen ? "Hide controls" : "Show controls", onClick: () => useStore.setState({ sideOpen: !s.sideOpen }), sep: true },
+      { label: "Sources", onClick: () => useStore.setState({ panel: s.panel === "sources" ? null : "sources" }) },
+      { label: "Export queue", onClick: () => useStore.setState({ panel: s.panel === "queue" ? null : "queue" }) },
+    ],
+    Process: [
+      { label: "Render frame", onClick: () => renderStill(), disabled: !has },
+      { label: `Render ${s.settings?.preview_seconds ?? 3}s`, onClick: () => renderClip(), disabled: !has },
+      { label: "Export as…", onClick: () => exportNow(true), disabled: !has, sep: true },
+      { label: "Quick export", onClick: () => exportNow(false), disabled: !has },
+      { label: s.queuePaused ? "Resume queue" : "Pause queue", onClick: () => api.queueAction(s.queuePaused ? "resume" : "pause").then(() => useStore.setState({ queuePaused: !s.queuePaused })).catch(errorToast), sep: true },
+    ],
+    Help: [
+      { label: "Models", onClick: () => useStore.setState({ dialog: "models" }) },
+      { label: "Diagnostics", onClick: () => useStore.setState({ dialog: "prefs", settingsSection: "diagnostics" }) },
+      { label: "About", onClick: () => useStore.setState({ dialog: "prefs", settingsSection: "about" }) },
+    ],
+  };
 }
 
-function TopBar() {
-  const source = useStore((s) => s.sourcePath);
+function TopBar({ presets, setPresets }: { presets: boolean; setPresets: (v: boolean) => void }) {
+  const sourcePath = useStore((s) => s.sourcePath);
   const projectName = useStore((s) => s.projectName);
   const dirty = useStore((s) => s.dirty);
+  const compare = useStore((s) => s.compare);
+  const sideOpen = useStore((s) => s.sideOpen);
   const app = useStore((s) => s.app);
+  const problems = useStore((s) => s.models.some((m) => m.state === "missing" || m.state === "broken"));
+  const { open, node } = useMenu();
+  const modes: { value: CompareMode; label: string; icon: typeof Sparkles }[] = [
+    { value: "original", label: "Original", icon: RectangleHorizontal },
+    { value: "processed", label: "Preview", icon: Sparkles },
+    { value: "split", label: "Split view", icon: SquareSplitHorizontal },
+    { value: "side", label: "Side by side", icon: Columns2 },
+  ];
   return (
     <header className="topbar">
-      <div className="brand"><img src="/logo.svg" alt="" /> ClearFrame</div>
-      <span className="title ellipsis">{projectName ? `${projectName}${dirty ? " •" : ""}` : ""}</span>
-      <span className="spacer" />
-      {app && !app.ffmpeg && <span className="badge err" title={app.ffmpeg_error ?? ""}>FFmpeg missing</span>}
-      <button className="btn ghost small" onClick={() => chooseVideo().catch(errorToast)}><FolderOpen size={15} /> Open video</button>
-      <button className="btn ghost small" onClick={() => openProjectFile().catch(errorToast)}>Open project</button>
-      <button className="btn ghost small" disabled={!source} onClick={() => saveProject(false).catch(errorToast)} title="Save project (Ctrl+S)"><Save size={15} /> Save</button>
+      <div className="brand"><img src="/logo.svg" alt="" />ClipFX <b>Enhance</b></div>
+      <nav className="row" style={{ gap: 0, padding: "0 6px" }} aria-label="Menu">
+        {Object.keys(menus()).map((k) => <button key={k} className="tb" onClick={(e) => open(e, menus()[k])}>{k}</button>)}
+      </nav>
+      <div className="crumbs">
+        <span>Projects</span><ChevronRight size={12} />
+        <span className="cur ellipsis" style={{ maxWidth: 260 }}>{projectName ?? (sourcePath ? basename(sourcePath) : "Default")}{dirty && projectName ? " •" : ""}</span>
+        {app?.demo && <span className="tag warn" title="Running in a browser without the processing engine">Demo</span>}
+        {app && !app.ffmpeg && <span className="tag err" title={app.ffmpeg_error ?? ""}>FFmpeg missing</span>}
+      </div>
+      <div className="top-center" role="group" aria-label="Player mode">
+        {modes.map(({ value, label, icon: I }) => (
+          <button key={value} className="tb icon" aria-label={label} title={label} aria-pressed={compare === value} onClick={() => useStore.setState({ compare: value })}><I size={15} /></button>
+        ))}
+      </div>
+      <div className="top-right">
+        <button className="tb" aria-pressed={presets} onClick={() => setPresets(!presets)}><Blend size={15} /> Presets</button>
+        <span className="sep" />
+        <button className="tb icon" aria-label="Models" title="Models" onClick={() => useStore.setState({ dialog: "models" })}><Boxes size={16} />{problems && <span className="dot-badge" />}</button>
+        <button className="tb icon" aria-label="Preferences" title="Preferences (Ctrl+,)" onClick={() => useStore.setState({ dialog: "prefs" })}><Gear size={16} /></button>
+        <span className="sep" />
+        <button className="tb icon" aria-label={sideOpen ? "Hide controls" : "Show controls"} title={sideOpen ? "Hide controls" : "Show controls"} onClick={() => useStore.setState({ sideOpen: !sideOpen })}>
+          {sideOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+        </button>
+      </div>
+      {node}
     </header>
   );
 }
 
-function Onboarding() {
-  const app = useStore((s) => s.app);
-  const hw = useStore((s) => s.hardware);
-  const models = useStore((s) => s.models);
-  const recommended = models.filter((m) => m.manifest?.recommended && m.state !== "installed");
-  const [picked, setPicked] = useState<string[]>([]);
-  const finish = async () => {
-    for (const id of picked) {
-      try {
-        await api.modelInstall(id);
-      } catch (e) {
-        errorToast(e);
-      }
-    }
-    if (picked.length) toast("info", `Installing ${picked.length} model(s). Progress is shown in the Model Library.`);
-    await saveSettings((s) => ({ ...s, onboarding_complete: true }));
-  };
-  const size = picked.reduce((a, id) => a + (models.find((m) => cardId(m) === id)?.manifest?.download_size_bytes ?? 0), 0);
+function BottomBar() {
+  const panel = useStore((s) => s.panel);
+  const range = useStore((s) => s.range);
+  const playhead = useStore((s) => s.playhead);
+  const source = useStore((s) => s.source);
+  const sources = useStore((s) => s.sources.length);
+  const active = useStore((s) => s.jobs.filter((j) => j.kind === "render" && (RUNNING.includes(j.state) || j.state === "queued" || j.state === "waiting_for_resources")).length);
+  const dur = source?.info.duration ?? 0;
+  const v = source?.info.video;
+  const step = v ? v.frame_rate.den / v.frame_rate.num : 1 / 30;
+  const toggle = (p: "sources" | "queue") => useStore.setState({ panel: panel === p ? null : p });
   return (
-    <Modal title="Welcome to ClearFrame" onClose={finish} wide footer={
-      <>
-        <span className="small faint grow">{picked.length ? `${picked.length} model(s), ${bytes(size)} download` : "You can install models any time from the Model Library."}</span>
-        <button className="btn primary" onClick={finish}>{picked.length ? "Install and start" : "Start"}</button>
-      </>
-    }>
-      <p className="muted">ClearFrame enhances videos on your own computer. Nothing is uploaded, there is no account, and after models are installed it works offline.</p>
-      <div className="col mt">
-        {app?.ffmpeg ? (
-          <Notice tone="ok">FFmpeg {app.ffmpeg.version} found{app.ffmpeg.vidstab ? "" : " (without vid.stab: stabilization unavailable)"}.</Notice>
-        ) : (
-          <Notice tone="err">FFmpeg was not found: {app?.ffmpeg_error}. Install FFmpeg or choose its folder in Settings → Advanced. Video processing needs it.</Notice>
-        )}
-        {hw && (
-          <Notice tone="info">
-            {hw.hardware.cpu_brand} · {hw.hardware.logical_cores} threads · {Math.round(hw.hardware.ram_total_mb / 1024)} GB RAM
-            {hw.hardware.backends.some((b) => b.kind !== "cpu" && b.available) ? " · GPU acceleration available" : " · processing runs on the CPU (slower, same quality)"}
-          </Notice>
-        )}
-      </div>
-      {recommended.length > 0 && (
-        <>
-          <h3 className="mt-l">Choose models to install now (optional)</h3>
-          <p className="small faint">Nothing is downloaded unless you tick it. Each model shows its license; some do not allow commercial use.</p>
-          <div className="col mt">
-            {recommended.map((m) => (
-              <label key={cardId(m)} className="check">
-                <input type="checkbox" checked={picked.includes(cardId(m))} onChange={(e) => setPicked(e.target.checked ? [...picked, cardId(m)] : picked.filter((x) => x !== cardId(m)))} />
-                <span>
-                  {cardName(m)} <span className="faint small">· {bytes(m.manifest!.download_size_bytes)} · {m.manifest!.weights_license}</span>
-                  <div className="desc">{m.manifest!.summary}</div>
-                </span>
-              </label>
-            ))}
-          </div>
-        </>
-      )}
-    </Modal>
+    <footer className="bottombar">
+      <button className="tb icon mono" aria-label="Set in point" title="Set in (I)" disabled={!source} onClick={() => useStore.setState({ range: { start: playhead, end: Math.max(playhead + step, range?.end ?? dur) } })}>[</button>
+      <button className="tb icon mono" aria-label="Set out point" title="Set out (O)" disabled={!source} onClick={() => useStore.setState({ range: { start: Math.min(range?.start ?? 0, playhead - step), end: playhead } })}>]</button>
+      <button className="tb icon mono" aria-label="Clear in and out" title="Clear in/out" disabled={!range} onClick={() => useStore.setState({ range: null })}>[×]</button>
+      {range && <span className="faint mono" style={{ marginLeft: 6 }}>{timecode(range.start)} – {timecode(range.end)}</span>}
+      <span className="spacer" />
+      <button className="tb" aria-pressed={panel === "sources"} onClick={() => toggle("sources")}><FolderInput size={14} /> Sources{sources > 1 && <span className="count">{sources}</span>}</button>
+      <button className="tb" aria-pressed={panel === "queue"} onClick={() => toggle("queue")}><Layers size={14} /> Export queue{active > 0 && <span className="count">{active}</span>}</button>
+    </footer>
   );
 }
 
@@ -128,16 +136,16 @@ function useShortcuts() {
       const s = useStore.getState();
       if (document.querySelector(".backdrop")) return;
       const k = e.key.toLowerCase();
-      if (mod && k === "o") { e.preventDefault(); chooseVideo().catch(errorToast); return; }
+      if (mod && k === "o") { e.preventDefault(); chooseVideos().catch(errorToast); return; }
       if (mod && k === "s") { e.preventDefault(); if (s.sourcePath) saveProject(e.shiftKey).catch(errorToast); return; }
-      if (mod && k === "e") { e.preventDefault(); if (s.source) useStore.setState({ exportOpen: true }); return; }
-      if (mod && k === "p") { e.preventDefault(); if (s.source) (e.shiftKey ? renderClip() : renderStill()); return; }
-      if (mod && k === "j") { e.preventDefault(); useStore.setState({ view: s.view === "queue" ? "workspace" : "queue" }); return; }
-      if (mod && e.key === ",") { e.preventDefault(); useStore.setState({ view: "settings" }); return; }
+      if (mod && k === "e") { e.preventDefault(); if (s.source) exportNow(!e.shiftKey); return; }
+      if (mod && k === "r") { e.preventDefault(); if (s.source) (e.shiftKey ? renderClip() : renderStill()); return; }
+      if (mod && k === "j") { e.preventDefault(); useStore.setState({ panel: s.panel === "queue" ? null : "queue" }); return; }
+      if (mod && e.key === ",") { e.preventDefault(); useStore.setState({ dialog: "prefs" }); return; }
       if (typing) return;
       if (mod && k === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
       if (mod && k === "y") { e.preventDefault(); redo(); return; }
-      if (s.view !== "workspace" || !s.source) return;
+      if (!s.source) return;
       const v = s.source.info.video;
       const step = v ? v.frame_rate.den / v.frame_rate.num : 1 / 30;
       const dur = s.source.info.duration;
@@ -145,7 +153,10 @@ function useShortcuts() {
       else if (e.key === "ArrowRight") { e.preventDefault(); useStore.setState({ playhead: Math.min(dur, s.playhead + (e.shiftKey ? 1 : step)) }); }
       else if (k === "i") useStore.setState({ range: { start: s.playhead, end: Math.max(s.playhead + step, s.range?.end ?? dur) } });
       else if (k === "o") useStore.setState({ range: { start: Math.min(s.range?.start ?? 0, s.playhead - step), end: s.playhead } });
-      else if (k === "c") useStore.setState({ compare: s.compare === "split" ? "side" : s.compare === "side" ? "original" : s.compare === "original" ? "processed" : "split" });
+      else if (k === "1") useStore.setState({ compare: "original" });
+      else if (k === "2") useStore.setState({ compare: "processed" });
+      else if (k === "3") useStore.setState({ compare: "split" });
+      else if (k === "4") useStore.setState({ compare: "side" });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -159,71 +170,86 @@ function useCloseGuard(setAsk: (v: boolean) => void) {
     import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
       getCurrentWindow().onCloseRequested((e) => {
         const s = useStore.getState();
-        const running = s.jobs.some((j) => j.kind === "render" && ["preparing", "processing", "encoding", "validating"].includes(j.state));
-        if (running && s.settings?.confirm_before_quit_with_jobs) {
+        if (s.settings?.confirm_before_quit_with_jobs && s.jobs.some((j) => j.kind === "render" && RUNNING.includes(j.state))) {
           e.preventDefault();
           setAsk(true);
         }
-      }).then((f) => (un = f)),
-    );
+      }).then((f) => (un = f)));
     return () => un?.();
   }, [setAsk]);
+}
+
+/** Open files passed by the OS (file associations, "Open with"). */
+async function openFiles(paths: string[]) {
+  const proj = paths.find((p) => p.toLowerCase().endsWith(".cfxproj"));
+  if (proj) return openProjectFile(proj).catch(errorToast);
+  for (const p of paths.filter((x) => x.toLowerCase().endsWith(".cfxpreset"))) {
+    await api.presetAction("import", { path: p }).then(() => { refreshPresets(); toast("success", `Imported ${basename(p)}`); }).catch(errorToast);
+  }
+  const vids = paths.filter((p) => VIDEO_EXTENSIONS.includes(p.split(".").pop()?.toLowerCase() ?? ""));
+  if (!vids.length) return;
+  const s = useStore.getState();
+  useStore.setState({ sources: [...s.sources, ...vids.filter((v) => !s.sources.includes(v))] });
+  await openSource(vids[0]);
+  if (vids.length > 1) useStore.setState({ panel: "sources" });
+}
+
+/** Offer the start dialog when a video is opened without adjustments. */
+function useStartDialog() {
+  const sourcePath = useStore((s) => s.sourcePath);
+  useEffect(() => {
+    const s = useStore.getState();
+    if (sourcePath && !s.settings?.hide_start_dialog && !s.projectPath && !s.pipeline.stages.some((x) => x.enabled) && !s.dialog) useStore.setState({ dialog: "start" });
+  }, [sourcePath]);
 }
 
 export function App() {
   const ready = useStore((s) => s.ready);
   const bootError = useStore((s) => s.bootError);
-  const view = useStore((s) => s.view);
-  const app = useStore((s) => s.app);
-  const settings = useStore((s) => s.settings);
-  const exportOpen = useStore((s) => s.exportOpen);
+  const sideOpen = useStore((s) => s.sideOpen);
+  const dialog = useStore((s) => s.dialog);
+  const [presets, setPresets] = useState(false);
   const [askClose, setAskClose] = useState(false);
 
   useEffect(() => { boot(); }, []);
   useShortcuts();
   useCloseGuard(setAskClose);
+  useStartDialog();
   useEffect(() => {
     let un: (() => void) | undefined;
-    onFileDrop(async (paths) => {
-      const proj = paths.find((p) => p.toLowerCase().endsWith(".cfproj"));
-      if (proj) return openProjectFile(proj).catch(errorToast);
-      const vids = paths.filter((p) => VIDEO_EXTENSIONS.includes(p.split(".").pop()?.toLowerCase() ?? ""));
-      if (vids.length === 1) openSource(vids[0]);
-      else if (vids.length > 1) {
-        await openSource(vids[0]);
-        toast("info", `${vids.length} videos dropped. The first is open; use Export → “Add more files” to process the rest with the same settings.`);
-      } else toast("warning", "That file type is not supported.");
+    onFileDrop((paths) => {
+      const known = paths.some((p) => /\.(cfxproj|cfxpreset)$/i.test(p) || VIDEO_EXTENSIONS.includes(p.split(".").pop()?.toLowerCase() ?? ""));
+      if (!known) return toast("warning", "Unsupported file type");
+      openFiles(paths);
     }).then((f) => (un = f));
     return () => un?.();
   }, []);
+  useEffect(() => {
+    if (ready && !bootError) api.startupFiles().then((f) => { if (f.length) openFiles(f); }).catch(() => {});
+  }, [ready, bootError]);
 
-  if (!ready) return <div className="empty" style={{ height: "100%" }}>Starting ClearFrame…</div>;
+  if (!ready) return <div className="empty-player" style={{ height: "100%" }}><img src="/logo.svg" alt="" width={36} /></div>;
   if (bootError) {
     return (
-      <div className="empty" style={{ height: "100%" }}>
-        <h2>ClearFrame could not start</h2>
-        <p className="selectable">{bootError}</p>
-        <button className="btn" onClick={() => location.reload()}>Try again</button>
+      <div className="empty-player" style={{ height: "100%" }}>
+        <span className="err">ClipFX Enhance could not start</span>
+        <span className="faint selectable">{bootError}</span>
+        <button className="btn" onClick={() => location.reload()}>Retry</button>
       </div>
     );
   }
   return (
-    <div className={`app${app?.demo ? " with-banner" : ""}`}>
-      <TopBar />
-      {app?.demo && <div className="demo-banner" role="status">Demo mode: running in a browser without the ClearFrame engine. Nothing is processed or downloaded.</div>}
-      <Nav />
-      <main className="main">
-        {view === "workspace" && <Workspace />}
-        {view === "queue" && <QueueView />}
-        {view === "presets" && <PresetsView />}
-        {view === "models" && <ModelsView />}
-        {view === "settings" && <SettingsView />}
-      </main>
-      {exportOpen && <ExportDialog />}
-      {settings && !settings.onboarding_complete && <Onboarding />}
+    <div className={`app${sideOpen ? "" : " no-side"}`}>
+      <TopBar presets={presets} setPresets={setPresets} />
+      <Player />
+      <Sidebar />
+      <BottomBar />
+      {presets && <PresetsPopover onClose={() => setPresets(false)} />}
+      {dialog === "start" && <StartDialog />}
+      {dialog === "models" && <ModelsDialog />}
+      {dialog === "prefs" && <PreferencesDialog />}
       {askClose && (
-        <Confirm title="Exports are running" confirmLabel="Pause and quit" onCancel={() => setAskClose(false)}
-          body="Running exports will be paused safely and resume from where they stopped next time you open ClearFrame."
+        <Confirm title="Exports are running" confirmLabel="Pause and quit" body="They resume next time you open the app." onCancel={() => setAskClose(false)}
           onConfirm={() => import("@tauri-apps/api/window").then(({ getCurrentWindow }) => getCurrentWindow().destroy())} />
       )}
       <Toasts />

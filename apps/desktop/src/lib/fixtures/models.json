@@ -982,7 +982,7 @@
         "live_action"
       ],
       "installed_size_bytes": 458046400,
-      "license_notes": "GFPGAN's repository license lists third-party components; ClearFrame uses the 'clean' architecture that needs no custom CUDA operators. The model was trained on FFHQ, whose images are under CC BY-NC-SA 4.0 — review this if your use is commercial.",
+      "license_notes": "GFPGAN's repository license lists third-party components; ClipFX Enhance uses the 'clean' architecture that needs no custom CUDA operators. The model was trained on FFHQ, whose images are under CC BY-NC-SA 4.0 — review this if your use is commercial.",
       "measurements": [],
       "memory_per_megapixel_mb": 1200.0,
       "minimum_ram_bytes": 4294967296,

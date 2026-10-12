@@ -1,6 +1,6 @@
-//! Presets: built-in and user presets, and the portable `.cframe` format.
+//! Presets: built-in and user presets, and the portable `.cfxpreset` format.
 //!
-//! A `.cframe` file is a small, human-readable JSON manifest. Import parses it
+//! A `.cfxpreset` file is a small, human-readable JSON manifest. Import parses it
 //! strictly (unknown operations are rejected), validates every parameter
 //! bound, checks names and sizes, and never executes anything. Presets store
 //! settings and model references only — never weights, videos or paths.
@@ -13,7 +13,7 @@ use clearframe_media::Rational;
 
 use crate::spec::*;
 
-pub const PRESET_FORMAT: &str = "clearframe-preset";
+pub const PRESET_FORMAT: &str = "clipfx-preset";
 pub const MAX_PRESET_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -37,7 +37,7 @@ pub struct Preset {
     pub output: Option<OutputSettings>,
 }
 
-/// The on-disk `.cframe` document.
+/// The on-disk `.cfxpreset` document.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PresetFile {
@@ -54,9 +54,9 @@ pub struct PresetFile {
 pub enum PresetError {
     #[error("the file is too large to be a preset")]
     TooLarge,
-    #[error("not a ClearFrame preset: {0}")]
+    #[error("not a ClipFX Enhance preset: {0}")]
     Format(String),
-    #[error("this preset was made with a newer version of ClearFrame (schema {0})")]
+    #[error("this preset was made with a newer version of ClipFX Enhance (schema {0})")]
     TooNew(u32),
     #[error("invalid preset: {0}")]
     Invalid(String),
@@ -107,7 +107,7 @@ impl Preset {
         Ok(())
     }
 
-    /// Serialise as a `.cframe` document.
+    /// Serialise as a `.cfxpreset` document.
     pub fn export(&self) -> String {
         let mut p = self.clone();
         p.builtin = false;
@@ -122,7 +122,7 @@ impl Preset {
         serde_json::to_string_pretty(&f).unwrap_or_default()
     }
 
-    /// Parse and validate a `.cframe` document. The imported preset gets a fresh id and is never built-in.
+    /// Parse and validate a `.cfxpreset` document. The imported preset gets a fresh id and is never built-in.
     pub fn import(data: &[u8]) -> Result<Preset, PresetError> {
         if data.len() > MAX_PRESET_BYTES {
             return Err(PresetError::TooLarge);
@@ -130,7 +130,7 @@ impl Preset {
         let s = std::str::from_utf8(data).map_err(|_| PresetError::Format("not UTF-8 text".into()))?;
         let v: serde_json::Value = serde_json::from_str(s).map_err(|e| PresetError::Format(e.to_string()))?;
         if v.get("format").and_then(|f| f.as_str()) != Some(PRESET_FORMAT) {
-            return Err(PresetError::Format("missing \"format\": \"clearframe-preset\"".into()));
+            return Err(PresetError::Format("missing \"format\": \"clipfx-preset\"".into()));
         }
         let ver = v.get("schema_version").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
         if ver > SCHEMA_VERSION {

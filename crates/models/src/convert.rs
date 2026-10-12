@@ -89,7 +89,7 @@ pub fn write_safetensors(sd: &StateDict, dst: &Path) -> Result<usize, ConvertErr
         .collect::<Result<_, _>>()?;
     let mut meta = HashMap::new();
     meta.insert("format".to_string(), "pt".to_string());
-    meta.insert("converted_by".to_string(), "clearframe".to_string());
+    meta.insert("converted_by".to_string(), "clipfx-enhance".to_string());
     safetensors::serialize_to_file(views, &Some(meta), dst).map_err(|e| ConvertError::SafeTensors(e.to_string()))?;
     Ok(sd.len())
 }

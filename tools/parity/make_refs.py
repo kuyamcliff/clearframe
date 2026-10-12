@@ -1,4 +1,4 @@
-"""PyTorch reference outputs for the ClearFrame parity check. See tools/parity/README.md."""
+"""PyTorch reference outputs for the ClipFX Enhance parity check. See tools/parity/README.md."""
 import sys, os, json, numpy as np, torch
 sys.path.insert(0, os.environ.get('CF_REFPKG', os.path.join(os.path.dirname(__file__), 'refpkg')))
 torch.set_grad_enabled(False)

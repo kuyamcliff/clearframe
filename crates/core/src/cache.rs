@@ -186,7 +186,7 @@ mod tests {
         std::fs::write(p.cache(CacheArea::Previews).join("a.mp4"), vec![0u8; 3 << 20]).unwrap();
         std::fs::write(p.cache(CacheArea::Previews).join("b.mp4"), vec![0u8; 3 << 20]).unwrap();
         // A non-cache file next to the cache must never be touched.
-        std::fs::write(d.path().join("project.cfproj"), b"keep").unwrap();
+        std::fs::write(d.path().join("project.cfxproj"), b"keep").unwrap();
         let prot: HashSet<String> = ["running-job".to_string()].into_iter().collect();
         let rep = report(&p, &prot, 1);
         let jobs = rep.areas.iter().find(|a| a.area == CacheArea::Jobs).unwrap();
@@ -198,7 +198,7 @@ mod tests {
         assert_eq!(r.skipped_protected, 1);
         assert!(p.job_dir("running-job").join("seg.mkv").is_file());
         assert!(!p.job_dir("old-job").exists());
-        assert!(d.path().join("project.cfproj").is_file());
+        assert!(d.path().join("project.cfxproj").is_file());
         let keep: HashSet<String> = HashSet::new();
         assert_eq!(remove_orphan_job_dirs(&p, &keep).removed_entries, 1);
     }

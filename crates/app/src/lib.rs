@@ -1,4 +1,4 @@
-//! ClearFrame application services.
+//! ClipFX Enhance application services.
 //!
 //! [`App`] owns the database, settings, FFmpeg tools, model manager and job
 //! queue. The desktop shell and the CLI are thin layers over it.
@@ -44,7 +44,7 @@ pub struct WorkerCommand {
 impl WorkerCommand {
     /// The current executable with `--worker`.
     pub fn current_exe() -> Self {
-        Self { program: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("clearframe")), args: vec!["--worker".into()] }
+        Self { program: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("clipfx")), args: vec!["--worker".into()] }
     }
 }
 

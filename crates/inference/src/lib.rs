@@ -1,4 +1,4 @@
-//! ClearFrame inference: reviewed, pure-Rust model adapters on top of candle.
+//! ClipFX Enhance inference: reviewed, pure-Rust model adapters on top of candle.
 //!
 //! Model files are never executed; weights are loaded from safetensors files
 //! produced by the installer's restricted checkpoint converter.

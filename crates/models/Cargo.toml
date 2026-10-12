@@ -1,6 +1,6 @@
 [package]
 name = "clearframe-models"
-description = "ClearFrame model catalog, safe checkpoint loading, verified installation and registry"
+description = "ClipFX Enhance model catalog, safe checkpoint loading, verified installation and registry"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -117,7 +117,7 @@ export function stageSummary(s: Stage, cards: ModelCard[]): string {
   const st = s.settings ?? {};
   const model = (id?: string | null) => {
     const c = cards.find((x) => cardId(x) === id);
-    return c ? cardName(c) : id ?? "";
+    return c ? shortName(c) : id ?? "";
   };
   switch (s.type) {
     case "deinterlace":
@@ -149,3 +149,29 @@ export function stageSummary(s: Stage, cards: ModelCard[]): string {
   }
   return "";
 }
+
+/** Compact model name for dense lists ("Real-ESRGAN AnimeVideo v3" -> "AnimeVideo v3"). */
+export function shortName(c: ModelCard): string {
+  return cardName(c).replace(/^Real-ESRGAN\s+/, "").replace(/\s*\(.*\)$/, "").replace(/\s*\+ RetinaFace$/, "");
+}
+
+/** One-line use case shown next to a model. */
+export function tagline(c: ModelCard): string {
+  return c.manifest?.best_for[0] ?? (c.installed?.custom ? "Custom import" : "");
+}
+
+/** Section titles in the Adjustments panel. */
+export const SECTION_TITLE: Record<OperationType, string> = {
+  enhance: "Enhancement",
+  denoise: "Denoise",
+  deblur: "Motion deblur",
+  face_restore: "Face recovery",
+  interpolate: "Frame interpolation",
+  stabilize: "Stabilization",
+  deinterlace: "Deinterlace",
+  color: "Color & HDR",
+  resize: "Resize",
+  grain: "Film grain",
+};
+
+export const SECTION_ORDER: OperationType[] = ["enhance", "denoise", "deblur", "face_restore", "interpolate", "stabilize", "deinterlace", "color", "resize", "grain"];

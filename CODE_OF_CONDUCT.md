@@ -1,6 +1,6 @@
 # Code of conduct
 
-ClearFrame follows the [Contributor Covenant, version 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
+ClipFX Enhance follows the [Contributor Covenant, version 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
 
 In short: be respectful and constructive, assume good faith, and remember that people of all
 backgrounds and experience levels use and build this project. Harassment, insults and

@@ -111,7 +111,7 @@ impl App {
         Ok(())
     }
 
-    /// Import a `.cframe` file. Returns the preset and the models it needs that are not installed.
+    /// Import a `.cfxpreset` file. Returns the preset and the models it needs that are not installed.
     pub fn import_preset(&self, path: &Path) -> Result<(Preset, Vec<String>)> {
         let meta = std::fs::metadata(path)?;
         if meta.len() > clearframe_pipeline::presets::MAX_PRESET_BYTES as u64 {

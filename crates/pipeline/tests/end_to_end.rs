@@ -52,7 +52,7 @@ fn classic_filters_keep_audio_and_source() {
     assert_eq!(*states.last().unwrap(), JobState::Completed);
     assert!(r.validation.as_ref().unwrap().ok);
     // sidecar written; work dir cleaned up
-    assert!(std::path::PathBuf::from(format!("{}.clearframe.json", r.output.display())).exists());
+    assert!(std::path::PathBuf::from(format!("{}.clipfx.json", r.output.display())).exists());
     assert!(!spec.work_dir.exists());
 }
 

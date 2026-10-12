@@ -71,7 +71,7 @@ pub struct Settings {
     pub language: String,
     pub ui_scale: f32,
     // Export
-    /// Default export folder. None = documented default (`Videos/ClearFrame Exports`).
+    /// Default export folder. None = documented default (`Videos/ClipFX Enhance Exports`).
     pub output_dir: Option<PathBuf>,
     pub naming_template: String,
     pub write_sidecar_report: bool,
@@ -98,7 +98,7 @@ pub struct Settings {
     pub cache_limit_mb: u64,
     /// Delete disposable cache entries not used for this many days; 0 = never.
     pub cache_max_age_days: u32,
-    /// Warn when a drive used by ClearFrame has less free space than this.
+    /// Warn when a drive used by ClipFX Enhance has less free space than this.
     pub low_disk_warning_mb: u64,
     // Performance
     pub performance: Performance,
@@ -163,9 +163,9 @@ pub enum PerformanceMode {
     /// Keep the computer responsive: leaves CPU cores and memory for other apps, lower priority.
     #[default]
     Balanced,
-    /// Favour ClearFrame while keeping basic responsiveness.
+    /// Favour ClipFX Enhance while keeping basic responsiveness.
     HighPerformance,
-    /// Use everything ClearFrame can; other applications may become slow.
+    /// Use everything ClipFX Enhance can; other applications may become slow.
     Maximum,
     /// Use the explicit values below.
     Custom,
@@ -190,7 +190,7 @@ pub enum MemoryPreset {
     #[default]
     Balanced,
     /// Leave about 2 GB for the system.
-    PrioritizeClearFrame,
+    PrioritizeApp,
     /// Use `memory_budget_mb`.
     Custom,
 }
@@ -287,7 +287,7 @@ impl Performance {
         let reserve = match self.memory_preset {
             MemoryPreset::MoreForOthers => ram_mb / 2,
             MemoryPreset::Balanced => (ram_mb / 4).max(4096.min(ram_mb / 2)),
-            MemoryPreset::PrioritizeClearFrame => 2048.min(ram_mb / 4),
+            MemoryPreset::PrioritizeApp => 2048.min(ram_mb / 4),
             MemoryPreset::Custom => ram_mb.saturating_sub(self.memory_budget_mb),
         };
         let budget = match self.memory_preset {
@@ -388,7 +388,7 @@ mod tests {
         assert_eq!(r.priority, ProcessPriority::BelowNormal);
         assert_eq!(r.memory_budget_mb, 32768 - 8192);
         p.mode = PerformanceMode::Maximum;
-        p.memory_preset = MemoryPreset::PrioritizeClearFrame;
+        p.memory_preset = MemoryPreset::PrioritizeApp;
         let r = p.resolve(16, 32768);
         assert_eq!(r.threads, 16);
         assert_eq!(r.memory_budget_mb, 32768 - 2048);

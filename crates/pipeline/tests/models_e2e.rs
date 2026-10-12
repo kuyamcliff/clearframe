@@ -1,5 +1,5 @@
 //! Renders with real AI models. Requires converted weights:
-//! `CLEARFRAME_TEST_MODELS=/path/to/safetensors cargo test --release -p clearframe-pipeline --test models_e2e`
+//! `CLIPFX_TEST_MODELS=/path/to/safetensors cargo test --release -p clearframe-pipeline --test models_e2e`
 //! Expected files: realesr-animevideov3, realesr-general-x4v3, realesr-general-wdn-x4v3,
 //! ffdnet_color, NAFNet-GoPro-width32, rife426, GFPGANv1.4, detection_mobilenet0.25_Final (.safetensors).
 
@@ -14,7 +14,7 @@ use clearframe_pipeline::spec::*;
 use common::*;
 
 fn models_dir() -> Option<PathBuf> {
-    std::env::var("CLEARFRAME_TEST_MODELS").ok().map(PathBuf::from).filter(|p| p.is_dir())
+    std::env::var("CLIPFX_TEST_MODELS").ok().map(PathBuf::from).filter(|p| p.is_dir())
 }
 
 fn resolved(dir: &PathBuf, id: &str, files: &[(&str, &str)]) -> (String, ResolvedModel) {
@@ -32,7 +32,7 @@ fn resolved(dir: &PathBuf, id: &str, files: &[(&str, &str)]) -> (String, Resolve
 macro_rules! setup {
     () => {{
         let (Some(t), Some(m)) = (tools(), models_dir()) else {
-            eprintln!("CLEARFRAME_TEST_MODELS not set; skipping");
+            eprintln!("CLIPFX_TEST_MODELS not set; skipping");
             return;
         };
         (t, m)

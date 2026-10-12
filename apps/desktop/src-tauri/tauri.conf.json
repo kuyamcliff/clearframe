@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ClearFrame",
+  "productName": "ClipFX Enhance",
   "version": "1.0.0",
-  "identifier": "io.github.kuyamcliff.clearframe",
+  "identifier": "io.github.kuyamcliff.clipfxenhance",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "ClearFrame",
+        "title": "ClipFX Enhance",
         "width": 1440,
         "height": 900,
         "minWidth": 960,
@@ -43,11 +43,11 @@
       "dmg",
       "app"
     ],
-    "publisher": "ClearFrame contributors",
-    "copyright": "Copyright (c) 2026 ClearFrame contributors. MIT License.",
+    "publisher": "ClipFX Enhance contributors",
+    "copyright": "Copyright (c) 2026 ClipFX Enhance contributors. MIT License.",
     "category": "Video",
     "shortDescription": "Local, open-source AI video enhancement",
-    "longDescription": "ClearFrame upscales, restores, denoises, deblurs, stabilizes and interpolates video locally with open models. No account, no subscription, works offline.",
+    "longDescription": "ClipFX Enhance upscales, restores, denoises, deblurs, stabilizes and interpolates video locally with open models. No account, no subscription, works offline.",
     "homepage": "https://github.com/kuyamcliff/clearframe",
     "license": "MIT",
     "licenseFile": "../../../LICENSE",
@@ -66,21 +66,21 @@
     "fileAssociations": [
       {
         "ext": [
-          "cfproj"
+          "cfxproj"
         ],
-        "name": "ClearFrame Project",
-        "description": "ClearFrame project",
+        "name": "ClipFX Enhance Project",
+        "description": "ClipFX Enhance project",
         "role": "Editor",
-        "mimeType": "application/x-clearframe-project"
+        "mimeType": "application/x-clipfx-project"
       },
       {
         "ext": [
-          "cframe"
+          "cfxpreset"
         ],
-        "name": "ClearFrame Preset",
-        "description": "ClearFrame preset",
+        "name": "ClipFX Enhance Preset",
+        "description": "ClipFX Enhance preset",
         "role": "Viewer",
-        "mimeType": "application/x-clearframe-preset"
+        "mimeType": "application/x-clipfx-preset"
       }
     ],
     "windows": {
@@ -91,7 +91,7 @@
         "headerImage": null,
         "sidebarImage": null,
         "template": null,
-        "startMenuFolder": "ClearFrame",
+        "startMenuFolder": "ClipFX Enhance",
         "installerHooks": "../../../packaging/windows/installer-hooks.nsh",
         "compression": "lzma"
       },

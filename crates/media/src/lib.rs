@@ -1,4 +1,4 @@
-//! ClearFrame media layer built on the FFmpeg command-line tools.
+//! ClipFX Enhance media layer built on the FFmpeg command-line tools.
 pub mod color;
 pub mod encode;
 pub mod mux;

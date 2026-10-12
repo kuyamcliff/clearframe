@@ -1,6 +1,6 @@
 # Model parity check
 
-ClearFrame runs models with its own Rust implementations (crates/inference/src/arch). This
+ClipFX Enhance runs models with its own Rust implementations (crates/inference/src/arch). This
 tool proves they compute the same thing as the official PyTorch code.
 
 Last run (Linux x86-64, CPU, fp32): every architecture matched the official implementation
@@ -17,7 +17,7 @@ DRUNet, NAFNet, RIFE 4.26, RetinaFace, GFPGAN 1.4).
    - `model/` (IFNet_HDv3) from https://github.com/hzwer/Practical-RIFE (v4.26)
    - `gfpgan/` and `facexlib/` from https://github.com/TencentARC/GFPGAN and https://github.com/xinntao/facexlib
 3. Download the original weights listed in `model-catalog/catalog.json` into `CF_MODELS` and check their SHA-256.
-4. Generate references, convert the weights with ClearFrame, and compare:
+4. Generate references, convert the weights with ClipFX Enhance, and compare:
 
 ```sh
 CF_REFPKG=... CF_MODELS=... CF_REFS=refs python tools/parity/make_refs.py

@@ -1,157 +1,169 @@
-import { useState } from "react";
-import { Copy, Download, Pencil, Star, Trash2, Upload } from "lucide-react";
+import { useRef, useState } from "react";
+import { Box, MoreHorizontal, Plus, Star, Upload, X } from "lucide-react";
 
-import { Check, Confirm, Field, Modal } from "../components/ui";
+import { Check, Confirm, Dialog, F, useDismiss, useMenu } from "../components/ui";
 import { api, pickFile, pickSave } from "../lib/ipc";
-import { cardId, cardName, opInfo, requiredModels } from "../lib/ops";
 import type { Preset } from "../lib/types";
-import { applyPreset, errorToast, refreshPresets, toast, useStore } from "../state/store";
+import { applyPreset, clearPipeline, errorToast, refreshPresets, saveSettings, toast, useStore } from "../state/store";
 
-const PRESET_FILTER = [{ name: "ClearFrame preset", extensions: ["cframe"] }];
+const PRESET_FILTER = [{ name: "ClipFX Enhance preset", extensions: ["cfxpreset"] }];
+
+function sortPresets(list: Preset[]) {
+  return [...list].sort((a, b) => Number(b.favorite) - Number(a.favorite) || Number(a.builtin) - Number(b.builtin) || a.name.localeCompare(b.name));
+}
+
+async function act(fn: () => Promise<unknown>, ok?: string) {
+  try {
+    await fn();
+    await refreshPresets();
+    if (ok) toast("success", ok);
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
+function PresetItem({ p, onPick, manage }: { p: Preset; onPick: (p: Preset) => void; manage?: boolean }) {
+  const { open, node } = useMenu();
+  const [renaming, setRenaming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [name, setName] = useState(p.name);
+  return (
+    <div className="item" role="button" tabIndex={0} onClick={() => onPick(p)} onKeyDown={(e) => e.key === "Enter" && onPick(p)} data-testid={`preset-${p.id}`}>
+      <div style={{ minWidth: 0 }}>
+        <div className="t ellipsis">{p.name}</div>
+        <div className="d ellipsis">{p.description || p.category}</div>
+      </div>
+      <button className="btn ghost sm icon" aria-label={p.favorite ? "Unfavorite" : "Favorite"} aria-pressed={p.favorite}
+        onClick={(e) => { e.stopPropagation(); act(() => api.presetAction("favorite", { id: p.id, favorite: !p.favorite })); }}>
+        <Star size={14} className={`star${p.favorite ? " on" : ""}`} fill={p.favorite ? "currentColor" : "none"} />
+      </button>
+      {manage ? (
+        <button className="btn ghost sm icon" aria-label={`More for ${p.name}`} onClick={(e) => open(e, [
+          { label: "Duplicate", onClick: () => act(() => api.presetAction("duplicate", { id: p.id })) },
+          { label: "Rename", onClick: () => setRenaming(true), disabled: p.builtin },
+          { label: "Export…", onClick: async () => {
+            const path = await pickSave("Export preset", `${p.name.replace(/[^\w\- ]+/g, "_")}.cfxpreset`, PRESET_FILTER);
+            if (path) act(() => api.presetAction("export", { id: p.id, path: path.endsWith(".cfxpreset") ? path : `${path}.cfxpreset` }), "Preset exported");
+          } },
+          { label: "Delete", onClick: () => setDeleting(true), danger: true, disabled: p.builtin, sep: true },
+        ])}><MoreHorizontal size={14} /></button>
+      ) : <span />}
+      {node}
+      {renaming && (
+        <Dialog title="Rename preset" onClose={() => setRenaming(false)} footer={<>
+          <button className="btn ghost" onClick={() => setRenaming(false)}>Cancel</button>
+          <button className="btn primary" disabled={!name.trim()} onClick={() => { setRenaming(false); act(() => api.presetAction("rename", { id: p.id, name: name.trim() })); }}>Rename</button>
+        </>}>
+          <F label="Name" htmlFor="rn"><input id="rn" className="input" value={name} onChange={(e) => setName(e.target.value)} /></F>
+        </Dialog>
+      )}
+      {deleting && <Confirm title={`Delete “${p.name}”?`} danger confirmLabel="Delete" onCancel={() => setDeleting(false)} onConfirm={() => { setDeleting(false); act(() => api.presetAction("delete", { id: p.id }), "Preset deleted"); }} />}
+    </div>
+  );
+}
 
 export function SavePresetDialog({ onClose }: { onClose: () => void }) {
   const pipeline = useStore((s) => s.pipeline);
   const output = useStore((s) => s.output);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [category, setCategory] = useState("My presets");
   const [withOutput, setWithOutput] = useState(false);
   const save = async () => {
+    const p: Preset = { id: "", name: name.trim(), description: description.trim(), category: "My presets", tags: [], favorite: false, builtin: false, pipeline, output: withOutput ? output : null };
     try {
-      const p: Preset = { id: "", name: name.trim(), description, category, tags: [], favorite: false, builtin: false, pipeline, output: withOutput ? output : null };
       await api.presetAction("save", { preset: p });
       await refreshPresets();
-      toast("success", `Saved preset “${p.name}”.`);
+      useStore.setState({ presetName: p.name });
+      toast("success", `Saved “${p.name}”`);
       onClose();
     } catch (e) {
       errorToast(e);
     }
   };
   return (
-    <Modal title="Save as preset" onClose={onClose} footer={
-      <>
-        <button className="btn" onClick={onClose}>Cancel</button>
-        <button className="btn primary" disabled={!name.trim() || pipeline.stages.length === 0} onClick={save}>Save preset</button>
-      </>
-    }>
-      <Field label="Name" htmlFor="pr-name"><input id="pr-name" className="input" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} /></Field>
-      <Field label="Description" htmlFor="pr-desc"><input id="pr-desc" className="input" value={description} maxLength={400} onChange={(e) => setDescription(e.target.value)} /></Field>
-      <Field label="Category" htmlFor="pr-cat"><input id="pr-cat" className="input" value={category} maxLength={40} onChange={(e) => setCategory(e.target.value)} /></Field>
-      <Check checked={withOutput} onChange={setWithOutput} label="Include export format (codec, quality, audio)" />
-      {pipeline.stages.length === 0 && <p className="small warn">The current pipeline has no stages.</p>}
-    </Modal>
+    <Dialog title="Create preset" onClose={onClose} footer={<>
+      <button className="btn ghost" onClick={onClose}>Cancel</button>
+      <button className="btn primary" disabled={!name.trim() || !pipeline.stages.some((s) => s.enabled)} onClick={save}>Save</button>
+    </>}>
+      <div className="prefs" style={{ gap: 10 }}>
+        <F label="Name" htmlFor="pr-name"><input id="pr-name" className="input" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} /></F>
+        <F label="Description" htmlFor="pr-desc"><input id="pr-desc" className="input" value={description} maxLength={200} onChange={(e) => setDescription(e.target.value)} /></F>
+        <F label="Codec settings"><Check checked={withOutput} onChange={setWithOutput} label="Include" /></F>
+      </div>
+    </Dialog>
   );
 }
 
-function PresetCard({ p }: { p: Preset }) {
-  const models = useStore((s) => s.models);
-  const [renaming, setRenaming] = useState(false);
-  const [name, setName] = useState(p.name);
-  const [deleting, setDeleting] = useState(false);
-  const missing = requiredModels(p.pipeline).filter((id) => {
-    const c = models.find((m) => cardId(m) === id);
-    return !c || !(c.state === "installed" || c.state === "update_available");
-  });
-  const act = async (fn: () => Promise<unknown>, ok?: string) => {
-    try {
-      await fn();
-      await refreshPresets();
-      if (ok) toast("success", ok);
-    } catch (e) {
-      errorToast(e);
-    }
-  };
-  return (
-    <div className="card" data-testid={`preset-${p.id}`}>
-      <div className="row" style={{ alignItems: "flex-start" }}>
-        <div className="grow">
-          <div className="row">
-            <h3>{p.name}</h3>
-            {p.builtin && <span className="badge">built-in</span>}
-          </div>
-          <div className="tiny faint">{p.category}</div>
-        </div>
-        <button className="btn ghost icon small" aria-label={p.favorite ? "Remove from favorites" : "Add to favorites"} aria-pressed={p.favorite}
-          onClick={() => act(() => api.presetAction("favorite", { id: p.id, favorite: !p.favorite }))}>
-          <Star size={15} fill={p.favorite ? "currentColor" : "none"} className={p.favorite ? "warn" : ""} />
-        </button>
-      </div>
-      {p.description && <p className="small muted mt" style={{ marginTop: 6 }}>{p.description}</p>}
-      <div className="row wrap mt" style={{ marginTop: 8, gap: 4 }}>
-        {p.pipeline.stages.filter((s) => s.enabled).map((s) => <span key={s.id} className="badge">{opInfo(s.type).label}</span>)}
-        {p.output && <span className="badge accent">export format</span>}
-      </div>
-      {missing.length > 0 && (
-        <p className="tiny warn mt" style={{ marginTop: 6 }}>
-          Needs: {missing.map((id) => { const c = models.find((m) => cardId(m) === id); return c ? cardName(c) : id; }).join(", ")}
-        </p>
-      )}
-      <div className="row wrap mt" style={{ marginTop: 10 }}>
-        <button className="btn small primary" onClick={() => { applyPreset(p); useStore.setState({ view: "workspace" }); }}>Use</button>
-        <button className="btn ghost small" onClick={() => act(() => api.presetAction("duplicate", { id: p.id }), "Duplicated.")}><Copy size={13} /> Duplicate</button>
-        {!p.builtin && <button className="btn ghost small" onClick={() => setRenaming(true)}><Pencil size={13} /> Rename</button>}
-        <button className="btn ghost small" onClick={async () => {
-          const path = await pickSave("Export preset", `${p.name.replace(/[^\w\- ]+/g, "_")}.cframe`, PRESET_FILTER);
-          if (path) act(() => api.presetAction("export", { id: p.id, path: path.endsWith(".cframe") ? path : `${path}.cframe` }), "Preset exported.");
-        }}><Download size={13} /> Export</button>
-        {!p.builtin && <button className="btn ghost small danger" onClick={() => setDeleting(true)}><Trash2 size={13} /> Delete</button>}
-      </div>
-      {renaming && (
-        <Modal title="Rename preset" onClose={() => setRenaming(false)} footer={
-          <>
-            <button className="btn" onClick={() => setRenaming(false)}>Cancel</button>
-            <button className="btn primary" disabled={!name.trim()} onClick={() => { setRenaming(false); act(() => api.presetAction("rename", { id: p.id, name: name.trim() })); }}>Rename</button>
-          </>
-        }>
-          <Field label="Name" htmlFor="rn"><input id="rn" className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
-        </Modal>
-      )}
-      {deleting && (
-        <Confirm title={`Delete “${p.name}”?`} danger confirmLabel="Delete preset" onCancel={() => setDeleting(false)}
-          body="Only the preset is deleted. Videos, projects and exports that used it are not affected."
-          onConfirm={() => { setDeleting(false); act(() => api.presetAction("delete", { id: p.id }), "Preset deleted."); }} />
-      )}
-    </div>
-  );
-}
-
-export function PresetsView() {
+export function PresetsPopover({ onClose }: { onClose: () => void }) {
   const presets = useStore((s) => s.presets);
-  const [q, setQ] = useState("");
-  const [cat, setCat] = useState<string>("All");
-  const [saving, setSaving] = useState(false);
-  const cats = ["All", "Favorites", ...Array.from(new Set(presets.map((p) => p.category))).sort()];
-  const list = presets
-    .filter((p) => cat === "All" || (cat === "Favorites" ? p.favorite : p.category === cat))
-    .filter((p) => !q || `${p.name} ${p.description} ${p.tags.join(" ")}`.toLowerCase().includes(q.toLowerCase()))
-    .sort((a, b) => Number(b.favorite) - Number(a.favorite) || Number(a.builtin) - Number(b.builtin) || a.name.localeCompare(b.name));
+  const ref = useRef<HTMLDivElement>(null);
+  const [creating, setCreating] = useState(false);
+  useDismiss(ref, onClose, !creating && !document.querySelector(".backdrop"));
   const importPreset = async () => {
     const [path] = await pickFile("Import preset", PRESET_FILTER);
     if (!path) return;
     try {
       const r = await api.presetAction<{ preset: Preset; missing_models: string[] }>("import", { path });
       await refreshPresets();
-      toast(r.missing_models.length ? "warning" : "success", `Imported “${r.preset.name}”.${r.missing_models.length ? ` It needs models you have not installed: ${r.missing_models.join(", ")}. Nothing was downloaded.` : ""}`);
+      toast(r.missing_models.length ? "warning" : "success", `Imported “${r.preset.name}”${r.missing_models.length ? ` · needs ${r.missing_models.length} model(s)` : ""}`);
     } catch (e) {
       errorToast(e);
     }
   };
+  const list = sortPresets(presets);
+  const mine = list.filter((p) => !p.builtin);
+  const builtin = list.filter((p) => p.builtin);
+  const pick = (p: Preset) => { applyPreset(p); onClose(); };
   return (
-    <div className="page">
-      <div className="page-head">
-        <div className="grow">
-          <h1>Presets</h1>
-          <p className="muted small">Reusable pipelines. Presets never download models by themselves.</p>
-        </div>
-        <input className="input" placeholder="Search presets" aria-label="Search presets" value={q} onChange={(e) => setQ(e.target.value)} />
-        <button className="btn" onClick={importPreset}><Upload size={15} /> Import…</button>
-        <button className="btn primary" onClick={() => setSaving(true)}>Save current as preset</button>
+    <div className="pop" ref={ref} style={{ top: 44, right: 120 }} role="dialog" aria-label="Presets">
+      <div className="pop-h">
+        <span className="grow">Presets</span>
+        <button className="btn ghost sm icon" aria-label="Import preset" title="Import" onClick={importPreset}><Upload size={14} /></button>
+        <button className="btn ghost sm icon" aria-label="Close presets" onClick={onClose}><X size={14} /></button>
       </div>
-      <div className="filters" role="group" aria-label="Category">
-        {cats.map((c) => <button key={c} className="chip" aria-pressed={cat === c} onClick={() => setCat(c)}>{c}</button>)}
+      <div className="pop-b plist">
+        {mine.length > 0 && <div className="grp">Yours</div>}
+        {mine.map((p) => <PresetItem key={p.id} p={p} onPick={pick} manage />)}
+        {mine.length > 0 && <div className="grp">Built-in</div>}
+        {builtin.map((p) => <PresetItem key={p.id} p={p} onPick={pick} manage />)}
       </div>
-      {list.length === 0 ? <div className="empty">No presets match.</div> : <div className="preset-grid">{list.map((p) => <PresetCard key={p.id} p={p} />)}</div>}
-      {saving && <SavePresetDialog onClose={() => setSaving(false)} />}
+      <div className="pop-f">
+        <button className="btn ghost" onClick={() => setCreating(true)}><Plus size={14} /> Create new</button>
+      </div>
+      {creating && <SavePresetDialog onClose={() => setCreating(false)} />}
     </div>
+  );
+}
+
+/** “How do you want to edit?” shown after opening a video. */
+export function StartDialog() {
+  const presets = useStore((s) => s.presets);
+  const settings = useStore((s) => s.settings);
+  const [hide, setHide] = useState(!!settings?.hide_start_dialog);
+  const close = () => {
+    useStore.setState({ dialog: null });
+    if (hide !== !!settings?.hide_start_dialog) saveSettings((s) => ({ ...s, hide_start_dialog: hide }));
+  };
+  return (
+    <Dialog title="How do you want to edit?" onClose={close} size="mid" flush>
+      <div className="start">
+        <div>
+          <Box size={30} strokeWidth={1.3} className="ico" />
+          <span className="t">Start from scratch</span>
+          <span className="d">No adjustments applied</span>
+          <button className="btn primary" style={{ alignSelf: "flex-start" }} onClick={() => { clearPipeline(); close(); }}>Start editing</button>
+          <span className="grow" />
+          <Check checked={hide} onChange={setHide} label="Don't show again" />
+        </div>
+        <div>
+          <Star size={30} strokeWidth={1.3} className="ico" />
+          <span className="t">Start from preset</span>
+          <span className="d">Choose a preset below to get started</span>
+          <div className="plist">
+            {sortPresets(presets).map((p) => <PresetItem key={p.id} p={p} onPick={(x) => { applyPreset(x); close(); }} />)}
+          </div>
+        </div>
+      </div>
+    </Dialog>
   );
 }

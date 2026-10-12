@@ -1,6 +1,6 @@
 [package]
 name = "clearframe-inference"
-description = "ClearFrame reviewed model adapters implemented on candle (pure Rust)"
+description = "ClipFX Enhance reviewed model adapters implemented on candle (pure Rust)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

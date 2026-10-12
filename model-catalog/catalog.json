@@ -877,7 +877,7 @@
       "code_license": "Apache-2.0",
       "commercial_use_allowed": true,
       "redistribution_allowed": true,
-      "license_notes": "GFPGAN's repository license lists third-party components; ClearFrame uses the 'clean' architecture that needs no custom CUDA operators. The model was trained on FFHQ, whose images are under CC BY-NC-SA 4.0 \u2014 review this if your use is commercial.",
+      "license_notes": "GFPGAN's repository license lists third-party components; ClipFX Enhance uses the 'clean' architecture that needs no custom CUDA operators. The model was trained on FFHQ, whose images are under CC BY-NC-SA 4.0 \u2014 review this if your use is commercial.",
       "attribution": [
         "GFPGAN: Xintao Wang, Yu Li, Honglun Zhang, Ying Shan (CVPR 2021). Copyright (c) 2021 Tencent ARC.",
         "RetinaFace weights via facexlib (Xintao Wang) and Pytorch_Retinaface (biubug6), MIT."

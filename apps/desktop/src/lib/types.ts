@@ -157,7 +157,7 @@ export interface ClearResult { freed_bytes: number; removed_entries: number; ski
 
 export type PerformanceMode = "balanced" | "high_performance" | "maximum" | "custom";
 export type ProcessPriority = "low" | "below_normal" | "normal" | "above_normal";
-export type MemoryPreset = "more_for_others" | "balanced" | "prioritize_clear_frame" | "custom";
+export type MemoryPreset = "more_for_others" | "balanced" | "prioritize_app" | "custom";
 export interface Performance {
   mode: PerformanceMode; cpu_threads: number; reserve_cpu_threads: number; priority: ProcessPriority;
   memory_preset: MemoryPreset; memory_budget_mb: number; memory_pressure: "pause" | "continue";

@@ -22,7 +22,7 @@ problems. We aim to acknowledge reports within 7 days.
   selects, or when the user checks for updates.
 - **Desktop shell.** The web view has a strict CSP, no remote content, and asset access is
   limited to the cache folder and files the user opened.
-- **Installer.** It installs per machine with least privilege at runtime: ClearFrame itself
+- **Installer.** It installs per machine with least privilege at runtime: ClipFX Enhance itself
   never runs elevated, and user data is created by the user's own process.
 
 ## Supported versions

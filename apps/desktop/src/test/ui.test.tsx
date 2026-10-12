@@ -7,7 +7,8 @@ import { StageForm } from "../components/StageForm";
 import defaults from "../lib/fixtures/operation_defaults.json";
 import type { JobRecord } from "../lib/types";
 import { boot, handleEvent, redo, setPipeline, undo, useStore } from "../state/store";
-import { ModelsView } from "../views/Models";
+import { ModelsDialog } from "../views/Models";
+import { Sidebar } from "../views/Sidebar";
 
 const D = defaults as any;
 
@@ -61,37 +62,48 @@ describe("store", () => {
 });
 
 describe("StageForm", () => {
-  it("offers an explicit install button for a missing model and never installs by itself", () => {
+  it("offers an explicit install button for a missing model and never installs by itself", async () => {
     const stage = { id: "enhance", enabled: true, type: "enhance" as const, settings: D.enhance.settings };
-    render(<StageForm stage={stage} advanced={false} onChange={() => {}} />);
-    expect(screen.getByRole("button", { name: /Install \(/ })).toBeInTheDocument();
+    const onChange = vi.fn();
+    render(<StageForm stage={stage} onChange={onChange} />);
+    expect(screen.getByRole("button", { name: /^Install AnimeVideo v3 ·/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("radio", { name: /General v3/ }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ model_id: "xinntao.realesr-general-v3" }));
     expect(useStore.getState().models.every((m) => !m.in_progress)).toBe(true);
   });
 
-  it("shows advanced-only controls in advanced mode", () => {
-    const stage = { id: "face", enabled: true, type: "face_restore" as const, settings: D.face_restore.settings };
-    const { rerender } = render(<StageForm stage={stage} advanced={false} onChange={() => {}} />);
-    expect(screen.queryByLabelText("Maximum faces")).toBeNull();
-    rerender(<StageForm stage={stage} advanced onChange={() => {}} />);
-    expect(screen.getByLabelText("Maximum faces")).toBeInTheDocument();
-    expect(screen.getByText(/can change how people look/)).toBeInTheDocument();
+  it("lists built-in methods next to AI models", () => {
+    const stage = { id: "dn", enabled: true, type: "denoise" as const, settings: D.denoise.settings };
+    render(<StageForm stage={stage} onChange={() => {}} />);
+    expect(screen.getByRole("radio", { name: /hqdn3d/ })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /FFDNet/ })).toHaveAttribute("aria-checked", "true");
   });
 
   it("reports edits through onChange", async () => {
     const onChange = vi.fn();
     const stage = { id: "s", enabled: true, type: "stabilize" as const, settings: D.stabilize.settings };
-    render(<StageForm stage={stage} advanced={false} onChange={onChange} />);
-    await userEvent.selectOptions(screen.getByLabelText("Borders"), "black");
+    render(<StageForm stage={stage} onChange={onChange} />);
+    await userEvent.click(screen.getByRole("button", { name: "Black" }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ mode: "black", smoothing: D.stabilize.settings.smoothing }));
   });
 });
 
-describe("Model Library", () => {
-  it("lists catalog models with license information and storage location", async () => {
-    render(<ModelsView />);
+describe("Models dialog", () => {
+  it("lists every catalog model with its license and storage location", async () => {
+    render(<ModelsDialog />);
     await waitFor(() => expect(screen.getByTestId("models-dir")).not.toHaveTextContent("…"));
-    expect(screen.getAllByRole("article").length).toBe(useStore.getState().models.length);
-    expect(screen.getAllByText("Best for, limitations, license and source").length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("button", { name: "Install" }).length).toBeGreaterThan(0);
+    for (const m of useStore.getState().models) expect(screen.getByTestId(`model-${m.manifest!.id}`)).toBeInTheDocument();
+    expect(screen.getByTestId("model-detail")).toHaveTextContent("Weights");
+    expect(screen.getByRole("button", { name: "Install" })).toBeInTheDocument();
+  });
+});
+
+describe("Sidebar", () => {
+  it("shows every adjustment section with a toggle", () => {
+    render(<Sidebar />);
+    for (const t of ["Enhancement", "Denoise", "Motion deblur", "Face recovery", "Frame interpolation", "Stabilization", "Deinterlace", "Color & HDR", "Resize", "Film grain"]) {
+      expect(screen.getByRole("switch", { name: t })).toBeInTheDocument();
+    }
+    expect(screen.getByTestId("export-as")).toBeDisabled();
   });
 });

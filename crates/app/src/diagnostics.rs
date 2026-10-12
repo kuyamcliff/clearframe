@@ -105,7 +105,7 @@ impl App {
             storage: self.storage_overview(),
             models,
             recent_jobs,
-            log_tail: crate::logging::tail(&self.paths().logs_dir.join("clearframe.log"), 64 * 1024),
+            log_tail: crate::logging::tail(&self.paths().logs_dir.join("clipfx.log"), 64 * 1024),
             redacted: false,
         }
     }

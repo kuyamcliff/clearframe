@@ -23,7 +23,7 @@ pub struct UpdateInfo {
 fn agent(url: &str) -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout(std::time::Duration::from_secs(20))
-        .user_agent(&format!("ClearFrame/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(&format!("ClipFX-Enhance/{}", env!("CARGO_PKG_VERSION")))
         .try_proxy_from_env(clearframe_models::manager::use_proxy_for(url))
         .build()
 }

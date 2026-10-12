@@ -1,6 +1,6 @@
 [package]
 name = "clearframe-pipeline"
-description = "ClearFrame processing pipeline: specification, planning, processors and the job runner"
+description = "ClipFX Enhance processing pipeline: specification, planning, processors and the job runner"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
