@@ -7,8 +7,8 @@ use crate::ops::{pixel_unshuffle, upsample_nearest, Act, Conv2d};
 const L: Act<'static> = Act::LeakyRelu(0.2);
 use crate::weights::Weights;
 
-struct Rdb {
-    convs: [Conv2d; 5],
+pub(crate) struct Rdb {
+    pub(crate) convs: [Conv2d; 5],
 }
 
 impl Rdb {
@@ -27,13 +27,13 @@ impl Rdb {
 }
 
 pub struct RrdbNet {
-    conv_first: Conv2d,
-    body: Vec<[Rdb; 3]>,
-    conv_body: Conv2d,
-    conv_up1: Conv2d,
-    conv_up2: Conv2d,
-    conv_hr: Conv2d,
-    conv_last: Conv2d,
+    pub(crate) conv_first: Conv2d,
+    pub(crate) body: Vec<[Rdb; 3]>,
+    pub(crate) conv_body: Conv2d,
+    pub(crate) conv_up1: Conv2d,
+    pub(crate) conv_up2: Conv2d,
+    pub(crate) conv_hr: Conv2d,
+    pub(crate) conv_last: Conv2d,
     pub scale: usize,
 }
 

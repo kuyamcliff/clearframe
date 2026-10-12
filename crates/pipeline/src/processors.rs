@@ -79,6 +79,7 @@ pub fn is_oom(msg: &str) -> bool {
         || m.contains("failed to allocate")
         || m.contains("allocation failed")
         || m.contains("insufficient memory")
+        || m.contains("use a smaller tile")
 }
 
 /// Image model stage (enhance / denoise / deblur) with optional strength blend.
@@ -329,15 +330,33 @@ pub fn budget_tile(res: &JobResources, mb_per_mp: f64) -> usize {
     auto_tile(0, &Device::Cpu, res, mb_per_mp)
 }
 
+/// Move an image model onto the job's GPU when one was selected. Returns whether it runs there;
+/// on failure the model stays on the CPU and the job continues.
+fn attach_gpu(im: &mut ImageModel, compute: &crate::runner::Compute, id: &str) -> bool {
+    #[cfg(feature = "gpu")]
+    if let Some(g) = &compute.gpu {
+        match im.use_gpu(g.clone()) {
+            Ok(()) => {
+                log::info!("{id}: running on {} with {}px tiles", g.info.name, im.tile);
+                return true;
+            }
+            Err(e) => log::warn!("{id}: GPU unavailable ({e}); using the CPU"),
+        }
+    }
+    let _ = (im, compute, id);
+    false
+}
+
 /// Build the native processor for a stage.
 pub fn build_native(
     op: &Operation,
     sp: &StagePlan,
     models: &BTreeMap<String, ResolvedModel>,
-    device: &Device,
+    compute: &crate::runner::Compute,
     precision: Precision,
     res: &JobResources,
 ) -> Result<Box<dyn Processor>> {
+    let device = &compute.device;
     Ok(match op {
         Operation::Enhance(e) => {
             let m = model(models, &e.model_id)?;
@@ -348,9 +367,10 @@ pub fn build_native(
                 w = w.interpolate(&wdn, dn as f64).map_err(|e| anyhow!("{e}"))?;
             }
             let mut im = ImageModel::load(&w, precision).map_err(|e| anyhow!("{}: {e}", m.id))?;
+            let on_gpu = attach_gpu(&mut im, compute, &m.id);
             if e.tile_size > 0 {
                 im.tile = e.tile_size as usize;
-            } else {
+            } else if !on_gpu {
                 im.tile = auto_tile(im.tile, device, res, m.memory_per_megapixel_mb);
             }
             if e.tile_pad > 0 {
@@ -376,7 +396,9 @@ pub fn build_native(
             let w = load_weights(m, "weights", device)?;
             let _ = d.engine;
             let mut im = ImageModel::load(&w, precision).map_err(|e| anyhow!("{}: {e}", m.id))?;
-            im.tile = auto_tile(im.tile, device, res, m.memory_per_megapixel_mb);
+            if !attach_gpu(&mut im, compute, &m.id) {
+                im.tile = auto_tile(im.tile, device, res, m.memory_per_megapixel_mb);
+            }
             Box::new(ImageProc {
                 label: format!("Denoise ({})", m.id),
                 model: im,
@@ -390,7 +412,9 @@ pub fn build_native(
             let m = model(models, &d.model_id)?;
             let w = load_weights(m, "weights", device)?;
             let mut im = ImageModel::load(&w, precision).map_err(|e| anyhow!("{}: {e}", m.id))?;
-            im.tile = auto_tile(im.tile, device, res, m.memory_per_megapixel_mb).min(512);
+            if !attach_gpu(&mut im, compute, &m.id) {
+                im.tile = auto_tile(im.tile, device, res, m.memory_per_megapixel_mb).min(512);
+            }
             Box::new(ImageProc {
                 label: format!("Deblur ({})", m.id),
                 model: im,

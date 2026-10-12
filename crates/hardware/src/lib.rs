@@ -28,6 +28,9 @@ pub struct HardwareInfo {
     pub ram_available_mb: u64,
     pub gpus: Vec<GpuInfo>,
     pub backends: Vec<BackendStatus>,
+    /// GPUs usable by the cross-vendor backend (Vulkan / DirectX 12 / Metal), best first.
+    #[serde(default)]
+    pub gpu_adapters: Vec<device::GpuAdapter>,
     pub precisions: Vec<String>,
     pub cpu_features: Vec<String>,
 }
@@ -240,6 +243,7 @@ pub fn detect() -> HardwareInfo {
         ram_available_mb: sys.available_memory() / (1 << 20),
         gpus,
         backends,
+        gpu_adapters: device::gpu_adapters(),
         precisions,
         cpu_features: cpu_features(),
     }

@@ -5,17 +5,17 @@ use candle_core::{Result, Tensor};
 use crate::ops::{global_avg_pool, layer_norm2d, pad_zero, pixel_shuffle, Conv2d};
 use crate::weights::Weights;
 
-struct NafBlock {
-    norm1: (Tensor, Tensor),
-    norm2: (Tensor, Tensor),
-    conv1: Conv2d,
-    conv2: Conv2d,
-    conv3: Conv2d,
-    sca: Conv2d,
-    conv4: Conv2d,
-    conv5: Conv2d,
-    beta: Tensor,
-    gamma: Tensor,
+pub(crate) struct NafBlock {
+    pub(crate) norm1: (Tensor, Tensor),
+    pub(crate) norm2: (Tensor, Tensor),
+    pub(crate) conv1: Conv2d,
+    pub(crate) conv2: Conv2d,
+    pub(crate) conv3: Conv2d,
+    pub(crate) sca: Conv2d,
+    pub(crate) conv4: Conv2d,
+    pub(crate) conv5: Conv2d,
+    pub(crate) beta: Tensor,
+    pub(crate) gamma: Tensor,
 }
 
 fn gate(x: &Tensor) -> Result<Tensor> {
@@ -56,13 +56,13 @@ impl NafBlock {
 }
 
 pub struct NafNet {
-    intro: Conv2d,
-    ending: Conv2d,
-    encoders: Vec<Vec<NafBlock>>,
-    downs: Vec<Conv2d>,
-    middle: Vec<NafBlock>,
-    ups: Vec<Conv2d>,
-    decoders: Vec<Vec<NafBlock>>,
+    pub(crate) intro: Conv2d,
+    pub(crate) ending: Conv2d,
+    pub(crate) encoders: Vec<Vec<NafBlock>>,
+    pub(crate) downs: Vec<Conv2d>,
+    pub(crate) middle: Vec<NafBlock>,
+    pub(crate) ups: Vec<Conv2d>,
+    pub(crate) decoders: Vec<Vec<NafBlock>>,
 }
 
 impl NafNet {

@@ -220,7 +220,7 @@ pub struct Performance {
     pub memory_pressure: MemoryPressureAction,
     /// Run more than one job at a time when the budget allows.
     pub max_concurrent_jobs: u32,
-    /// Compute device: "auto", "cpu", "cuda:0", "metal:0".
+    /// Compute device: "auto", "cpu", "gpu:0" (any GPU via Vulkan/DX12/Metal), "cuda:0", "metal:0".
     pub device: String,
     /// Limit for GPU memory used by models (MB, 0 = automatic).
     pub vram_budget_mb: u64,
@@ -333,7 +333,7 @@ impl Settings {
         self.performance.max_concurrent_jobs = self.performance.max_concurrent_jobs.clamp(1, 8);
         self.performance.memory_budget_mb = self.performance.memory_budget_mb.clamp(512, 4 << 20);
         let d = self.performance.device.trim().to_ascii_lowercase();
-        let valid = d == "auto" || d == "cpu" || ["cuda:", "metal:"].iter().any(|p| d.strip_prefix(p).is_some_and(|n| n.parse::<u32>().is_ok()));
+        let valid = d == "auto" || d == "cpu" || ["gpu:", "cuda:", "metal:"].iter().any(|p| d.strip_prefix(p).is_some_and(|n| n.parse::<u32>().is_ok()));
         self.performance.device = if valid { d } else { "auto".into() };
         self.segment_seconds = self.segment_seconds.clamp(2.0, 120.0);
         if self.naming_template.trim().is_empty() || self.naming_template.len() > 200 {

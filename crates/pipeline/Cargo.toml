@@ -6,7 +6,9 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = []
+default = ["gpu"]
+# Cross-vendor GPU inference (Vulkan / DirectX 12 / Metal).
+gpu = ["clearframe-inference/gpu"]
 cuda = ["clearframe-inference/cuda"]
 metal = ["clearframe-inference/metal"]
 accelerate = ["clearframe-inference/accelerate"]

@@ -124,7 +124,7 @@ pub fn render_still(tools: &FfmpegTools, info: &MediaInfo, req: &StillRequest, l
     let pass = &plan.passes[0];
     let needs_pair = req.pipeline.enabled().any(|s| matches!(s.op, Operation::Interpolate(_)));
     let n_frames = if needs_pair { 2 } else { 1 };
-    let (_, dev) = crate::runner::select_device(&req.resources, &req.engine).map_err(|e| anyhow!(e))?;
+    let compute = crate::runner::select_compute(&req.resources, &req.engine).map_err(|e| anyhow!(e))?;
     let enabled: Vec<&Stage> = req.pipeline.enabled().collect();
     let mut procs: Vec<Timed> = Vec::new();
     for seg in &pass.segments {
@@ -132,7 +132,7 @@ pub fn render_still(tools: &FfmpegTools, info: &MediaInfo, req: &StillRequest, l
             Segment::Native { stage } => {
                 let sp = &plan.stages[*stage];
                 procs.push(Timed {
-                    inner: build_native(&enabled[sp.index].op, sp, &req.models, &dev, req.engine.precision, &req.resources)?,
+                    inner: build_native(&enabled[sp.index].op, sp, &req.models, &compute, req.engine.precision, &req.resources)?,
                     seconds: 0.0,
                     stage_id: sp.stage_id.clone(),
                 });

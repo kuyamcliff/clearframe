@@ -5,9 +5,9 @@ use candle_core::{Result, Tensor};
 use crate::ops::{pad_replicate, Conv2d, ConvTranspose2d};
 use crate::weights::Weights;
 
-struct ResBlock {
-    c1: Conv2d,
-    c2: Conv2d,
+pub(crate) struct ResBlock {
+    pub(crate) c1: Conv2d,
+    pub(crate) c2: Conv2d,
 }
 
 impl ResBlock {
@@ -21,11 +21,11 @@ impl ResBlock {
 }
 
 pub struct DruNet {
-    head: Conv2d,
-    downs: Vec<(Vec<ResBlock>, Conv2d)>,
-    body: Vec<ResBlock>,
-    ups: Vec<(ConvTranspose2d, Vec<ResBlock>)>,
-    tail: Conv2d,
+    pub(crate) head: Conv2d,
+    pub(crate) downs: Vec<(Vec<ResBlock>, Conv2d)>,
+    pub(crate) body: Vec<ResBlock>,
+    pub(crate) ups: Vec<(ConvTranspose2d, Vec<ResBlock>)>,
+    pub(crate) tail: Conv2d,
 }
 
 impl DruNet {

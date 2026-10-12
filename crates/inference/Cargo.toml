@@ -10,6 +10,8 @@ default = []
 cuda = ["candle-core/cuda", "candle-nn/cuda"]
 metal = ["candle-core/metal", "candle-nn/metal"]
 accelerate = ["candle-core/accelerate", "candle-nn/accelerate"]
+# Cross-vendor GPU compute (Vulkan / DirectX 12 / Metal) for NVIDIA, AMD, Intel and Apple GPUs.
+gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
 
 [dependencies]
 candle-core.workspace = true
@@ -20,6 +22,9 @@ serde_json.workspace = true
 log.workspace = true
 rayon.workspace = true
 gemm = { version = "0.19", features = ["rayon"] }
+wgpu = { version = "30", optional = true }
+pollster = { version = "0.4", optional = true }
+bytemuck = { version = "1", optional = true, features = ["derive"] }
 
 [dev-dependencies]
 safetensors.workspace = true
