@@ -95,6 +95,20 @@ impl ColorTags {
         matches!(self.transfer.as_deref(), Some("smpte2084") | Some("arib-std-b67"))
     }
 
+    /// `setparams` filter that tags the frames themselves. FFmpeg 8 takes the encoder's colour
+    /// properties from the frames and ignores `-color_primaries`/`-color_trc` when frames come
+    /// untagged from a raw pipe, so both are needed.
+    pub fn setparams_filter(&self) -> String {
+        let mut f = format!("setparams=colorspace={}:range={}", self.matrix.colorspace_tag(), if self.full_range { "pc" } else { "tv" });
+        if let Some(p) = &self.primaries {
+            f.push_str(&format!(":color_primaries={p}"));
+        }
+        if let Some(t) = &self.transfer {
+            f.push_str(&format!(":color_trc={t}"));
+        }
+        f
+    }
+
     /// `-colorspace/-color_primaries/-color_trc/-color_range` output options.
     pub fn ffmpeg_args(&self) -> Vec<String> {
         let mut a = vec!["-colorspace".to_string(), self.matrix.colorspace_tag().to_string()];
@@ -112,6 +126,11 @@ impl ColorTags {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frames_are_tagged() {
+        assert_eq!(ColorTags::sdr_bt709().setparams_filter(), "setparams=colorspace=bt709:range=tv:color_primaries=bt709:color_trc=bt709");
+    }
 
     #[test]
     fn matrix_mapping() {

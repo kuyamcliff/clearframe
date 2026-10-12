@@ -25,16 +25,20 @@ Everything that doesn't fit on the front page: the full feature list, install no
 
 ## Install
 
-- **Windows 10/11 (x64):** run `ClipFX Enhance_<version>_x64-setup.exe`. It installs per machine
+- **Windows 10/11 (x64):** run `ClipFX-Enhance-windows-x64-setup.exe`. It installs per machine
   into Program Files and includes FFmpeg. Your settings, models and cache live in
   `%LOCALAPPDATA%\ClipFX Enhance` and survive upgrades and uninstalls; they are removed only if
   you tick “Delete the application data” in the uninstaller. If WebView2 is missing, the
   installer downloads it.
 - **Linux (x64):** install the `.deb` (Debian/Ubuntu), `.rpm` (Fedora/openSUSE) or
-  run the AppImage. FFmpeg comes from your distribution (`ffmpeg` package). The binary is
+  run the AppImage (`chmod +x`, then open it). FFmpeg comes from your distribution (`ffmpeg` package). The binary is
   `clipfx-enhance`.
-- **macOS 11+:** build from source (see below) and install FFmpeg with Homebrew
-  (`brew install ffmpeg`). Signed macOS builds are not provided yet.
+- **macOS 11+ (Apple Silicon and Intel):** open `ClipFX-Enhance-macos-universal.dmg` and drag the
+  app to Applications. FFmpeg is included. The app isn't notarized by Apple, so the first time you
+  open it, go to System Settings → Privacy & Security and click **Open Anyway**. The bundled
+  FFmpeg exports H.264 and H.265 (software or VideoToolbox hardware), ProRes and FFV1; AV1 and VP9
+  export need an FFmpeg you choose in Preferences. Updates are announced in the app and downloaded
+  from the release page.
 
 FFmpeg needs `libvidstab` for stabilization and `zimg` (zscale) for HDR conversion. The app
 tells you if either is missing and turns those features off.
@@ -94,7 +98,8 @@ Diagnostics reports are created locally, can hide personal paths, and are never 
 
 When a new version is out, a bar at the top of the window shows its version and download size.
 **Download** fetches only the update package for your computer, and **Restart to update** installs it
-and reopens the app. On Windows the update package contains just the app (a few MB), not the
+and reopens the app (Windows and the Linux `.deb`; on macOS and for the AppImage or `.rpm`, the bar
+links to the release page). On Windows the update package contains just the app (a few MB), not the
 bundled FFmpeg, so it is far smaller than the full installer. Every update is checked against
 the release signing key built into the app and against its SHA-256 before anything runs.
 

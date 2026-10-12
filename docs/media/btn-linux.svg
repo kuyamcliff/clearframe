@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="60" viewBox="0 0 300 60">
+  <defs>
+    <linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff8a3d"/><stop offset="1" stop-color="#e8590c"/></linearGradient>
+    <linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="0.5" y="0.5" width="299" height="59" rx="29.5" fill="url(#b)"/>
+  <rect x="0.5" y="0.5" width="299" height="59" rx="29.5" fill="url(#s)"/>
+  <g transform="translate(33 18)" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="1" y="1" width="22" height="22" rx="5"/>
+    <path d="M7 9l4 3-4 3M13 16h4"/>
+  </g>
+  <text x="166" y="37.5" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',Helvetica,Arial,sans-serif" font-size="18" font-weight="700" fill="#fff" letter-spacing="-.2">Download for Linux</text>
+</svg>

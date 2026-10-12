@@ -290,6 +290,24 @@ fn primaries_name(p: &Option<String>) -> &str {
     }
 }
 
+/// Input matrix and range for zscale. FFmpeg 8 passes "unspecified" through to zimg, which then
+/// cannot convert, so untagged video gets the usual default for its size (BT.601 for SD, BT.709
+/// above) and limited range; for the same reason the output primaries are always set. RGB frames
+/// ignore the matrix and range.
+fn matrix_range_in(c: &clearframe_media::probe::ColorInfo, height: u32) -> String {
+    let matrix = match c.space.as_deref() {
+        Some("bt709") => "709",
+        Some("smpte170m") => "170m",
+        Some("bt470bg") => "470bg",
+        Some("bt2020nc") => "2020_ncl",
+        Some("bt2020c") => "2020_cl",
+        _ if height < 720 => "170m",
+        _ => "709",
+    };
+    let range = if c.range.as_deref() == Some("pc") { "full" } else { "limited" };
+    format!("min={matrix}:rin={range}")
+}
+
 /// Default planner options.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanOptions {
@@ -556,7 +574,8 @@ pub fn plan(
                             ToneMapper::Reinhard => "reinhard",
                             ToneMapper::Clip => "clip",
                         };
-                        f.push(format!("zscale=tin={}:pin={}:t=linear:npl=100", transfer_name(&cur.transfer), primaries_name(&cur.primaries)));
+                        let pin = primaries_name(&cur.primaries);
+                        f.push(format!("zscale=tin={}:pin={pin}:p={pin}:{}:t=linear:npl=100", transfer_name(&cur.transfer), matrix_range_in(&v.color, cur.height)));
                         f.push("format=gbrpf32le".into());
                         f.push("zscale=p=709".into());
                         f.push(format!("tonemap=tonemap={tm}:desat={:.2}", c.desaturate * 2.0));
@@ -581,7 +600,13 @@ pub fn plan(
                             HdrTransfer::Pq => ("smpte2084", "smpte2084"),
                             HdrTransfer::Hlg => ("arib-std-b67", "arib-std-b67"),
                         };
-                        f.push(format!("zscale=tin={}:pin={}:t=linear:npl={:.0}", transfer_name(&cur.transfer), primaries_name(&cur.primaries), c.sdr_white_nits));
+                        let pin = primaries_name(&cur.primaries);
+                        f.push(format!(
+                            "zscale=tin={}:pin={pin}:p={pin}:{}:t=linear:npl={:.0}",
+                            transfer_name(&cur.transfer),
+                            matrix_range_in(&v.color, cur.height),
+                            c.sdr_white_nits
+                        ));
                         f.push("format=gbrpf32le".into());
                         f.push(format!("zscale=p=2020:t={t}:npl={:.0}", c.sdr_white_nits));
                         cur.transfer = Some(tname.into());

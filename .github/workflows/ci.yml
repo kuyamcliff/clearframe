@@ -38,15 +38,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
-      - name: FFmpeg (macOS)
+      - name: FFmpeg (macOS, built from source with vid.stab and zimg)
         if: runner.os == 'macOS'
-        run: brew install ffmpeg
+        uses: ./.github/actions/macos-ffmpeg
       - name: FFmpeg (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           ./packaging/windows/fetch-ffmpeg.ps1
           "CLIPFX_FFMPEG_DIR=$((Resolve-Path apps/desktop/src-tauri/ffmpeg).Path)" >> $env:GITHUB_ENV
+          (Resolve-Path apps/desktop/src-tauri/ffmpeg).Path >> $env:GITHUB_PATH
       - name: Frontend placeholder for the desktop crate
         shell: bash
         run: mkdir -p apps/desktop/dist && [ -f apps/desktop/dist/index.html ] || echo '<!doctype html><title>ClipFX Enhance</title>' > apps/desktop/dist/index.html
@@ -218,6 +219,7 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "self-test failed" }
           $json = $report | ConvertFrom-Json
           if (-not $json.gpu.check.passed) { throw "GPU check failed: $($json.gpu | ConvertTo-Json -Depth 5)" }
+          if (-not ($json.ffmpeg.vidstab -and $json.ffmpeg.zscale)) { throw "bundled FFmpeg lacks stabilization or HDR: $($json.ffmpeg | ConvertTo-Json)" }
 
           # Open the app with a real video and take a screenshot of what a user sees.
           $video = Join-Path $env:RUNNER_TEMP "Sample clip.mp4"
@@ -273,7 +275,7 @@ jobs:
           export HOME=$(mktemp -d)
           xvfb-run -a clipfx-enhance --self-test "$PWD/screens/linux-selftest.json" || (cat screens/linux-selftest.json; exit 1)
           cat screens/linux-selftest.json
-          python3 -c "import json; d=json.load(open('screens/linux-selftest.json')); assert d['gpu']['check']['passed'], d['gpu']"
+          python3 -c "import json; d=json.load(open('screens/linux-selftest.json')); assert d['gpu']['check']['passed'], d['gpu']; assert d['ffmpeg']['vidstab'] and d['ffmpeg']['zscale'], d['ffmpeg']"
           ffmpeg -v error -y -f lavfi -i "testsrc2=size=640x360:rate=30" -t 3 -pix_fmt yuv420p "$RUNNER_TEMP/Sample clip.mp4"
           Xvfb :99 -screen 0 1600x960x24 & sleep 2
           DISPLAY=:99 clipfx-enhance "$RUNNER_TEMP/Sample clip.mp4" & app=$!
@@ -309,7 +311,8 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
-      - run: brew install ffmpeg
+      - name: FFmpeg (bundled into the app)
+        uses: ./.github/actions/macos-ffmpeg
       - name: Build the .app
         working-directory: apps/desktop
         run: |
@@ -320,9 +323,11 @@ jobs:
           app=$(find target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
           bin=$(find "$app/Contents/MacOS" -type f -perm +111 | head -1)
           mkdir -p screens
-          "$bin" --self-test "$PWD/screens/macos-selftest.json" || (cat screens/macos-selftest.json; exit 1)
+          test -x "$app/Contents/Resources/ffmpeg/ffmpeg"
+          # Without CLIPFX_FFMPEG_DIR the app must find the FFmpeg inside its own bundle.
+          env -u CLIPFX_FFMPEG_DIR "$bin" --self-test "$PWD/screens/macos-selftest.json" || (cat screens/macos-selftest.json; exit 1)
           cat screens/macos-selftest.json
-          python3 -c "import json; d=json.load(open('screens/macos-selftest.json')); assert d['gpu']['check']['passed'], d['gpu']"
+          python3 -c "import json; d=json.load(open('screens/macos-selftest.json')); assert d['gpu']['check']['passed'], d['gpu']; f=d['ffmpeg']; assert f['vidstab'] and f['zscale'] and '.app/Contents/Resources' in f['path'], f"
           ffmpeg -v error -y -f lavfi -i "testsrc2=size=640x360:rate=30" -t 3 -pix_fmt yuv420p "$RUNNER_TEMP/Sample clip.mp4"
           "$bin" "$RUNNER_TEMP/Sample clip.mp4" & pid=$!
           sleep 30

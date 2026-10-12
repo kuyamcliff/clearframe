@@ -65,7 +65,14 @@ pub fn platform_key() -> &'static str {
     if cfg!(all(windows, target_arch = "x86_64")) {
         "windows-x64"
     } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        "linux-x64-deb"
+        // Only an installed .deb can be updated with a .deb; an AppImage or .rpm install is
+        // pointed at the download page instead.
+        let deb = std::env::var_os("APPIMAGE").is_none() && std::path::Path::new("/var/lib/dpkg/info/clip-fx-enhance.list").exists();
+        if deb {
+            "linux-x64-deb"
+        } else {
+            "linux-x64"
+        }
     } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         "macos-arm64"
     } else {
