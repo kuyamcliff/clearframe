@@ -6,7 +6,7 @@ This page lists only what has actually been tested. "Built in CI" means the CI w
 | Platform | Build | Automated tests | Installer | Manually tested |
 |---|---|---|---|---|
 | Linux x86-64 (Ubuntu 24.04) | ✅ local | ✅ all Rust suites, UI unit tests, Playwright UI tests | ✅ `.deb` installed and self-tested; `.rpm`/AppImage built | Development container only (CPU, no GPU, no display server except Xvfb) |
-| Windows 10/11 x64 | configured in CI | configured in CI | NSIS lifecycle script (`packaging/windows/test-installer.ps1`) configured in CI | **Not yet** |
+| Windows 10/11 x64 | ✅ cross-compiled on Linux (`cargo-xwin`); also configured in CI | configured in CI | ✅ NSIS installer built (v1.0.0, 100 MB, FFmpeg 8.1 bundled); lifecycle script configured in CI | **Not yet**: never run on a Windows PC |
 | macOS 11+ (Apple silicon / Intel) | configured in CI (Rust only) | configured in CI | `.dmg` not produced or signed yet | **Not yet** |
 
 ## Compute backends
