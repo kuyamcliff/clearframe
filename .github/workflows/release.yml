@@ -131,7 +131,7 @@ jobs:
           bin=$(find "$app/Contents/MacOS" -type f -perm +111 | head -1)
           lipo -info "$bin"
           lipo -info "$app/Contents/Resources/ffmpeg/ffmpeg"
-          check='import json,sys; d=json.load(open(sys.argv[1])); f=d["ffmpeg"]; assert d["ok"] and f["vidstab"] and f["zscale"] and ".app/Contents/Resources" in f["path"], d'
+          check='import json,sys; d=json.load(open(sys.argv[1])); f=d["ffmpeg"]; assert d["ok"] and f["vidstab"] and f["zscale"] and ".app/Contents/" in f["path"] and "/Resources/ffmpeg/" in f["path"], d'
           env -u CLIPFX_FFMPEG_DIR "$bin" --self-test "$RUNNER_TEMP/arm.json" && python3 -c "$check" "$RUNNER_TEMP/arm.json"
           if arch -x86_64 /usr/bin/true 2>/dev/null; then
             env -u CLIPFX_FFMPEG_DIR arch -x86_64 "$bin" --self-test "$RUNNER_TEMP/intel.json" && python3 -c "$check" "$RUNNER_TEMP/intel.json"

@@ -541,8 +541,13 @@ pub fn plan(
                         StabilizeMode::Black => ("black", 0),
                     };
                     let detect = format!("vidstabdetect=shakiness={}:accuracy=15:result={{TRF}}", s.shakiness.clamp(1, 10));
-                    let transform =
-                        format!("vidstabtransform=input={{TRF}}:smoothing={}:optzoom={optzoom}:crop={crop}:tripod={}:interpol=bicubic", s.smoothing, if s.tripod { 1 } else { 0 });
+                    // Newer vid.stab defaults to an L1 path optimiser ("opt") that ignores `smoothing` and
+                    // does not report the auto-crop zoom; Gaussian smoothing behaves the same in every build.
+                    let transform = format!(
+                        "vidstabtransform=input={{TRF}}:optalgo=gauss:smoothing={}:optzoom={optzoom}:crop={crop}:tripod={}:interpol=bicubic",
+                        s.smoothing,
+                        if s.tripod { 1 } else { 0 }
+                    );
                     notes.push("vid.stab processes 8-bit 4:4:4 frames; higher bit depth is reduced to 8 bits for this step.".into());
                     match s.mode {
                         StabilizeMode::FullFrame => notes.push("Full frame: uncovered edges are filled from neighbouring frames and may show artifacts.".into()),

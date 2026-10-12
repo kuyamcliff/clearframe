@@ -327,7 +327,7 @@ jobs:
           # Without CLIPFX_FFMPEG_DIR the app must find the FFmpeg inside its own bundle.
           env -u CLIPFX_FFMPEG_DIR "$bin" --self-test "$PWD/screens/macos-selftest.json" || (cat screens/macos-selftest.json; exit 1)
           cat screens/macos-selftest.json
-          python3 -c "import json; d=json.load(open('screens/macos-selftest.json')); assert d['gpu']['check']['passed'], d['gpu']; f=d['ffmpeg']; assert f['vidstab'] and f['zscale'] and '.app/Contents/Resources' in f['path'], f"
+          python3 -c "import json; d=json.load(open('screens/macos-selftest.json')); assert d['gpu']['check']['passed'], d['gpu']; f=d['ffmpeg']; assert f['vidstab'] and f['zscale'] and '.app/Contents/' in f['path'] and '/Resources/ffmpeg/' in f['path'], f"
           ffmpeg -v error -y -f lavfi -i "testsrc2=size=640x360:rate=30" -t 3 -pix_fmt yuv420p "$RUNNER_TEMP/Sample clip.mp4"
           "$bin" "$RUNNER_TEMP/Sample clip.mp4" & pid=$!
           sleep 30
