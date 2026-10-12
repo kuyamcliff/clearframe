@@ -185,7 +185,7 @@ jobs:
           sudo apt-get install -y ./target/release/bundle/deb/*.deb
           HOME=$(mktemp -d) xvfb-run -a clipfx-enhance --self-test "$RUNNER_TEMP/selftest.json" || (cat "$RUNNER_TEMP/selftest.json"; exit 1)
           cat "$RUNNER_TEMP/selftest.json"
-          sudo apt-get remove -y clear-frame
+          sudo apt-get remove -y clip-fx-enhance
       - uses: actions/upload-artifact@v4
         with:
           name: linux-packages

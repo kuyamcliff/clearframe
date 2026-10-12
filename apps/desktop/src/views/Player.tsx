@@ -158,11 +158,12 @@ function Ruler({ dur }: { dur: number }) {
     const major = steps.find((s) => dur / s <= 10) ?? 3600;
     const minor = major / 5;
     const out: { t: number; major: boolean }[] = [];
-    for (let t = 0; t <= dur + 1e-6; t += minor) out.push({ t, major: Math.abs(t / major - Math.round(t / major)) < 1e-6 });
+    for (let i = 0; i * minor <= dur + 1e-6; i++) out.push({ t: i * minor, major: i % 5 === 0 });
     return out;
   }, [dur]);
   const fmt = (t: number) => {
-    const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = Math.floor(t % 60);
+    const r = Math.round(t * 1000) / 1000;
+    const h = Math.floor(r / 3600), m = Math.floor((r % 3600) / 60), s = Math.floor(r % 60);
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   };
   return (
@@ -170,7 +171,7 @@ function Ruler({ dur }: { dur: number }) {
       {ticks.map((k) => (
         <span key={k.t}>
           <span className={`tick${k.major ? " major" : ""}`} style={{ left: `${(k.t / dur) * 100}%` }} />
-          {k.major && <span className="t" style={{ left: `${(k.t / dur) * 100}%` }}>{fmt(k.t)}</span>}
+          {k.major && k.t / dur < 0.94 && <span className="t" style={{ left: `${(k.t / dur) * 100}%` }}>{fmt(k.t)}</span>}
         </span>
       ))}
     </>

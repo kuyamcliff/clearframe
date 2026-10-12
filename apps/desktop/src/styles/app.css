@@ -148,7 +148,7 @@ h1, h2, h3, p { margin: 0; font-weight: 500; }
 .split-btn .btn + .btn { border-radius: 0 var(--r) var(--r) 0; border-left: 1px solid rgba(255, 255, 255, 0.25); padding: 0 6px; }
 .input.fit { height: 26px; width: auto; padding: 0 22px 0 8px; background-color: transparent; color: var(--text-2); background-position: right 6px center; }
 
-.timeline { position: relative; padding: 0 10px 8px; background: var(--bg); touch-action: none; }
+.timeline { position: relative; padding: 0 10px 8px; background: var(--bg); touch-action: none; overflow: hidden; }
 .ruler { position: relative; height: 22px; cursor: pointer; }
 .ruler .tick { position: absolute; bottom: 0; width: 1px; background: var(--line-2); height: 5px; }
 .ruler .tick.major { height: 10px; background: var(--text-3); }
