@@ -7,7 +7,7 @@
 # Pass -Sha256 (or set FFMPEG_SHA256) to pin the exact archive. Without it the
 # script prints the hash it saw so a release can record it.
 param(
-  [string]$Url = $(if ($env:FFMPEG_URL) { $env:FFMPEG_URL } else { "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-gpl-7.1.zip" }),
+  [string]$Url = $env:FFMPEG_URL,
   [string]$Sha256 = $env:FFMPEG_SHA256
 )
 $ErrorActionPreference = "Stop"
@@ -16,8 +16,20 @@ $work = Join-Path ([System.IO.Path]::GetTempPath()) ("cf-ffmpeg-" + [guid]::NewG
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 try {
   $zip = Join-Path $work "ffmpeg.zip"
-  Write-Host "Downloading $Url"
-  Invoke-WebRequest -Uri $Url -OutFile $zip -UseBasicParsing
+  # BtbN keeps only the newest release branches under "latest", so try the
+  # current release first and fall back to newer ones, then master.
+  $base = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
+  $candidates = if ($Url) { @($Url) } else { @(
+    "$base/ffmpeg-n8.1-latest-win64-gpl-8.1.zip",
+    "$base/ffmpeg-n8.2-latest-win64-gpl-8.2.zip",
+    "$base/ffmpeg-n9.0-latest-win64-gpl-9.0.zip",
+    "$base/ffmpeg-master-latest-win64-gpl.zip") }
+  $ok = $false
+  foreach ($c in $candidates) {
+    try { Write-Host "Downloading $c"; Invoke-WebRequest -Uri $c -OutFile $zip -UseBasicParsing; $Url = $c; $ok = $true; break }
+    catch { Write-Host "  not available: $($_.Exception.Message)" }
+  }
+  if (-not $ok) { throw "no FFmpeg build could be downloaded" }
   $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
   Write-Host "sha256 $hash"
   if ($Sha256 -and $hash -ne $Sha256.ToLower()) { throw "FFmpeg archive hash mismatch (expected $Sha256)" }
