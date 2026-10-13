@@ -49,9 +49,19 @@ def main():
     else:
         ck = None
     r2.put(P + 'run_config.json', json.dumps(run_config, indent=1, default=str).encode())
-    world = torch.cuda.device_count()
+    world = int(cfg.get('world') or 0) or torch.cuda.device_count()
     import torch.multiprocessing as tmp
     test_items = [it for it in items if it['split'] == 'test']
+    variants = cfg.get('profile_variants')
+    if variants:  # Phase 2 benchmarks: several configurations in one session, sharing the data cache
+        for v in variants:
+            vc = {**cfg, **v}; w = int(vc.get('world') or 0) or torch.cuda.device_count(); os.environ['MASTER_PORT'] = str(29511 + variants.index(v))
+            log('profiling variant', json.dumps(v))
+            try:
+                tmp.spawn(worker, args=(w, vc, P, work, fp, index, test_items, None, run_config, dict(timers)), nprocs=w, join=True)
+            except Exception as e:  # e.g. torch.compile failing on this stack is itself a result
+                log('variant failed', json.dumps(v), type(e).__name__, str(e)[:300]); r2.put(P + f"perf/{v.get('profile_name', 'variant')}.json", json.dumps({'config': v, 'failed': f'{type(e).__name__}: {str(e)[:500]}'}).encode())
+        return
     tmp.spawn(worker, args=(world, cfg, P, work, fp, index, test_items, ck, run_config, timers), nprocs=world, join=True)
 
 def worker(rank, world, cfg, P, work, fp, index, test_items, ck, run_config, timers):
@@ -66,6 +76,7 @@ def worker(rank, world, cfg, P, work, fp, index, test_items, ck, run_config, tim
     G.load_state_dict(torch.load(io.BytesIO(r2.get(cfg['init_g'])), map_location='cpu', weights_only=True)['params'])
     bd = torch.load(io.BytesIO(urllib.request.urlopen(cfg['init_d_url']).read()), map_location='cpu', weights_only=True); D.load_state_dict(bd.get('params', bd))
     Gema = sc.SRVGGNetCompact().to(dev); Gema.load_state_dict(G.state_dict()); Gema.requires_grad_(False)
+    if cfg.get('channels_last_gd'): G = G.to(memory_format=torch.channels_last); D = D.to(memory_format=torch.channels_last)
     oG = torch.optim.Adam(G.parameters(), cfg['lr'], betas=(0.9, 0.99)); oD = torch.optim.Adam(D.parameters(), cfg['lr'], betas=(0.9, 0.99))
     scaler = torch.amp.GradScaler(); step = 0
     state = {'baseline': None, 'pareto': {}, 'train_seconds_total': 0.0, 'sessions': 0}
@@ -78,14 +89,22 @@ def worker(rank, world, cfg, P, work, fp, index, test_items, ck, run_config, tim
         else: random.seed(cfg['seed'] + rank + 1000 * step); np.random.seed((cfg['seed'] + rank + 1000 * step) % 2 ** 32); torch.manual_seed(cfg['seed'] + rank + 1000 * step)
     state['sessions'] += 1
     timers['model_init_s'] = round(time.time() - t0, 1)
-    E = None
-    if rank == 0:
+    E = None; prof_mode = bool(cfg.get('profile_steps'))
+    if rank == 0 and not prof_mode:
         t1 = time.time(); E = ev.Evaluator(r2, test_items, work, dev, log=log); timers['evaluator_setup_s'] = round(time.time() - t1, 1)
         if state['baseline'] is None:  # original model, same evaluator and data, once per run
             t1 = time.time(); state['baseline'] = {'quick': E.run(Gema, 'quick'), 'full': E.run(Gema, 'full')}; timers['baseline_eval_s'] = round(time.time() - t1, 1)
             r2.put(P + 'baseline.json', json.dumps(state['baseline']).encode()); log('baseline', json.dumps(summ_metrics(state['baseline']['full'])))
     dist.barrier()
     Gp = nn.parallel.DistributedDataParallel(G, device_ids=[rank]); Dp = nn.parallel.DistributedDataParallel(D, device_ids=[rank], broadcast_buffers=False)
+    if cfg.get('compile_g'):
+        t1 = time.time(); Gp = torch.compile(Gp, mode=cfg.get('compile_mode', 'default')); timers['compile_setup_s'] = round(time.time() - t1, 1)
+    cl = (lambda x: x.contiguous(memory_format=torch.channels_last)) if cfg.get('channels_last_gd') else (lambda x: x)
+    prof_n = int(cfg.get('profile_steps') or 0); prof_warm = int(cfg.get('profile_warmup') or 50); prof = {}
+    def tick(name, t_prev):
+        """Profile mode only: synchronise the GPU and charge the elapsed time to a section."""
+        if not prof_n or step < prof_warm: return t_prev
+        torch.cuda.synchronize(); now = time.perf_counter(); prof[name] = prof.get(name, 0.0) + now - t_prev; return now
     dl = iter(torch.utils.data.DataLoader(sc.PairDataset(index, f'{work}/cache-{fp}', cfg['lq_patch']), batch_size=cfg['batch_size'] // world,
                                           num_workers=cfg['num_workers'], persistent_workers=True, prefetch_factor=cfg['prefetch_factor'], pin_memory=True))
     acc = {'train_s': 0.0, 'data_wait_s': 0.0, 'eval_s': 0.0, 'ckpt_s': 0.0, 'pairs': 0}
@@ -135,31 +154,45 @@ def worker(rank, world, cfg, P, work, fp, index, test_items, ck, run_config, tim
             state['pareto'][w] = rec; r2.put(P + f'{w}.json', json.dumps(rec).encode()); log('PROMOTED', w, step, json.dumps(sm))
 
     while True:
-        tw = time.time(); lq, hq, lq2, hq2, shifts = next(dl); acc['data_wait_s'] += time.time() - tw
+        tp = time.perf_counter()
+        tw = time.time(); lq, hq, lq2, hq2, shifts = next(dl); acc['data_wait_s'] += time.time() - tw; tp = tick('data_wait', tp)
         ts = time.time()
-        lq, hq, lq2, hq2 = (v.to(dev, non_blocking=True) for v in (lq, hq, lq2, hq2))
+        lq, hq, lq2, hq2 = (cl(v.to(dev, non_blocking=True)) for v in (lq, hq, lq2, hq2)); tp = tick('h2d', tp)
         for p in D.parameters(): p.requires_grad = False
         with torch.autocast('cuda', dtype=torch.float16):
             sr, sr2 = Gp(torch.cat([lq, lq2])).chunk(2)
             l_temp = sc.temporal_loss(sr.float(), sr2.float(), shifts) if cfg['w_temp'] > 0 else torch.zeros((), device=dev)
-            l_pix = (F.l1_loss(sr, hq) + F.l1_loss(sr2, hq2)) / 2
-            l_perc = vgg(sr.contiguous(memory_format=torch.channels_last), hq.contiguous(memory_format=torch.channels_last))
+            l_pix = (F.l1_loss(sr, hq) + F.l1_loss(sr2, hq2)) / 2; tp = tick('g_forward_pix_temp', tp)
+            l_perc = vgg(sr.contiguous(memory_format=torch.channels_last), hq.contiguous(memory_format=torch.channels_last)); tp = tick('vgg_forward', tp)
             fake = D(sr); l_gan = F.binary_cross_entropy_with_logits(fake.float(), torch.ones_like(fake, dtype=torch.float32)) if cfg['w_gan'] > 0 else torch.zeros((), device=dev)
         lossG = l_pix + cfg['w_perc'] * l_perc.float() + cfg['w_gan'] * l_gan + cfg['w_temp'] * l_temp
-        oG.zero_grad(set_to_none=True); scaler.scale(lossG).backward(); scaler.step(oG)
-        if cfg['w_gan'] > 0:
+        tp = tick('d_forward_for_g', tp)
+        oG.zero_grad(set_to_none=True); scaler.scale(lossG).backward(); tp = tick('g_backward_allreduce', tp); scaler.step(oG); tp = tick('g_optimizer', tp)
+        if cfg['w_gan'] > 0 and step % int(cfg.get('d_every') or 1) == 0:
             for p in D.parameters(): p.requires_grad = True
             oD.zero_grad(set_to_none=True)
             with torch.autocast('cuda', dtype=torch.float16): dr = Dp(hq).float(); l_real = F.binary_cross_entropy_with_logits(dr, torch.ones_like(dr))
             scaler.scale(l_real).backward()
             with torch.autocast('cuda', dtype=torch.float16): df = Dp(sr.detach()).float(); l_fake = F.binary_cross_entropy_with_logits(df, torch.zeros_like(df))
-            scaler.scale(l_fake).backward(); scaler.step(oD)
+            scaler.scale(l_fake).backward(); scaler.step(oD); tp = tick('d_update', tp)
         scaler.update(); step += 1; acc['pairs'] += lq.shape[0] * world
         with torch.no_grad():
             for pe, p in zip(Gema.parameters(), G.parameters()): pe.lerp_(p, 1 - cfg['ema_decay'])
+        tp = tick('ema', tp)
+        if prof_n and step >= prof_warm + prof_n:
+            if rank == 0:
+                n = prof_n; tot = sum(prof.values())
+                rep = {'config': {k: cfg.get(k) for k in ('world', 'batch_size', 'lq_patch', 'channels_last_gd', 'compile_g', 'compile_mode', 'd_every', 'num_workers', 'prefetch_factor', 'w_gan')},
+                       'world': world, 'gpus': [torch.cuda.get_device_name(i) for i in range(world)], 'steps_timed': n,
+                       'ms_per_step': {k: round(v / n * 1000, 2) for k, v in sorted(prof.items(), key=lambda kv: -kv[1])},
+                       'total_ms_per_step': round(tot / n * 1000, 1), 'updates_per_s': round(n / tot, 3), 'pairs_per_s': round(n * cfg['batch_size'] / tot, 1),
+                       'hr_megapixels_per_s': round(n * cfg['batch_size'] * 2 * (cfg['lq_patch'] * 4) ** 2 / tot / 1e6, 2),
+                       'peak_vram_gb': round(torch.cuda.max_memory_allocated() / 1e9, 2), 'setup': timers}
+                name = cfg.get('profile_name', 'profile'); r2.put(P + f'perf/{name}.json', json.dumps(rep, indent=1).encode()); log('PROFILE', name, json.dumps(rep))
+            break
         if step % 50 == 0: torch.cuda.synchronize()
         acc['train_s'] += time.time() - ts
-        if rank == 0:
+        if rank == 0 and not prof_n:
             if time.time() - t_log > 300:
                 log(f"step {step} pix {l_pix.item():.4f} perc {l_perc.item():.3f} gan {l_gan.item():.3f} temp {l_temp.item() * 255:.2f} "
                     f"{(step - s0) / max(acc['train_s'], 1e-9):.2f} upd/s data-wait {acc['data_wait_s'] / max(time.time() - t_start, 1):.0%}"); t_log = time.time()
@@ -172,7 +205,7 @@ def worker(rank, world, cfg, P, work, fp, index, test_items, ck, run_config, tim
         if step % 50 == 0:
             dist.broadcast(stop, 0)
             if stop.item() > 0: break
-    if rank == 0:
+    if rank == 0 and not prof_n:
         evaluate('full'); checkpoint(final=True); log('session done', step, json.dumps({k: round(v, 1) for k, v in acc.items()}))
     dist.barrier(); dist.destroy_process_group()
 
