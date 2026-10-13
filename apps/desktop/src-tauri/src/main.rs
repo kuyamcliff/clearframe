@@ -25,6 +25,14 @@ fn gpu_report() -> serde_json::Value {
 }
 
 fn main() {
+    // WebKitGTK's DMA-BUF renderer leaves the window blank where the GPU driver or display
+    // server cannot share buffers (some NVIDIA drivers, VMs, remote and virtual displays). The
+    // interface is light to draw, so use the renderer that always works unless the user chose.
+    // Set before any thread or GTK starts.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
     // The installed executable doubles as the isolated processing worker.
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {

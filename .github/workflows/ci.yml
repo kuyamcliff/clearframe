@@ -283,6 +283,10 @@ jobs:
           sleep 25
           kill -0 $app
           DISPLAY=:99 import -window root screens/linux-app.png
+          # A blank (single-colour) screen means the window did not render.
+          colours=$(identify -format %k screens/linux-app.png)
+          echo "screenshot colours: $colours"
+          [ "$colours" -gt 50 ] || { echo "the app window rendered blank"; exit 1; }
           kill $app
           sudo apt-get remove -y clip-fx-enhance
       - uses: actions/upload-artifact@v4
