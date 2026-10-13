@@ -59,6 +59,10 @@ pub struct App {
     tools_ready: parking_lot::Condvar,
     pub models: Arc<ModelManager>,
     hardware: RwLock<Option<HardwareInfo>>,
+    /// Held while hardware is detected, so concurrent callers wait for one detection.
+    hardware_detect: parking_lot::Mutex<()>,
+    /// Recent probe results by file, reused while the file is unchanged (size, modified time).
+    probes: parking_lot::Mutex<std::collections::HashMap<PathBuf, ProbeEntry>>,
     pub events: EventSink,
     pub queue: queue::Queue,
     pub installs: models::Installs,
@@ -92,6 +96,11 @@ impl App {
         }
         let a = app.clone();
         std::thread::Builder::new().name("ffmpeg-detect".into()).spawn(move || a.refresh_tools())?;
+        // Hardware too (cores, memory, GPUs), so the first export check doesn't wait for it.
+        let a = app.clone();
+        std::thread::Builder::new().name("hardware-detect".into()).spawn(move || {
+            a.hardware();
+        })?;
         Ok(app)
     }
 
@@ -115,6 +124,8 @@ impl App {
             tools_ready: parking_lot::Condvar::new(),
             models,
             hardware: RwLock::new(None),
+            hardware_detect: parking_lot::Mutex::new(()),
+            probes: Default::default(),
             events: events.clone(),
             queue: queue::Queue::new(worker),
             installs: models::Installs::default(),
@@ -236,9 +247,35 @@ impl App {
         if let Some(h) = self.hardware.read().clone() {
             return h;
         }
+        let _detecting = self.hardware_detect.lock();
+        if let Some(h) = self.hardware.read().clone() {
+            return h; // another caller finished detecting while we waited
+        }
         let h = clearframe_hardware::detect();
         *self.hardware.write() = Some(h.clone());
         h
+    }
+
+    /// Probe a video, reusing the last result while the file is unchanged. Opening a video, every
+    /// export check and every enqueue need it, and each probe runs several FFprobe commands.
+    pub fn probe_cached(&self, tools: &FfmpegTools, path: &Path) -> Result<clearframe_media::probe::MediaInfo> {
+        let stamp = file_stamp(path);
+        if let Some(st) = stamp {
+            if let Some((s, info)) = self.probes.lock().get(path) {
+                if *s == st {
+                    return Ok(info.clone());
+                }
+            }
+        }
+        let info = clearframe_media::probe::probe(tools, path)?;
+        if let Some(st) = stamp {
+            let mut m = self.probes.lock();
+            if m.len() >= 64 {
+                m.clear();
+            }
+            m.insert(path.to_path_buf(), (st, info.clone()));
+        }
+        Ok(info)
     }
 
     pub fn refresh_hardware(&self) -> HardwareInfo {
@@ -254,6 +291,9 @@ impl App {
         (self.events)(e);
     }
 }
+
+/// A cached probe: the file's (size, modified time) and what FFprobe reported.
+type ProbeEntry = ((u64, i64), clearframe_media::probe::MediaInfo);
 
 /// What [`App::cached_tools`] keeps between launches.
 #[derive(serde::Serialize, serde::Deserialize)]

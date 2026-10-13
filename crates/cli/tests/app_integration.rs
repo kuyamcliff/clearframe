@@ -438,3 +438,21 @@ fn detected_ffmpeg_is_ready_at_once_on_the_next_launch() {
     assert!(!second.tools_pending());
     assert_eq!(second.tools().unwrap().version, t.version);
 }
+
+#[test]
+fn probe_results_are_reused_until_the_file_changes() {
+    if !have_ffmpeg() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let app = open(d.path());
+    let tools = app.tools().unwrap();
+    let src = d.path().join("v.mp4");
+    clip(&src, 1);
+    let a = app.probe_cached(&tools, &src).unwrap();
+    assert_eq!(app.probe_cached(&tools, &src).unwrap().duration, a.duration);
+    // Replacing the file (different size) must not return the old result.
+    clip(&src, 3);
+    let b = app.probe_cached(&tools, &src).unwrap();
+    assert!(b.duration > a.duration + 1.0, "{} vs {}", b.duration, a.duration);
+}

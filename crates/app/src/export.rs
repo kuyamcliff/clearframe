@@ -12,7 +12,7 @@ use clearframe_core::fsutil::{self, NameVars};
 use clearframe_core::jobs::{JobKind, JobRecord, JobState};
 use clearframe_core::paths::default_export_dir;
 use clearframe_pipeline::plan::ExecutionPlan;
-use clearframe_pipeline::runner::plan_job;
+use clearframe_pipeline::runner::plan_probed;
 use clearframe_pipeline::spec::*;
 
 use crate::App;
@@ -127,7 +127,8 @@ impl App {
     pub fn check_export(&self, job: &NewJob) -> Result<ExportCheck> {
         let tools = self.tools()?;
         let spec = self.draft_spec(job, PathBuf::from("."), "check");
-        let (_, plan) = plan_job(&tools, &spec, &self.lookup(), None)?;
+        let info = self.probe_cached(&tools, &spec.source)?;
+        let plan = plan_probed(&tools, &info, &spec, &self.lookup(), None)?;
         let folder = job.folder.clone().unwrap_or_else(|| self.default_export_folder());
         let destination_folder_ok = fsutil::ensure_writable_dir(&folder, folder == default_export_dir());
         let destination = self.plan_destination(job, &plan, &BTreeSet::new()).unwrap_or_else(|_| folder.join("…"));
@@ -168,7 +169,8 @@ impl App {
         let id = format!("{}{}", if kind == JobKind::Preview { "preview-" } else { "" }, uuid::Uuid::new_v4());
         let mut spec = self.draft_spec(&job, PathBuf::new(), &id);
         spec.models = self.resolve_models(&job.pipeline)?;
-        let (_, plan) = plan_job(&tools, &spec, &self.lookup(), None)?;
+        let info = self.probe_cached(&tools, &spec.source)?;
+        let plan = plan_probed(&tools, &info, &spec, &self.lookup(), None)?;
         if plan.has_errors() {
             bail!("{}", plan.errors().map(|e| e.message.clone()).collect::<Vec<_>>().join(" "));
         }
