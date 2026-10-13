@@ -317,6 +317,8 @@ pub struct Recorder {
     dummy: wgpu::Buffer,
     // Popped in reverse order in `finish_read`.
     scopes: Vec<(wgpu::ErrorScopeGuard, &'static str)>,
+    /// Whether any kernel has been recorded (uploads after that must be ordered copies, see `upload`).
+    recorded: bool,
 }
 
 #[repr(C)]
@@ -344,7 +346,7 @@ impl Recorder {
         ];
         let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("clipfx-forward") });
         let pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None, timestamp_writes: None }).forget_lifetime();
-        Self { gpu: gpu.clone(), encoder, pass: Some(pass), dummy: gpu.constant(&[0.0]), scopes }
+        Self { gpu: gpu.clone(), encoder, pass: Some(pass), dummy: gpu.constant(&[0.0]), scopes, recorded: false }
     }
 
     pub fn gpu(&self) -> &Arc<Gpu> {
@@ -359,6 +361,7 @@ impl Recorder {
             entries.push(wgpu::BindGroupEntry { binding: i as u32 + 1, resource: b.as_entire_binding() });
         }
         let bg = self.gpu.device.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout: &pipe.get_bind_group_layout(0), entries: &entries });
+        self.recorded = true;
         let pass = self.pass.as_mut().unwrap();
         pass.set_pipeline(pipe);
         pass.set_bind_group(0, &bg, &[]);
@@ -368,7 +371,20 @@ impl Recorder {
     /// Upload planar data as a new tensor.
     pub fn upload(&mut self, c: u32, h: u32, w: u32, data: &[f32]) -> Result<GTensor, String> {
         let t = GTensor::new(&self.gpu, c, h, w)?;
-        self.gpu.queue.write_buffer(t.buf(), 0, bytemuck::cast_slice(data));
+        if !self.recorded {
+            self.gpu.queue.write_buffer(t.buf(), 0, bytemuck::cast_slice(data));
+            return Ok(t);
+        }
+        // `queue.write_buffer` lands before this recorder's commands run. The pooled buffer may still be written by an
+        // already-recorded kernel (a dropped intermediate), which would then overwrite the upload, so copy in order.
+        let staging = self.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("upload"),
+            contents: bytemuck::cast_slice(data),
+            usage: wgpu::BufferUsages::COPY_SRC,
+        });
+        drop(self.pass.take());
+        self.encoder.copy_buffer_to_buffer(&staging, 0, t.buf(), 0, std::mem::size_of_val(data) as u64);
+        self.pass = Some(self.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None, timestamp_writes: None }).forget_lifetime());
         Ok(t)
     }
 
@@ -602,6 +618,47 @@ impl Recorder {
         p.c = [m.t.c, m.off, 0, 0];
         let (ab, bb, mb, ob) = (a.t.buf().clone(), b.t.buf().clone(), m.t.buf().clone(), out.buf().clone());
         self.dispatch("sigmoid_blend", p, &[&ab, &bb, &mb, &ob], (a.t.w.div_ceil(16), a.t.h.div_ceil(16), a.len));
+        Ok(out)
+    }
+
+    /// StyleGAN output stage: `act(x[c] * d[c] * gain + noise[pix] * nw + bias[c]) + skip[c]`.
+    /// `noise` is a one-channel (H, W) buffer; `act` is the leaky slope (None = linear).
+    #[allow(clippy::too_many_arguments)]
+    pub fn style_out(
+        &mut self,
+        x: View<'_>,
+        d: &wgpu::Buffer,
+        gain: f32,
+        noise: Option<(&wgpu::Buffer, f32)>,
+        bias: &wgpu::Buffer,
+        act: Option<f32>,
+        skip: Option<View<'_>>,
+    ) -> Result<GTensor, String> {
+        let out = GTensor::new(&self.gpu, x.len, x.t.h, x.t.w)?;
+        let mut p = Params::zero();
+        p.a = [x.len, x.t.h, x.t.w, noise.is_some() as u32];
+        p.b = [x.t.c, x.off, skip.map(|s| s.t.c).unwrap_or(0), skip.map(|s| s.off).unwrap_or(0)];
+        p.c = [act.is_some() as u32, skip.is_some() as u32, 0, 0];
+        p.f = [gain, noise.map(|n| n.1).unwrap_or(0.0), act.unwrap_or(1.0), 0.0];
+        let nb = noise.map(|n| n.0.clone()).unwrap_or_else(|| self.dummy.clone());
+        let sb = skip.map(|s| s.t.buf().clone()).unwrap_or_else(|| self.dummy.clone());
+        let (xb, db, bb, ob) = (x.t.buf().clone(), d.clone(), bias.clone(), out.buf().clone());
+        self.dispatch("style_out", p, &[&xb, &db, &nb, &bb, &sb, &ob], (x.t.w.div_ceil(16), x.t.h.div_ceil(16), x.len));
+        Ok(out)
+    }
+
+    /// GFPGAN spatial feature transform: keep the first half of `x`'s channels, and replace the second half
+    /// with `x * scale + shift` (scale/shift are full-resolution tensors with half the channels).
+    pub fn sft(&mut self, x: View<'_>, scale: View<'_>, shift: View<'_>) -> Result<GTensor, String> {
+        let half = x.len / 2;
+        assert!(scale.len == half && shift.len == half);
+        let out = GTensor::new(&self.gpu, x.len, x.t.h, x.t.w)?;
+        let mut p = Params::zero();
+        p.a = [x.len, x.t.h, x.t.w, half];
+        p.b = [x.t.c, x.off, scale.t.c, scale.off];
+        p.c = [shift.t.c, shift.off, 0, 0];
+        let (xb, sb, hb, ob) = (x.t.buf().clone(), scale.t.buf().clone(), shift.t.buf().clone(), out.buf().clone());
+        self.dispatch("sft", p, &[&xb, &sb, &hb, &ob], (x.t.w.div_ceil(16), x.t.h.div_ceil(16), x.len));
         Ok(out)
     }
 
@@ -1032,6 +1089,47 @@ fn main(@builtin(global_invocation_id) g: vec3<u32>) {
   let w = 1.0 / (1.0 + exp(-m[p.c.y * hw + pix]));
   let v = a[(p.b.y + g.z) * hw + pix] * w + b[(p.b.w + g.z) * hw + pix] * (1.0 - w);
   outp[g.z * hw + pix] = clamp(v, 0.0, 1.0);
+}
+"#,
+    ),
+    (
+        "style_out",
+        r#"
+@group(0) @binding(1) var<storage, read> x: array<f32>;
+@group(0) @binding(2) var<storage, read> d: array<f32>;
+@group(0) @binding(3) var<storage, read> noise: array<f32>;
+@group(0) @binding(4) var<storage, read> bias: array<f32>;
+@group(0) @binding(5) var<storage, read> skip: array<f32>;
+@group(0) @binding(6) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let H = p.a.y; let W = p.a.z;
+  if (g.x >= W || g.y >= H || g.z >= C) { return; }
+  let hw = H * W; let pix = g.y * W + g.x;
+  var v = x[(p.b.y + g.z) * hw + pix] * d[g.z] * p.f.x + bias[g.z];
+  if (p.a.w == 1u) { v += noise[pix] * p.f.y; }
+  if (p.c.x == 1u) { v = max(v, v * p.f.z); }
+  if (p.c.y == 1u) { v += skip[(p.b.w + g.z) * hw + pix]; }
+  outp[g.z * hw + pix] = v;
+}
+"#,
+    ),
+    (
+        "sft",
+        r#"
+@group(0) @binding(1) var<storage, read> x: array<f32>;
+@group(0) @binding(2) var<storage, read> sc: array<f32>;
+@group(0) @binding(3) var<storage, read> sh: array<f32>;
+@group(0) @binding(4) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let H = p.a.y; let W = p.a.z; let half = p.a.w;
+  if (g.x >= W || g.y >= H || g.z >= C) { return; }
+  let hw = H * W; let pix = g.y * W + g.x;
+  let v = x[(p.b.y + g.z) * hw + pix];
+  if (g.z < half) { outp[g.z * hw + pix] = v; return; }
+  let j = g.z - half;
+  outp[g.z * hw + pix] = v * sc[(p.b.w + j) * hw + pix] + sh[(p.c.y + j) * hw + pix];
 }
 "#,
     ),

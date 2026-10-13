@@ -650,3 +650,191 @@ impl GRife {
         Ok(Planar { c: 3, h: a.h, w: a.w, data })
     }
 }
+
+// ---------------------------------------------------------------- GFPGAN (face restoration)
+
+/// A StyleGAN2 modulated convolution as `d[o] * conv(x * s[i], W)`: the static weight lives on the GPU and the
+/// per-face style only scales input channels (`s`) and output channels (`d`, the demodulation), computed on the CPU.
+struct GModConv {
+    conv: GConv,
+    /// Σ_k W[o,i,k]² as an (out, in) CPU tensor, for the demodulation factor.
+    w2: Tensor,
+    modulation: crate::ops::Linear,
+    demodulate: bool,
+    upsample: bool,
+}
+
+impl GModConv {
+    fn new(gpu: &Gpu, m: &crate::arch::gfpgan::ModConv) -> R<Self> {
+        let (cout, cin, k, _) = m.weight.dims4().map_err(|e| e.to_string())?;
+        let conv = GConv::new(gpu, &vec(&m.weight)?, None, cout as u32, cin as u32, k as u32, 1, m.padding as u32, 1, 1);
+        let w2 = m.weight.to_dtype(DType::F32).and_then(|w| w.sqr()).and_then(|w| w.sum(3)).and_then(|w| w.sum(2)).map_err(|e| e.to_string())?;
+        Ok(Self { conv, w2, modulation: m.modulation.clone(), demodulate: m.demodulate, upsample: m.upsample })
+    }
+
+    /// Per-face (s, d) for a latent row (1, num_style_feat).
+    fn style(&self, gpu: &Gpu, lat: &Tensor) -> R<(wgpu::Buffer, wgpu::Buffer)> {
+        let e = |x: candle_core::Error| x.to_string();
+        let s = self.modulation.forward(lat).map_err(e)?.flatten_all().map_err(e)?.to_dtype(DType::F32).map_err(e)?;
+        let d = if self.demodulate {
+            // d[o] = 1 / sqrt(Σ_i s_i² Σ_k W[o,i,k]² + 1e-8)
+            let s2 = s.sqr().map_err(e)?.unsqueeze(1).map_err(e)?;
+            self.w2.matmul(&s2).map_err(e)?.flatten_all().map_err(e)?.affine(1.0, 1e-8).map_err(e)?.sqrt().map_err(e)?.recip().map_err(e)?
+        } else {
+            Tensor::ones(self.conv.cout as usize, DType::F32, &candle_core::Device::Cpu).map_err(e)?
+        };
+        Ok((gpu.constant(&vec(&s)?), gpu.constant(&vec(&d)?)))
+    }
+
+    /// The modulated convolution without its output scaling (returned `d` is applied by the caller's `style_out`).
+    fn run(&self, r: &mut Recorder, x: &GTensor, s: &wgpu::Buffer) -> R<GTensor> {
+        let xs = r.scale_channels(x.all(), s, None)?;
+        let xs = if self.upsample { r.resize_bilinear_factor(xs.all(), 2.0, 1.0)? } else { xs };
+        r.conv(&self.conv, xs.all(), GAct::None)
+    }
+}
+
+struct GStyleConv {
+    conv: GModConv,
+    noise: wgpu::Buffer,
+    noise_weight: f32,
+    bias: wgpu::Buffer,
+}
+
+struct GToRgb {
+    conv: GModConv,
+    bias: wgpu::Buffer,
+    upsample: bool,
+}
+
+struct GResBlock {
+    conv1: GConv,
+    conv2: GConv,
+    skip: GConv,
+    factor: f64,
+}
+
+/// GFPGAN v1.4 (GFPGANv1Clean) on the GPU; mirrors `arch::gfpgan::Gfpgan::forward`.
+pub struct GGfpgan {
+    first: GConv,
+    down: Vec<GResBlock>,
+    final_conv: GConv,
+    up: Vec<GResBlock>,
+    final_linear: crate::ops::Linear,
+    cond_scale: Vec<(GConv, GConv)>,
+    cond_shift: Vec<(GConv, GConv)>,
+    constant: Planar,
+    style_conv1: GStyleConv,
+    to_rgb1: GToRgb,
+    style_convs: Vec<GStyleConv>,
+    to_rgbs: Vec<GToRgb>,
+    num_style_feat: usize,
+}
+
+impl GGfpgan {
+    pub fn new(gpu: &Arc<Gpu>, n: &crate::arch::gfpgan::Gfpgan) -> R<Self> {
+        let res = |b: &crate::arch::gfpgan::ResBlock| -> R<GResBlock> {
+            Ok(GResBlock { conv1: gconv(gpu, &b.conv1)?, conv2: gconv(gpu, &b.conv2)?, skip: gconv(gpu, &b.skip)?, factor: b.factor })
+        };
+        let sc = |s: &crate::arch::gfpgan::StyleConv| -> R<GStyleConv> {
+            Ok(GStyleConv { conv: GModConv::new(gpu, &s.conv)?, noise: gpu.constant(&vec(&s.noise)?), noise_weight: vec(&s.noise_weight)?[0], bias: gpu.constant(&vec(&s.bias)?) })
+        };
+        let rgb = |t: &crate::arch::gfpgan::ToRgb| -> R<GToRgb> { Ok(GToRgb { conv: GModConv::new(gpu, &t.conv)?, bias: gpu.constant(&vec(&t.bias)?), upsample: t.upsample }) };
+        let pair = |v: &Vec<(Conv2d, Conv2d)>| -> R<Vec<(GConv, GConv)>> { v.iter().map(|(a, b)| Ok((gconv(gpu, a)?, gconv(gpu, b)?))).collect() };
+        Ok(Self {
+            first: gconv(gpu, &n.conv_body_first)?,
+            down: n.down.iter().map(res).collect::<R<_>>()?,
+            final_conv: gconv(gpu, &n.final_conv)?,
+            up: n.up.iter().map(res).collect::<R<_>>()?,
+            final_linear: n.final_linear.clone(),
+            cond_scale: pair(&n.cond_scale)?,
+            cond_shift: pair(&n.cond_shift)?,
+            constant: Planar::from_tensor(&n.constant)?,
+            style_conv1: sc(&n.style_conv1)?,
+            to_rgb1: rgb(&n.to_rgb1)?,
+            style_convs: n.style_convs.iter().map(sc).collect::<R<_>>()?,
+            to_rgbs: n.to_rgbs.iter().map(rgb).collect::<R<_>>()?,
+            num_style_feat: n.num_style_feat,
+        })
+    }
+
+    fn resblock(r: &mut Recorder, b: &GResBlock, x: &GTensor) -> R<GTensor> {
+        let l = GAct::Leaky(0.2);
+        let out = r.conv(&b.conv1, x.all(), l)?;
+        let out = r.resize_bilinear_factor(out.all(), b.factor, 1.0)?;
+        let out = r.conv(&b.conv2, out.all(), l)?;
+        let xs = r.resize_bilinear_factor(x.all(), b.factor, 1.0)?;
+        let skip = r.conv(&b.skip, xs.all(), GAct::None)?;
+        r.add(out.all(), skip.all())
+    }
+
+    fn style_conv(&self, gpu: &Gpu, r: &mut Recorder, s: &GStyleConv, x: &GTensor, lat: &Tensor) -> R<GTensor> {
+        let (sb, db) = s.conv.style(gpu, lat)?;
+        let y = s.conv.run(r, x, &sb)?;
+        r.style_out(y.all(), &db, std::f32::consts::SQRT_2, Some((&s.noise, s.noise_weight)), &s.bias, Some(0.2), None)
+    }
+
+    fn to_rgb(&self, gpu: &Gpu, r: &mut Recorder, t: &GToRgb, x: &GTensor, lat: &Tensor, skip: Option<&GTensor>) -> R<GTensor> {
+        let (sb, db) = t.conv.style(gpu, lat)?;
+        let y = t.conv.run(r, x, &sb)?;
+        let skip = match skip {
+            Some(s) if t.upsample => Some(r.resize_bilinear_factor(s.all(), 2.0, 1.0)?),
+            Some(s) => Some(r.resize_bilinear_factor(s.all(), 1.0, 1.0)?),
+            None => None,
+        };
+        r.style_out(y.all(), &db, 1.0, None, &t.bias, None, skip.as_ref().map(|s| s.all()))
+    }
+
+    /// Restore an aligned 512×512 face given as planar RGB in 0..1; returns the same layout in 0..1.
+    pub fn forward(&self, gpu: &Arc<Gpu>, face: &Planar) -> R<Planar> {
+        let e = |x: candle_core::Error| x.to_string();
+        // Pass 1: encoder down to the style features.
+        let mut r = Recorder::new(gpu);
+        let norm: Vec<f32> = face.data.iter().map(|v| (v - 0.5) / 0.5).collect();
+        let x = r.upload(3, face.h as u32, face.w as u32, &norm)?;
+        let first = r.conv(&self.first, x.all(), GAct::Leaky(0.2))?;
+        // Every encoder output stays alive on the GPU: they are the skip connections of pass 2.
+        let mut downs: Vec<GTensor> = Vec::new();
+        for d in &self.down {
+            let next = Self::resblock(&mut r, d, downs.last().unwrap_or(&first))?;
+            downs.push(next);
+        }
+        let feat = r.conv(&self.final_conv, downs.last().unwrap().all(), GAct::Leaky(0.2))?;
+        let flat = r.finish_read(&feat)?;
+        let style = Tensor::from_vec(flat, (1, feat.c as usize * feat.h as usize * feat.w as usize), &candle_core::Device::Cpu).map_err(e)?;
+        let style = self.final_linear.forward(&style).map_err(e)?;
+        let n_latent = style.dim(1).map_err(e)? / self.num_style_feat;
+        let latent = style.reshape((n_latent, self.num_style_feat)).map_err(e)?;
+        let lat = |i: usize| latent.narrow(0, i, 1).map_err(e);
+        // Pass 2: up path (SFT conditions) and the StyleGAN decoder.
+        let mut r = Recorder::new(gpu);
+        let mut feat = feat;
+        let mut conditions = Vec::new();
+        for (i, u) in self.up.iter().enumerate() {
+            let sum = r.add(feat.all(), downs[downs.len() - 1 - i].all())?;
+            feat = Self::resblock(&mut r, u, &sum)?;
+            let (a, b) = &self.cond_scale[i];
+            let t = r.conv(a, feat.all(), GAct::Leaky(0.2))?;
+            conditions.push(r.conv(b, t.all(), GAct::None)?);
+            let (a, b) = &self.cond_shift[i];
+            let t = r.conv(a, feat.all(), GAct::Leaky(0.2))?;
+            conditions.push(r.conv(b, t.all(), GAct::None)?);
+        }
+        let c = &self.constant;
+        let constant = r.upload(c.c as u32, c.h as u32, c.w as u32, &c.data)?;
+        let mut out = self.style_conv(gpu, &mut r, &self.style_conv1, &constant, &lat(0)?)?;
+        let mut skip = self.to_rgb(gpu, &mut r, &self.to_rgb1, &out, &lat(1)?, None)?;
+        let mut i = 1;
+        for (k, t) in self.to_rgbs.iter().enumerate() {
+            out = self.style_conv(gpu, &mut r, &self.style_convs[2 * k], &out, &lat(i)?)?;
+            if i < conditions.len() {
+                out = r.sft(out.all(), conditions[i - 1].all(), conditions[i].all())?;
+            }
+            out = self.style_conv(gpu, &mut r, &self.style_convs[2 * k + 1], &out, &lat(i + 1)?)?;
+            skip = self.to_rgb(gpu, &mut r, t, &out, &lat(i + 2)?, Some(&skip))?;
+            i += 2;
+        }
+        let data = r.finish_read(&skip)?;
+        Ok(Planar { c: 3, h: face.h, w: face.w, data: data.into_iter().map(|v| (v.clamp(-1.0, 1.0) + 1.0) * 0.5).collect() })
+    }
+}

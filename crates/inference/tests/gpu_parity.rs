@@ -273,3 +273,67 @@ fn rife_on_gpu_matches_cpu() {
         assert!(max <= 2e-3, "GPU RIFE differs from CPU by {max}");
     }
 }
+
+/// GFPGAN v1.4 layout (512px, 7 down / 7 up blocks, StyleGAN2 decoder with SFT), narrow channels.
+#[test]
+fn gfpgan_on_gpu_matches_cpu() {
+    let Some(g) = gpu() else { return };
+    let mut r = Rng(11);
+    let mut w = W::default();
+    let (c, nsf) = (8usize, 8usize);
+    w.conv(&mut r, "conv_body_first", c, 3, 1, true);
+    for i in 0..7 {
+        for p in ["conv_body_down", "conv_body_up"] {
+            w.conv(&mut r, &format!("{p}.{i}.conv1"), c, c, 3, true);
+            w.conv(&mut r, &format!("{p}.{i}.conv2"), c, c, 3, true);
+            w.conv(&mut r, &format!("{p}.{i}.skip"), c, c, 1, false);
+        }
+        for p in ["condition_scale", "condition_shift"] {
+            w.conv(&mut r, &format!("{p}.{i}.0"), c, c, 3, true);
+            w.conv(&mut r, &format!("{p}.{i}.2"), c / 2, c, 3, true);
+        }
+    }
+    w.conv(&mut r, "final_conv", c, c, 3, true);
+    w.t(&mut r, "final_linear.weight", &[16 * nsf, c * 16], 0.1);
+    w.t(&mut r, "final_linear.bias", &[16 * nsf], 0.05);
+    w.t(&mut r, "stylegan_decoder.constant_input.weight", &[1, c, 4, 4], 0.5);
+    let modconv = |w: &mut W, r: &mut Rng, p: &str, out: usize, k: usize| {
+        w.t(r, &format!("{p}.modulated_conv.weight"), &[1, out, c, k, k], 1.0 / ((c * k * k) as f32).sqrt());
+        w.t(r, &format!("{p}.modulated_conv.modulation.weight"), &[c, nsf], 0.3);
+        w.t(r, &format!("{p}.modulated_conv.modulation.bias"), &[c], 0.3);
+    };
+    modconv(&mut w, &mut r, "stylegan_decoder.style_conv1", c, 3);
+    w.t(&mut r, "stylegan_decoder.style_conv1.weight", &[1], 0.1);
+    w.t(&mut r, "stylegan_decoder.style_conv1.bias", &[1, c, 1, 1], 0.05);
+    modconv(&mut w, &mut r, "stylegan_decoder.to_rgb1", 3, 1);
+    w.t(&mut r, "stylegan_decoder.to_rgb1.bias", &[1, 3, 1, 1], 0.05);
+    w.t(&mut r, "stylegan_decoder.noises.noise0", &[1, 1, 4, 4], 1.0);
+    for j in 0..14 {
+        let res = 8usize << (j / 2);
+        let p = format!("stylegan_decoder.style_convs.{j}");
+        modconv(&mut w, &mut r, &p, c, 3);
+        w.t(&mut r, &format!("{p}.weight"), &[1], 0.1);
+        w.t(&mut r, &format!("{p}.bias"), &[1, c, 1, 1], 0.05);
+        w.t(&mut r, &format!("stylegan_decoder.noises.noise{}", j + 1), &[1, 1, res, res], 1.0);
+    }
+    for k in 0..7 {
+        let p = format!("stylegan_decoder.to_rgbs.{k}");
+        modconv(&mut w, &mut r, &p, 3, 1);
+        w.t(&mut r, &format!("{p}.bias"), &[1, 3, 1, 1], 0.05);
+    }
+    let weights = w.build();
+    let cpu = clearframe_inference::arch::gfpgan::Gfpgan::load(&weights).unwrap();
+    let gnet = clearframe_inference::gpu::nets::GGfpgan::new(&g, &cpu).unwrap();
+    let face = image(&mut r, 512, 512).to_tensor(&Device::Cpu, clearframe_inference::DType::F32).unwrap();
+    let a = cpu.forward(&face).unwrap().flatten_all().unwrap().to_vec1::<f32>().unwrap();
+    let planar = clearframe_inference::gpu::nets::Planar::from_tensor(&face).unwrap();
+    let b = gnet.forward(&g, &planar).unwrap().data;
+    let max = a.iter().zip(&b).map(|(x, y)| (x - y).abs()).fold(0f32, f32::max);
+    let spread = a.iter().map(|v| (v - a[0]).abs()).fold(0f32, f32::max);
+    let mean = a.iter().zip(&b).map(|(x, y)| (x - y).abs()).sum::<f32>() / a.len() as f32;
+    let big = a.iter().zip(&b).filter(|(x, y)| (*x - *y).abs() > 1e-3).count();
+    let (amin, amax) = a.iter().fold((f32::MAX, f32::MIN), |m, v| (m.0.min(*v), m.1.max(*v)));
+    eprintln!("GFPGAN: {} values, max diff {max:.2e}, mean diff {mean:.2e}, {big} values off by >1e-3, CPU range {amin:.3}..{amax:.3}", a.len());
+    assert!(spread > 0.05, "output is flat; the test would prove nothing");
+    assert!(max <= 2e-3, "GPU GFPGAN differs from CPU by {max}");
+}

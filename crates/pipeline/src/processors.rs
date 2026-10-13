@@ -436,7 +436,15 @@ pub fn build_native(
             let m = model(models, &f.model_id)?;
             let det = load_weights(m, "detector", device)?;
             let res = load_weights(m, "restorer", device)?;
-            let fm = FaceModels::load(&det, &res).map_err(|e| anyhow!("{}: {e}", m.id))?;
+            #[allow(unused_mut)]
+            let mut fm = FaceModels::load(&det, &res).map_err(|e| anyhow!("{}: {e}", m.id))?;
+            #[cfg(feature = "gpu")]
+            if let Some(g) = &compute.gpu {
+                match fm.use_gpu(g.clone()) {
+                    Ok(()) => log::info!("{}: face restoration on {}", m.id, g.info.name),
+                    Err(e) => log::warn!("{}: GPU unavailable ({e}); using the CPU", m.id),
+                }
+            }
             Box::new(FaceProc { restorer: FaceRestorer::new(fm), params: f.params.clone(), frames: 0, faces: 0 })
         }
         Operation::Interpolate(i) => {

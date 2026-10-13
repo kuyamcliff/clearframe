@@ -351,10 +351,51 @@ pub struct FaceModels {
     pub detector: RetinaFace,
     pub restorer: Gfpgan,
     pub device: Device,
+    #[cfg(feature = "gpu")]
+    gpu_restorer: Option<(std::sync::Arc<crate::gpu::Gpu>, crate::gpu::nets::GGfpgan)>,
 }
 
 impl FaceModels {
     pub fn load(detector: &Weights, restorer: &Weights) -> Result<Self> {
-        Ok(Self { detector: RetinaFace::load(detector)?, restorer: Gfpgan::load(restorer)?, device: restorer.device().clone() })
+        Ok(Self {
+            detector: RetinaFace::load(detector)?,
+            restorer: Gfpgan::load(restorer)?,
+            device: restorer.device().clone(),
+            #[cfg(feature = "gpu")]
+            gpu_restorer: None,
+        })
+    }
+
+    /// Restore faces on a cross-vendor GPU (Vulkan / DirectX 12 / Metal) instead of the CPU.
+    #[cfg(feature = "gpu")]
+    pub fn use_gpu(&mut self, gpu: std::sync::Arc<crate::gpu::Gpu>) -> Result<()> {
+        let net = crate::gpu::nets::GGfpgan::new(&gpu, &self.restorer).map_err(candle_core::Error::msg)?;
+        self.gpu_restorer = Some((gpu, net));
+        Ok(())
+    }
+
+    /// Whether faces are restored on the GPU.
+    pub fn on_gpu(&self) -> bool {
+        #[cfg(feature = "gpu")]
+        return self.gpu_restorer.is_some();
+        #[cfg(not(feature = "gpu"))]
+        false
+    }
+
+    /// Restore an aligned 512×512 face (1,3,512,512) in 0..1. Uses the GPU when attached, else (or on a GPU
+    /// failure) the CPU.
+    pub fn restore(&self, face: &candle_core::Tensor) -> Result<candle_core::Tensor> {
+        #[cfg(feature = "gpu")]
+        if let Some((gpu, net)) = &self.gpu_restorer {
+            let run = || -> std::result::Result<candle_core::Tensor, String> {
+                let p = crate::gpu::nets::Planar::from_tensor(&face.to_dtype(DType::F32).map_err(|e| e.to_string())?)?;
+                net.forward(gpu, &p)?.to_tensor()
+            };
+            match run() {
+                Ok(t) => return Ok(t),
+                Err(e) => log::warn!("face restoration on the GPU failed ({e}); using the CPU for this face"),
+            }
+        }
+        self.restorer.forward(face)
     }
 }

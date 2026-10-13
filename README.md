@@ -67,7 +67,7 @@ The `.deb` (Debian, Ubuntu, Mint) and `.rpm` (Fedora, openSUSE) packages install
 </details>
 
 > [!NOTE]
-> Upscaling, denoising, deblurring and frame interpolation run on your GPU (NVIDIA, AMD, Intel or Apple, through Vulkan, DirectX 12 or Metal). Face recovery still uses the CPU. Without a GPU, AI processing is slow. See [known limitations](docs/limitations.md).
+> Upscaling, denoising, deblurring and frame interpolation run on your GPU (NVIDIA, AMD, Intel or Apple, through Vulkan, DirectX 12 or Metal). Face restoration also runs on the GPU; face detection still uses the CPU. Without a GPU, AI processing is slow. See [known limitations](docs/limitations.md).
 
 ## Build from source
 
