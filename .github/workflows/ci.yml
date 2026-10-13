@@ -279,15 +279,26 @@ jobs:
           python3 -c "import json; d=json.load(open('screens/linux-selftest.json')); assert d['gpu']['check']['passed'], d['gpu']; assert d['ffmpeg']['vidstab'] and d['ffmpeg']['zscale'], d['ffmpeg']"
           ffmpeg -v error -y -f lavfi -i "testsrc2=size=640x360:rate=30" -t 3 -pix_fmt yuv420p "$RUNNER_TEMP/Sample clip.mp4"
           Xvfb :99 -screen 0 1600x960x24 & sleep 2
-          DISPLAY=:99 clipfx-enhance "$RUNNER_TEMP/Sample clip.mp4" & app=$!
-          sleep 25
-          kill -0 $app
-          DISPLAY=:99 import -window root screens/linux-app.png
-          # A blank (single-colour) screen means the window did not render.
-          colours=$(identify -format %k screens/linux-app.png)
+          # Open the app with a video and screenshot it; a single-colour screen means nothing rendered.
+          shot() { # <name> [env...]
+            local name=$1; shift
+            env DISPLAY=:99 "$@" clipfx-enhance "$RUNNER_TEMP/Sample clip.mp4" > "screens/$name.log" 2>&1 & local app=$!
+            sleep 25
+            kill -0 $app
+            DISPLAY=:99 import -window root "screens/$name.png"
+            kill $app; wait $app 2>/dev/null || true
+            identify -format %k "screens/$name.png"
+          }
+          colours=$(shot linux-app)
           echo "screenshot colours: $colours"
-          [ "$colours" -gt 50 ] || { echo "the app window rendered blank"; exit 1; }
-          kill $app
+          if [ "$colours" -le 50 ]; then
+            echo "--- app log"; cat screens/linux-app.log
+            # Tell a broken app from this VM's display: try without WebKit's GPU compositing.
+            fallback=$(shot linux-app-no-compositing WEBKIT_DISABLE_COMPOSITING_MODE=1)
+            echo "without GPU compositing: $fallback colours"
+            [ "$fallback" -gt 50 ] || { echo "the app window rendered blank"; exit 1; }
+            echo "::warning::The window rendered only with GPU compositing off on this runner's virtual display; see the screenshots."
+          fi
           sudo apt-get remove -y clip-fx-enhance
       - uses: actions/upload-artifact@v4
         if: always()
