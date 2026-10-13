@@ -838,3 +838,158 @@ impl GGfpgan {
         Ok(Planar { c: 3, h: face.h, w: face.w, data: data.into_iter().map(|v| (v.clamp(-1.0, 1.0) + 1.0) * 0.5).collect() })
     }
 }
+
+// ---------------------------------------------------------------- RetinaFace (face detection)
+
+struct GCbr {
+    conv: GConv,
+    act: Option<f32>,
+}
+
+impl GCbr {
+    fn new(gpu: &Gpu, c: &crate::arch::retinaface::Cbr) -> R<Self> {
+        Ok(Self { conv: gconv(gpu, &c.conv)?, act: c.act.map(|a| a as f32) })
+    }
+    fn act(&self) -> GAct<'static> {
+        match self.act {
+            Some(0.0) => GAct::Relu,
+            Some(s) => GAct::Leaky(s),
+            None => GAct::None,
+        }
+    }
+    fn run(&self, r: &mut Recorder, x: &GTensor) -> R<GTensor> {
+        r.conv(&self.conv, x.all(), self.act())
+    }
+}
+
+/// ResNet bottleneck: 1×1, 3×3, 1×1 and an optional projection for the identity path.
+struct GBottleneck {
+    c1: GCbr,
+    c2: GCbr,
+    c3: GCbr,
+    down: Option<GCbr>,
+}
+
+enum GBackbone {
+    ResNet50 { stem: GCbr, layers: Vec<Vec<GBottleneck>> },
+    MobileNet { stages: Vec<Vec<GCbr>> },
+}
+
+struct GSsh {
+    c3: GCbr,
+    c5_1: GCbr,
+    c5_2: GCbr,
+    c7_2: GCbr,
+    c7_3: GCbr,
+}
+
+/// RetinaFace on the GPU; mirrors `arch::retinaface::RetinaFace::forward` up to the raw head outputs.
+pub struct GRetinaFace {
+    backbone: GBackbone,
+    fpn_out: [GCbr; 3],
+    merge1: GCbr,
+    merge2: GCbr,
+    ssh: [GSsh; 3],
+    heads: [[GConv; 3]; 3],
+}
+
+impl GRetinaFace {
+    pub fn new(gpu: &Arc<Gpu>, n: &crate::arch::retinaface::RetinaFace) -> R<Self> {
+        use crate::arch::retinaface::Backbone;
+        let c = |x: &crate::arch::retinaface::Cbr| GCbr::new(gpu, x);
+        let backbone = match &n.backbone {
+            Backbone::ResNet50 { stem, layers } => GBackbone::ResNet50 {
+                stem: c(stem)?,
+                layers: layers
+                    .iter()
+                    .map(|l| l.iter().map(|b| Ok(GBottleneck { c1: c(&b.c1)?, c2: c(&b.c2)?, c3: c(&b.c3)?, down: b.down.as_ref().map(c).transpose()? })).collect::<R<Vec<_>>>())
+                    .collect::<R<Vec<_>>>()?,
+            },
+            Backbone::MobileNet { stages } => GBackbone::MobileNet { stages: stages.iter().map(|s| s.iter().map(c).collect::<R<Vec<_>>>()).collect::<R<Vec<_>>>()? },
+        };
+        let ssh = |s: &crate::arch::retinaface::Ssh| -> R<GSsh> { Ok(GSsh { c3: c(&s.c3)?, c5_1: c(&s.c5_1)?, c5_2: c(&s.c5_2)?, c7_2: c(&s.c7_2)?, c7_3: c(&s.c7_3)? }) };
+        let heads = |h: &[Conv2d; 3]| -> R<[GConv; 3]> { Ok([gconv(gpu, &h[0])?, gconv(gpu, &h[1])?, gconv(gpu, &h[2])?]) };
+        Ok(Self {
+            backbone,
+            fpn_out: [c(&n.fpn_out[0])?, c(&n.fpn_out[1])?, c(&n.fpn_out[2])?],
+            merge1: c(&n.merge1)?,
+            merge2: c(&n.merge2)?,
+            ssh: [ssh(&n.ssh[0])?, ssh(&n.ssh[1])?, ssh(&n.ssh[2])?],
+            heads: [heads(&n.class_head)?, heads(&n.bbox_head)?, heads(&n.landmark_head)?],
+        })
+    }
+
+    fn backbone(&self, r: &mut Recorder, x: &GTensor) -> R<Vec<GTensor>> {
+        let mut outs = Vec::new();
+        match &self.backbone {
+            GBackbone::ResNet50 { stem, layers } => {
+                let s = stem.run(r, x)?;
+                let mut y = r.max_pool3s2(s.all())?;
+                for (i, layer) in layers.iter().enumerate() {
+                    for b in layer {
+                        let t = b.c1.run(r, &y)?;
+                        let t = b.c2.run(r, &t)?;
+                        let t = b.c3.run(r, &t)?;
+                        y = match &b.down {
+                            Some(d) => {
+                                let id = d.run(r, &y)?;
+                                r.add_act(t.all(), Some(id.all()), GAct::Relu)?
+                            }
+                            None => r.add_act(t.all(), Some(y.all()), GAct::Relu)?,
+                        };
+                    }
+                    if i >= 1 {
+                        outs.push(r.add_act(y.all(), None, GAct::None)?);
+                    }
+                }
+            }
+            GBackbone::MobileNet { stages } => {
+                let mut y = r.add_act(x.all(), None, GAct::None)?;
+                for st in stages {
+                    for c in st {
+                        y = c.run(r, &y)?;
+                    }
+                    outs.push(r.add_act(y.all(), None, GAct::None)?);
+                }
+            }
+        }
+        Ok(outs)
+    }
+
+    fn ssh(r: &mut Recorder, s: &GSsh, x: &GTensor) -> R<GTensor> {
+        let a = s.c3.run(r, x)?;
+        let b1 = s.c5_1.run(r, x)?;
+        let b = s.c5_2.run(r, &b1)?;
+        let c2 = s.c7_2.run(r, &b1)?;
+        let c = s.c7_3.run(r, &c2)?;
+        let cat = cat(r, &[a.all(), b.all(), c.all()])?;
+        r.add_act(cat.all(), None, GAct::Relu)
+    }
+
+    /// Raw head outputs for a preprocessed (BGR, mean-subtracted) planar input: [class×3, bbox×3, landmark×3],
+    /// each (1, C, H, W) on the CPU.
+    pub fn forward(&self, gpu: &Arc<Gpu>, x: &Planar) -> R<Vec<Tensor>> {
+        let mut r = Recorder::new(gpu);
+        let input = r.upload(x.c as u32, x.h as u32, x.w as u32, &x.data)?;
+        let feats = self.backbone(&mut r, &input)?;
+        let o1 = self.fpn_out[0].run(&mut r, &feats[0])?;
+        let o2 = self.fpn_out[1].run(&mut r, &feats[1])?;
+        let o3 = self.fpn_out[2].run(&mut r, &feats[2])?;
+        let up3 = r.resize_nearest(o3.all(), o2.h, o2.w)?;
+        let s2 = r.add_act(o2.all(), Some(up3.all()), GAct::None)?;
+        let o2 = self.merge2.run(&mut r, &s2)?;
+        let up2 = r.resize_nearest(o2.all(), o1.h, o1.w)?;
+        let s1 = r.add_act(o1.all(), Some(up2.all()), GAct::None)?;
+        let o1 = self.merge1.run(&mut r, &s1)?;
+        let fs = [Self::ssh(&mut r, &self.ssh[0], &o1)?, Self::ssh(&mut r, &self.ssh[1], &o2)?, Self::ssh(&mut r, &self.ssh[2], &o3)?];
+        let mut outs = Vec::new();
+        for heads in &self.heads {
+            for (f, h) in fs.iter().zip(heads.iter()) {
+                outs.push(r.conv(h, f.all(), GAct::None)?);
+            }
+        }
+        let shapes: Vec<(usize, usize, usize)> = outs.iter().map(|t| (t.c as usize, t.h as usize, t.w as usize)).collect();
+        let data = r.finish_read_many(&outs.iter().collect::<Vec<_>>())?;
+        data.into_iter().zip(shapes).map(|(d, (c, h, w))| Tensor::from_vec(d, (1, c, h, w), &candle_core::Device::Cpu).map_err(|e| e.to_string())).collect()
+    }
+}

@@ -3,9 +3,10 @@
 These are the limits of the current release, stated plainly.
 
 ## Performance
-- **GPU support covers the image models only.** Upscaling (Real-ESRGAN), denoising
-  (FFDNet, DRUNet) and deblurring (NAFNet) run on any GPU through Vulkan, DirectX 12 or
-  Metal. Face detection (RetinaFace) still runs on the CPU; face restoration (GFPGAN) runs on the GPU.
+- **Every AI model runs on the GPU when one is available.** Upscaling (Real-ESRGAN), denoising
+  (FFDNet, DRUNet), deblurring (NAFNet), frame interpolation (RIFE) and face detection and
+  restoration (RetinaFace, GFPGAN) run on any GPU through Vulkan, DirectX 12 or Metal. Without a
+  usable GPU they run on the CPU.
 - **GPU speed has not been measured on real graphics cards yet.** Correctness is tested
   on every graphics API in CI (Mesa lavapipe for Vulkan, Microsoft WARP for DirectX 12 and
   Apple's GPU for Metal) by comparing against the CPU path, but those test devices are

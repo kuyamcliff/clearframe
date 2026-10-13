@@ -330,7 +330,7 @@ impl FaceRestorer {
             img
         };
         let t = src.to_tensor(&self.models.device, DType::F32)?;
-        let mut dets = self.models.detector.detect(&t, p.detection_threshold, 0.4)?;
+        let mut dets = self.models.detect(&t, p.detection_threshold, 0.4)?;
         let inv = 1.0 / scale;
         for d in &mut dets {
             for v in d.bbox.iter_mut() {

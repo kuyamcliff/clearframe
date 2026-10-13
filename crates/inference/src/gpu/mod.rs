@@ -662,6 +662,97 @@ impl Recorder {
         Ok(out)
     }
 
+    /// 3×3 / stride 2 / padding 1 max pool with zero padding (inputs are post-ReLU, so zero equals -inf padding).
+    pub fn max_pool3s2(&mut self, x: View<'_>) -> Result<GTensor, String> {
+        let (oh, ow) = ((x.t.h - 1) / 2 + 1, (x.t.w - 1) / 2 + 1);
+        let out = GTensor::new(&self.gpu, x.len, oh, ow)?;
+        let mut p = Params::zero();
+        p.a = [x.len, oh, ow, 0];
+        p.b = [x.t.c, x.off, x.t.h, x.t.w];
+        let (xb, ob) = (x.t.buf().clone(), out.buf().clone());
+        self.dispatch("max_pool3s2", p, &[&xb, &ob], (ow.div_ceil(16), oh.div_ceil(16), x.len));
+        Ok(out)
+    }
+
+    /// Nearest-neighbour resize to (oh, ow) with source index `i * in / out` (matches ops::resize_nearest).
+    pub fn resize_nearest(&mut self, x: View<'_>, oh: u32, ow: u32) -> Result<GTensor, String> {
+        let out = GTensor::new(&self.gpu, x.len, oh, ow)?;
+        let mut p = Params::zero();
+        p.a = [x.len, oh, ow, 0];
+        p.b = [x.t.c, x.off, x.t.h, x.t.w];
+        let (xb, ob) = (x.t.buf().clone(), out.buf().clone());
+        self.dispatch("resize_nearest", p, &[&xb, &ob], (ow.div_ceil(16), oh.div_ceil(16), x.len));
+        Ok(out)
+    }
+
+    /// `act(a + b)` (or `act(a)` without `b`); `act` is None, ReLU or leaky.
+    pub fn add_act(&mut self, a: View<'_>, b: Option<View<'_>>, act: GAct<'_>) -> Result<GTensor, String> {
+        if let Some(b) = b {
+            assert_eq!(a.len, b.len);
+        }
+        let out = GTensor::new(&self.gpu, a.len, a.t.h, a.t.w)?;
+        let (id, slope) = match act {
+            GAct::None => (0, 0.0),
+            GAct::Relu => (1, 0.0),
+            GAct::Leaky(s) => (2, s),
+            GAct::Prelu(_) => return Err("add_act does not support PReLU".into()),
+        };
+        let mut p = Params::zero();
+        p.a = [a.len, a.t.h, a.t.w, b.is_some() as u32];
+        p.b = [a.t.c, a.off, b.map(|v| v.t.c).unwrap_or(0), b.map(|v| v.off).unwrap_or(0)];
+        p.c = [id, 0, 0, 0];
+        p.f = [slope, 0.0, 0.0, 0.0];
+        let bb = b.map(|v| v.t.buf().clone()).unwrap_or_else(|| self.dummy.clone());
+        let (ab, ob) = (a.t.buf().clone(), out.buf().clone());
+        self.dispatch("add_act", p, &[&ab, &bb, &ob], (a.t.w.div_ceil(16), a.t.h.div_ceil(16), a.len));
+        Ok(out)
+    }
+
+    /// Finish recording, run everything and read back several tensors (planar data, in order).
+    pub fn finish_read_many(mut self, ts: &[&GTensor]) -> Result<Vec<Vec<f32>>, String> {
+        drop(self.pass.take());
+        let stagings: Vec<(wgpu::Buffer, u64)> = ts
+            .iter()
+            .map(|t| {
+                let bytes = t.c as u64 * t.hw() as u64 * 4;
+                let st = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("readback"),
+                    size: bytes,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                self.encoder.copy_buffer_to_buffer(t.buf(), 0, &st, 0, bytes);
+                (st, bytes)
+            })
+            .collect();
+        let idx = self.gpu.queue.submit([self.encoder.finish()]);
+        for (scope, what) in self.scopes.drain(..).rev() {
+            if let Some(e) = pollster::block_on(scope.pop()) {
+                return Err(format!("{what}: {e}"));
+            }
+        }
+        let mut rxs = Vec::new();
+        for (st, _) in &stagings {
+            let (tx, rx) = std::sync::mpsc::channel();
+            st.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+                let _ = tx.send(r);
+            });
+            rxs.push(rx);
+        }
+        self.gpu.device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: None }).map_err(|e| format!("GPU did not finish: {e}"))?;
+        let mut out = Vec::new();
+        for ((st, _), rx) in stagings.iter().zip(rxs) {
+            rx.recv().map_err(|_| "GPU readback was cancelled".to_string())?.map_err(|e| format!("GPU readback failed: {e}"))?;
+            let data = {
+                let view = st.slice(..).get_mapped_range().map_err(|e| format!("GPU readback failed: {e:?}"))?;
+                bytemuck::cast_slice::<u8, f32>(&view).to_vec()
+            };
+            st.unmap();
+            out.push(data);
+        }
+        Ok(out)
+    }
+
     /// Finish recording, run everything and read back `t` as planar data.
     pub fn finish_read(mut self, t: &GTensor) -> Result<Vec<f32>, String> {
         drop(self.pass.take());
@@ -1130,6 +1221,63 @@ fn main(@builtin(global_invocation_id) g: vec3<u32>) {
   if (g.z < half) { outp[g.z * hw + pix] = v; return; }
   let j = g.z - half;
   outp[g.z * hw + pix] = v * sc[(p.b.w + j) * hw + pix] + sh[(p.c.y + j) * hw + pix];
+}
+"#,
+    ),
+    (
+        "max_pool3s2",
+        r#"
+@group(0) @binding(1) var<storage, read> inp: array<f32>;
+@group(0) @binding(2) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let OH = p.a.y; let OW = p.a.z; let off = p.b.y; let H = i32(p.b.z); let W = i32(p.b.w);
+  if (g.x >= OW || g.y >= OH || g.z >= C) { return; }
+  var m = 0.0; // zero padding; inputs are post-ReLU
+  let base = (off + g.z) * u32(H * W);
+  for (var dy = -1; dy <= 1; dy++) {
+    let y = i32(g.y) * 2 + dy;
+    if (y < 0 || y >= H) { continue; }
+    for (var dx = -1; dx <= 1; dx++) {
+      let x = i32(g.x) * 2 + dx;
+      if (x < 0 || x >= W) { continue; }
+      m = max(m, inp[base + u32(y * W + x)]);
+    }
+  }
+  outp[(g.z * OH + g.y) * OW + g.x] = m;
+}
+"#,
+    ),
+    (
+        "resize_nearest",
+        r#"
+@group(0) @binding(1) var<storage, read> inp: array<f32>;
+@group(0) @binding(2) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let OH = p.a.y; let OW = p.a.z; let off = p.b.y; let H = p.b.z; let W = p.b.w;
+  if (g.x >= OW || g.y >= OH || g.z >= C) { return; }
+  let sy = min((g.y * H) / OH, H - 1u); let sx = min((g.x * W) / OW, W - 1u);
+  outp[(g.z * OH + g.y) * OW + g.x] = inp[(off + g.z) * H * W + sy * W + sx];
+}
+"#,
+    ),
+    (
+        "add_act",
+        r#"
+@group(0) @binding(1) var<storage, read> a: array<f32>;
+@group(0) @binding(2) var<storage, read> b: array<f32>;
+@group(0) @binding(3) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let H = p.a.y; let W = p.a.z;
+  if (g.x >= W || g.y >= H || g.z >= C) { return; }
+  let hw = H * W; let pix = g.y * W + g.x;
+  var v = a[(p.b.y + g.z) * hw + pix];
+  if (p.a.w == 1u) { v += b[(p.b.w + g.z) * hw + pix]; }
+  if (p.c.x == 1u) { v = max(v, 0.0); }
+  if (p.c.x == 2u) { v = select(v * p.f.x, v, v >= 0.0); }
+  outp[g.z * hw + pix] = v;
 }
 "#,
     ),

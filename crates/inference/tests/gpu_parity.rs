@@ -337,3 +337,80 @@ fn gfpgan_on_gpu_matches_cpu() {
     assert!(spread > 0.05, "output is flat; the test would prove nothing");
     assert!(max <= 2e-3, "GPU GFPGAN differs from CPU by {max}");
 }
+
+/// RetinaFace ResNet-50 layout (stem, 3/4/6/3 bottlenecks, FPN, SSH, heads) with narrow channels and random BN stats.
+#[test]
+fn retinaface_on_gpu_matches_cpu() {
+    let Some(g) = gpu() else { return };
+    let mut r = Rng(13);
+    let mut w = W::default();
+    let bn = |w: &mut W, r: &mut Rng, p: &str, c: usize| {
+        w.t(r, &format!("{p}.weight"), &[c], 0.3);
+        w.0.last_mut().unwrap().2.iter_mut().for_each(|v| *v += 1.0);
+        w.t(r, &format!("{p}.bias"), &[c], 0.1);
+        w.t(r, &format!("{p}.running_mean"), &[c], 0.1);
+        w.t(r, &format!("{p}.running_var"), &[c], 0.2);
+        w.0.last_mut().unwrap().2.iter_mut().for_each(|v| *v = v.abs() + 0.5);
+    };
+    w.conv(&mut r, "body.conv1", 8, 3, 7, false);
+    bn(&mut w, &mut r, "body.bn1", 8);
+    let (mid, out) = (4usize, 16usize);
+    let mut cin = 8;
+    let mut level_out = Vec::new();
+    for (li, n) in [3usize, 4, 6, 3].iter().enumerate() {
+        for bi in 0..*n {
+            let p = format!("body.layer{}.{bi}", li + 1);
+            w.conv(&mut r, &format!("{p}.conv1"), mid, cin, 1, false);
+            bn(&mut w, &mut r, &format!("{p}.bn1"), mid);
+            w.conv(&mut r, &format!("{p}.conv2"), mid, mid, 3, false);
+            bn(&mut w, &mut r, &format!("{p}.bn2"), mid);
+            w.conv(&mut r, &format!("{p}.conv3"), out, mid, 1, false);
+            bn(&mut w, &mut r, &format!("{p}.bn3"), out);
+            if bi == 0 {
+                w.conv(&mut r, &format!("{p}.downsample.0"), out, cin, 1, false);
+                bn(&mut w, &mut r, &format!("{p}.downsample.1"), out);
+            }
+            cin = out;
+        }
+        level_out.push(out);
+    }
+    let c = 8usize;
+    for (i, &lo) in level_out[1..].iter().enumerate() {
+        w.conv(&mut r, &format!("fpn.output{}.0", i + 1), c, lo, 1, false);
+        bn(&mut w, &mut r, &format!("fpn.output{}.1", i + 1), c);
+    }
+    for m in ["fpn.merge1", "fpn.merge2"] {
+        w.conv(&mut r, &format!("{m}.0"), c, c, 3, false);
+        bn(&mut w, &mut r, &format!("{m}.1"), c);
+    }
+    for s in ["ssh1", "ssh2", "ssh3"] {
+        for (name, o, i) in [("conv3X3", c / 2, c), ("conv5X5_1", c / 4, c), ("conv5X5_2", c / 4, c / 4), ("conv7X7_2", c / 4, c / 4), ("conv7x7_3", c / 4, c / 4)] {
+            w.conv(&mut r, &format!("{s}.{name}.0"), o, i, 3, false);
+            bn(&mut w, &mut r, &format!("{s}.{name}.1"), o);
+        }
+    }
+    for i in 0..3 {
+        w.conv(&mut r, &format!("ClassHead.{i}.conv1x1"), 4, c, 1, true);
+        w.conv(&mut r, &format!("BboxHead.{i}.conv1x1"), 8, c, 1, true);
+        w.conv(&mut r, &format!("LandmarkHead.{i}.conv1x1"), 20, c, 1, true);
+    }
+    let weights = w.build();
+    use clearframe_inference::arch::retinaface as rf;
+    let cpu = rf::RetinaFace::load(&weights).unwrap();
+    let gnet = clearframe_inference::gpu::nets::GRetinaFace::new(&g, &cpu).unwrap();
+    let img = image(&mut r, 160, 96).to_tensor(&Device::Cpu, clearframe_inference::DType::F32).unwrap();
+    let x = rf::preprocess(&img).unwrap();
+    let (a_loc, a_conf, a_lm) = cpu.forward(&x).unwrap();
+    let o = gnet.forward(&g, &clearframe_inference::gpu::nets::Planar::from_tensor(&x).unwrap()).unwrap();
+    let (b_loc, b_conf, b_lm) = rf::heads_to_outputs(&o[0..3], &o[3..6], &o[6..9]).unwrap();
+    for (name, a, b) in [("loc", a_loc, b_loc), ("conf", a_conf, b_conf), ("landmarks", a_lm, b_lm)] {
+        assert_eq!(a.dims(), b.dims(), "{name} shape");
+        let (a, b) = (a.flatten_all().unwrap().to_vec1::<f32>().unwrap(), b.flatten_all().unwrap().to_vec1::<f32>().unwrap());
+        let max = a.iter().zip(&b).map(|(x, y)| (x - y).abs()).fold(0f32, f32::max);
+        let peak = a.iter().fold(0f32, |m, v| m.max(v.abs()));
+        let spread = a.iter().map(|v| (v - a[0]).abs()).fold(0f32, f32::max);
+        eprintln!("RetinaFace {name}: {} values, max diff {max:.2e}, |output| up to {peak:.2}, spread {spread:.2}", a.len());
+        assert!(spread > 1e-3, "{name} output is flat; the test would prove nothing");
+        assert!(max <= 1e-3 * peak.max(1.0), "GPU RetinaFace {name} differs from CPU by {max}");
+    }
+}

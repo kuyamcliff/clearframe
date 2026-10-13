@@ -353,6 +353,8 @@ pub struct FaceModels {
     pub device: Device,
     #[cfg(feature = "gpu")]
     gpu_restorer: Option<(std::sync::Arc<crate::gpu::Gpu>, crate::gpu::nets::GGfpgan)>,
+    #[cfg(feature = "gpu")]
+    gpu_detector: Option<crate::gpu::nets::GRetinaFace>,
 }
 
 impl FaceModels {
@@ -363,15 +365,41 @@ impl FaceModels {
             device: restorer.device().clone(),
             #[cfg(feature = "gpu")]
             gpu_restorer: None,
+            #[cfg(feature = "gpu")]
+            gpu_detector: None,
         })
     }
 
     /// Restore faces on a cross-vendor GPU (Vulkan / DirectX 12 / Metal) instead of the CPU.
     #[cfg(feature = "gpu")]
     pub fn use_gpu(&mut self, gpu: std::sync::Arc<crate::gpu::Gpu>) -> Result<()> {
+        let det = crate::gpu::nets::GRetinaFace::new(&gpu, &self.detector).map_err(candle_core::Error::msg)?;
         let net = crate::gpu::nets::GGfpgan::new(&gpu, &self.restorer).map_err(candle_core::Error::msg)?;
+        self.gpu_detector = Some(det);
         self.gpu_restorer = Some((gpu, net));
         Ok(())
+    }
+
+    /// Detect faces in an RGB image tensor (1,3,H,W) in 0..1. Uses the GPU when attached, else (or on a GPU failure)
+    /// the CPU; pre- and post-processing are shared.
+    pub fn detect(&self, rgb: &candle_core::Tensor, conf_threshold: f32, nms_threshold: f32) -> Result<Vec<crate::arch::retinaface::Detection>> {
+        #[cfg(feature = "gpu")]
+        if let (Some(det), Some((gpu, _))) = (&self.gpu_detector, &self.gpu_restorer) {
+            use crate::arch::retinaface as rf;
+            let run = || -> Result<Vec<rf::Detection>> {
+                let (_, _, h, w) = rgb.dims4()?;
+                let x = rf::preprocess(&rgb.to_dtype(DType::F32)?)?;
+                let p = crate::gpu::nets::Planar::from_tensor(&x).map_err(candle_core::Error::msg)?;
+                let o = det.forward(gpu, &p).map_err(candle_core::Error::msg)?;
+                let (loc, conf, landm) = rf::heads_to_outputs(&o[0..3], &o[3..6], &o[6..9])?;
+                rf::decode(&loc, &conf, &landm, h, w, conf_threshold, nms_threshold)
+            };
+            match run() {
+                Ok(d) => return Ok(d),
+                Err(e) => log::warn!("face detection on the GPU failed ({e}); using the CPU for this frame"),
+            }
+        }
+        self.detector.detect(rgb, conf_threshold, nms_threshold)
     }
 
     /// Whether faces are restored on the GPU.
