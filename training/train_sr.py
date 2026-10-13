@@ -150,8 +150,11 @@ def evaluate(G, test, lp):
     out = {k: {kk: float(np.mean(vv)) for kk, vv in v.items()} for k, v in res.items()}
     out['mean'] = {kk: float(np.mean([out[k][kk] for k in res])) for kk in ['psnr', 'lpips', 'flicker']}; return out
 
-def better(m, best):  # perceptual quality must improve without losing more than 0.2 dB of accuracy
-    return m['mean']['lpips'] < best['mean']['lpips'] - 1e-4 and m['mean']['psnr'] > best['mean']['psnr'] - 0.2
+BASELINE = {}
+def better(m, best):
+    # Looks better (LPIPS), keeps accuracy (at most 0.2 dB PSNR lost) and does not flicker more than 5% over the original model.
+    flicker_cap = BASELINE.get('flicker', float('inf')) * 1.05
+    return m['mean']['lpips'] < best['mean']['lpips'] - 1e-4 and m['mean']['psnr'] > best['mean']['psnr'] - 0.2 and m['mean']['flicker'] <= flicker_cap
 
 @torch.no_grad()
 def save_samples(G, test, tag):
@@ -187,6 +190,7 @@ def worker(rank, world, index, test):
     if rank == 0 and state['baseline'] is None:
         state['baseline'] = evaluate(Gema, test, lp); state['best'] = state['baseline']; log('baseline', json.dumps(state['baseline']['mean']))
         r2.put(P + 'baseline.json', json.dumps(state['baseline']).encode()); save_samples(Gema, test, 'baseline')
+    if rank == 0: BASELINE.update(state['baseline']['mean'])
     dist.barrier()
     Gp = nn.parallel.DistributedDataParallel(G, device_ids=[rank]); Dp = nn.parallel.DistributedDataParallel(D, device_ids=[rank], broadcast_buffers=False)
     dl = iter(torch.utils.data.DataLoader(PairDataset(index), batch_size=BS // world, num_workers=2, persistent_workers=True, prefetch_factor=6, pin_memory=True))
