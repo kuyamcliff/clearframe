@@ -538,6 +538,73 @@ impl Recorder {
         Ok(out)
     }
 
+    /// General transposed convolution (RIFE up-sampling). `weight` is [cin][cout][k][k], `bias` is [cout].
+    #[allow(clippy::too_many_arguments)]
+    pub fn conv_transpose(&mut self, x: View<'_>, weight: &wgpu::Buffer, bias: &wgpu::Buffer, cout: u32, k: u32, stride: u32, pad: u32) -> Result<GTensor, String> {
+        let (oh, ow) = ((x.t.h - 1) * stride + k - 2 * pad, (x.t.w - 1) * stride + k - 2 * pad);
+        let out = GTensor::new(&self.gpu, cout, oh, ow)?;
+        let mut p = Params::zero();
+        p.a = [cout, oh, ow, x.len];
+        p.b = [x.t.c, x.off, x.t.h, x.t.w];
+        p.c = [k, stride, pad, 0];
+        let (xb, wb, bb, ob) = (x.t.buf().clone(), weight.clone(), bias.clone(), out.buf().clone());
+        self.dispatch("conv_t", p, &[&xb, &wb, &bb, &ob], (ow.div_ceil(16), oh.div_ceil(16), cout));
+        Ok(out)
+    }
+
+    /// Bilinear resize by `factor` (`align_corners=False`, output `floor(size * factor)`), times `mul`.
+    pub fn resize_bilinear_factor(&mut self, x: View<'_>, factor: f64, mul: f32) -> Result<GTensor, String> {
+        let (oh, ow) = (((x.t.h as f64) * factor).floor() as u32, ((x.t.w as f64) * factor).floor() as u32);
+        let out = GTensor::new(&self.gpu, x.len, oh, ow)?;
+        let mut p = Params::zero();
+        p.a = [x.len, oh, ow, 0];
+        p.b = [x.t.c, x.off, x.t.h, x.t.w];
+        p.f = [(1.0 / factor) as f32, (1.0 / factor) as f32, mul, 0.0];
+        let (xb, ob) = (x.t.buf().clone(), out.buf().clone());
+        self.dispatch("resize_bl", p, &[&xb, &ob], (ow.div_ceil(16), oh.div_ceil(16), x.len));
+        Ok(out)
+    }
+
+    /// Backward warp: `out(y, x) = img(y + flow_y, x + flow_x)`, bilinear, coordinates clamped to the frame.
+    pub fn warp(&mut self, img: View<'_>, flow: View<'_>) -> Result<GTensor, String> {
+        assert_eq!(flow.len, 2);
+        assert!(img.t.h == flow.t.h && img.t.w == flow.t.w, "warp size");
+        let out = GTensor::new(&self.gpu, img.len, img.t.h, img.t.w)?;
+        let mut p = Params::zero();
+        p.a = [img.len, img.t.h, img.t.w, 0];
+        p.b = [img.t.c, img.off, flow.t.c, flow.off];
+        let (ib, fb, ob) = (img.t.buf().clone(), flow.t.buf().clone(), out.buf().clone());
+        self.dispatch("warp", p, &[&ib, &fb, &ob], (img.t.w.div_ceil(16), img.t.h.div_ceil(16), img.len));
+        Ok(out)
+    }
+
+    /// `leaky(a[c] * s[c] + base[c])` (RIFE's residual blocks).
+    pub fn scale_add_leaky(&mut self, a: View<'_>, s: &wgpu::Buffer, base: View<'_>, slope: f32) -> Result<GTensor, String> {
+        assert_eq!(a.len, base.len);
+        let out = GTensor::new(&self.gpu, a.len, a.t.h, a.t.w)?;
+        let mut p = Params::zero();
+        p.a = [a.len, a.t.h, a.t.w, 0];
+        p.b = [a.t.c, a.off, base.t.c, base.off];
+        p.f = [slope, 0.0, 0.0, 0.0];
+        let (ab, sb, bb, ob) = (a.t.buf().clone(), s.clone(), base.t.buf().clone(), out.buf().clone());
+        self.dispatch("scale_add_leaky", p, &[&ab, &sb, &bb, &ob], (a.t.w.div_ceil(16), a.t.h.div_ceil(16), a.len));
+        Ok(out)
+    }
+
+    /// `clamp(a * sigmoid(m) + b * (1 - sigmoid(m)), 0, 1)` with a one-channel mask view.
+    pub fn sigmoid_blend(&mut self, a: View<'_>, b: View<'_>, m: View<'_>) -> Result<GTensor, String> {
+        assert_eq!(a.len, b.len);
+        assert_eq!(m.len, 1);
+        let out = GTensor::new(&self.gpu, a.len, a.t.h, a.t.w)?;
+        let mut p = Params::zero();
+        p.a = [a.len, a.t.h, a.t.w, 0];
+        p.b = [a.t.c, a.off, b.t.c, b.off];
+        p.c = [m.t.c, m.off, 0, 0];
+        let (ab, bb, mb, ob) = (a.t.buf().clone(), b.t.buf().clone(), m.t.buf().clone(), out.buf().clone());
+        self.dispatch("sigmoid_blend", p, &[&ab, &bb, &mb, &ob], (a.t.w.div_ceil(16), a.t.h.div_ceil(16), a.len));
+        Ok(out)
+    }
+
     /// Finish recording, run everything and read back `t` as planar data.
     pub fn finish_read(mut self, t: &GTensor) -> Result<Vec<f32>, String> {
         drop(self.pass.take());
@@ -849,6 +916,122 @@ fn main(@builtin(global_invocation_id) g: vec3<u32>) {
     acc += inp[((off + ic) * IH + iy) * IW + ix] * wt[(ic * cout + oc) * 4u + t];
   }
   outp[(oc * OH + y) * OW + x] = acc;
+}
+"#,
+    ),
+    (
+        "conv_t",
+        r#"
+@group(0) @binding(1) var<storage, read> inp: array<f32>;
+@group(0) @binding(2) var<storage, read> wt: array<f32>;
+@group(0) @binding(3) var<storage, read> bias: array<f32>;
+@group(0) @binding(4) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let cout = p.a.x; let OH = p.a.y; let OW = p.a.z; let cin = p.a.w;
+  let off = p.b.y; let H = i32(p.b.z); let W = i32(p.b.w);
+  let k = i32(p.c.x); let s = i32(p.c.y); let pad = i32(p.c.z);
+  if (g.x >= OW || g.y >= OH || g.z >= cout) { return; }
+  let ox = i32(g.x); let oy = i32(g.y); let oc = g.z;
+  var acc = bias[oc];
+  for (var ky = 0; ky < k; ky++) {
+    let ty = oy + pad - ky;
+    if (ty < 0 || ty % s != 0) { continue; }
+    let iy = ty / s;
+    if (iy >= H) { continue; }
+    for (var kx = 0; kx < k; kx++) {
+      let tx = ox + pad - kx;
+      if (tx < 0 || tx % s != 0) { continue; }
+      let ix = tx / s;
+      if (ix >= W) { continue; }
+      let pix = u32(iy * W + ix); let tap = u32(ky * k + kx);
+      for (var ic = 0u; ic < cin; ic++) {
+        acc += inp[(off + ic) * u32(H * W) + pix] * wt[((ic * cout + oc) * u32(k * k)) + tap];
+      }
+    }
+  }
+  outp[(oc * OH + g.y) * OW + g.x] = acc;
+}
+"#,
+    ),
+    (
+        "resize_bl",
+        r#"
+@group(0) @binding(1) var<storage, read> inp: array<f32>;
+@group(0) @binding(2) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let OH = p.a.y; let OW = p.a.z;
+  let off = p.b.y; let H = p.b.z; let W = p.b.w;
+  if (g.x >= OW || g.y >= OH || g.z >= C) { return; }
+  let sy = max((f32(g.y) + 0.5) * p.f.x - 0.5, 0.0);
+  let sx = max((f32(g.x) + 0.5) * p.f.y - 0.5, 0.0);
+  let y0 = min(u32(floor(sy)), H - 1u); let y1 = min(y0 + 1u, H - 1u);
+  let x0 = min(u32(floor(sx)), W - 1u); let x1 = min(x0 + 1u, W - 1u);
+  var wy = sy - f32(y0); if (y1 == y0) { wy = 0.0; }
+  var wx = sx - f32(x0); if (x1 == x0) { wx = 0.0; }
+  let base = (off + g.z) * H * W;
+  let a = inp[base + y0 * W + x0] * (1.0 - wy) + inp[base + y1 * W + x0] * wy;
+  let b = inp[base + y0 * W + x1] * (1.0 - wy) + inp[base + y1 * W + x1] * wy;
+  outp[(g.z * OH + g.y) * OW + g.x] = (a * (1.0 - wx) + b * wx) * p.f.z;
+}
+"#,
+    ),
+    (
+        "warp",
+        r#"
+@group(0) @binding(1) var<storage, read> img: array<f32>;
+@group(0) @binding(2) var<storage, read> flow: array<f32>;
+@group(0) @binding(3) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let H = p.a.y; let W = p.a.z; let ioff = p.b.y; let foff = p.b.w;
+  if (g.x >= W || g.y >= H || g.z >= C) { return; }
+  let hw = H * W; let pix = g.y * W + g.x;
+  let sx = clamp(f32(g.x) + flow[foff * hw + pix], 0.0, f32(W - 1u));
+  let sy = clamp(f32(g.y) + flow[(foff + 1u) * hw + pix], 0.0, f32(H - 1u));
+  let x0 = floor(sx); let y0 = floor(sy); let wx = sx - x0; let wy = sy - y0;
+  let x1 = min(x0 + 1.0, f32(W - 1u)); let y1 = min(y0 + 1.0, f32(H - 1u));
+  let base = (ioff + g.z) * hw;
+  let v00 = img[base + u32(y0) * W + u32(x0)]; let v01 = img[base + u32(y0) * W + u32(x1)];
+  let v10 = img[base + u32(y1) * W + u32(x0)]; let v11 = img[base + u32(y1) * W + u32(x1)];
+  let top = v00 * (1.0 - wx) + v01 * wx; let bot = v10 * (1.0 - wx) + v11 * wx;
+  outp[g.z * hw + pix] = top * (1.0 - wy) + bot * wy;
+}
+"#,
+    ),
+    (
+        "scale_add_leaky",
+        r#"
+@group(0) @binding(1) var<storage, read> a: array<f32>;
+@group(0) @binding(2) var<storage, read> s: array<f32>;
+@group(0) @binding(3) var<storage, read> base: array<f32>;
+@group(0) @binding(4) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let H = p.a.y; let W = p.a.z;
+  if (g.x >= W || g.y >= H || g.z >= C) { return; }
+  let hw = H * W; let pix = g.y * W + g.x;
+  let v = a[(p.b.y + g.z) * hw + pix] * s[g.z] + base[(p.b.w + g.z) * hw + pix];
+  outp[g.z * hw + pix] = max(v, v * p.f.x);
+}
+"#,
+    ),
+    (
+        "sigmoid_blend",
+        r#"
+@group(0) @binding(1) var<storage, read> a: array<f32>;
+@group(0) @binding(2) var<storage, read> b: array<f32>;
+@group(0) @binding(3) var<storage, read> m: array<f32>;
+@group(0) @binding(4) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let H = p.a.y; let W = p.a.z;
+  if (g.x >= W || g.y >= H || g.z >= C) { return; }
+  let hw = H * W; let pix = g.y * W + g.x;
+  let w = 1.0 / (1.0 + exp(-m[p.c.y * hw + pix]));
+  let v = a[(p.b.y + g.z) * hw + pix] * w + b[(p.b.w + g.z) * hw + pix] * (1.0 - w);
+  outp[g.z * hw + pix] = clamp(v, 0.0, 1.0);
 }
 "#,
     ),

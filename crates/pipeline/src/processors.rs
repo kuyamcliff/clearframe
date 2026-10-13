@@ -445,7 +445,16 @@ pub fn build_native(
                 InterpEngine::Rife => {
                     let m = model(models, &i.model_id)?;
                     let w = load_weights(m, "weights", device)?;
-                    Box::new(RifeSynth { model: InterpModel::load(&w, precision).map_err(|e| anyhow!("{}: {e}", m.id))?, scale: i.rife_scale })
+                    #[allow(unused_mut)]
+                    let mut im = InterpModel::load(&w, precision).map_err(|e| anyhow!("{}: {e}", m.id))?;
+                    #[cfg(feature = "gpu")]
+                    if let Some(g) = &compute.gpu {
+                        match im.use_gpu(g.clone()) {
+                            Ok(()) => log::info!("{}: frame interpolation on {}", m.id, g.info.name),
+                            Err(e) => log::warn!("{}: GPU unavailable ({e}); using the CPU", m.id),
+                        }
+                    }
+                    Box::new(RifeSynth { model: im, scale: i.rife_scale })
                 }
                 _ => Box::new(BlendSynth),
             };

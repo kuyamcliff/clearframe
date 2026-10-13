@@ -266,6 +266,8 @@ pub struct InterpModel {
     net: Rife,
     device: Device,
     dtype: DType,
+    #[cfg(feature = "gpu")]
+    gpu: Option<(std::sync::Arc<crate::gpu::Gpu>, crate::gpu::nets::GRife)>,
 }
 
 impl InterpModel {
@@ -273,11 +275,60 @@ impl InterpModel {
         let device = w.device().clone();
         let dtype = precision.dtype(&device);
         let w = convert_weights(w, dtype)?;
-        Ok(Self { net: Rife::load(&w)?, device, dtype })
+        Ok(Self {
+            net: Rife::load(&w)?,
+            device,
+            dtype,
+            #[cfg(feature = "gpu")]
+            gpu: None,
+        })
+    }
+
+    /// Run RIFE on a cross-vendor GPU (Vulkan / DirectX 12 / Metal) instead of the CPU.
+    #[cfg(feature = "gpu")]
+    pub fn use_gpu(&mut self, gpu: std::sync::Arc<crate::gpu::Gpu>) -> Result<()> {
+        let net = crate::gpu::nets::GRife::new(&gpu, &self.net).map_err(candle_core::Error::msg)?;
+        self.gpu = Some((gpu, net));
+        Ok(())
+    }
+
+    /// Whether frames are synthesized on the GPU.
+    pub fn on_gpu(&self) -> bool {
+        #[cfg(feature = "gpu")]
+        return self.gpu.is_some();
+        #[cfg(not(feature = "gpu"))]
+        false
+    }
+
+    #[cfg(feature = "gpu")]
+    fn interpolate_gpu(&self, a: &RgbImage, b: &RgbImage, t: f32, scale: f64) -> Option<RgbImage> {
+        use crate::gpu::nets::Planar;
+        let (gpu, net) = self.gpu.as_ref()?;
+        let run = || -> std::result::Result<RgbImage, String> {
+            let (h, w) = (a.height, a.width);
+            let m = ((64.0 / scale).max(64.0)) as usize;
+            let (ph, pw) = ((m - h % m) % m, (m - w % m) % m);
+            let pa = Planar::from_tensor(&a.to_tensor(&Device::Cpu, DType::F32).map_err(|e| e.to_string())?)?.pad_replicate(pw, ph);
+            let pb = Planar::from_tensor(&b.to_tensor(&Device::Cpu, DType::F32).map_err(|e| e.to_string())?)?.pad_replicate(pw, ph);
+            let y = net.forward(gpu, &pa, &pb, t, scale)?.to_tensor()?;
+            let y = y.narrow(2, 0, h).and_then(|y| y.narrow(3, 0, w)).map_err(|e| e.to_string())?;
+            RgbImage::from_tensor(&y).map_err(|e| e.to_string())
+        };
+        match run() {
+            Ok(img) => Some(img),
+            Err(e) => {
+                log::warn!("RIFE on the GPU failed ({e}); using the CPU for this frame");
+                None
+            }
+        }
     }
 
     /// Synthesize a frame at `t` between `a` and `b`.
     pub fn interpolate(&self, a: &RgbImage, b: &RgbImage, t: f32, scale: f64) -> Result<RgbImage> {
+        #[cfg(feature = "gpu")]
+        if let Some(img) = self.interpolate_gpu(a, b, t, scale) {
+            return Ok(img);
+        }
         let x0 = a.to_tensor(&self.device, self.dtype)?;
         let x1 = b.to_tensor(&self.device, self.dtype)?;
         let y = self.net.interpolate(&x0, &x1, t, scale)?;
@@ -286,6 +337,9 @@ impl InterpModel {
 
     /// Synthesize several timesteps, re-using the uploaded input tensors.
     pub fn interpolate_many(&self, a: &RgbImage, b: &RgbImage, ts: &[f32], scale: f64) -> Result<Vec<RgbImage>> {
+        if self.on_gpu() {
+            return ts.iter().map(|t| self.interpolate(a, b, *t, scale)).collect();
+        }
         let x0 = a.to_tensor(&self.device, self.dtype)?;
         let x1 = b.to_tensor(&self.device, self.dtype)?;
         ts.iter().map(|t| RgbImage::from_tensor(&self.net.interpolate(&x0, &x1, *t, scale)?)).collect()

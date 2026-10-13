@@ -230,3 +230,46 @@ fn tiling_on_gpu_matches_whole_frame() {
     let max = whole.data.iter().zip(&tiled.data).map(|(x, y)| (x - y).abs()).fold(0f32, f32::max);
     assert!(max < 1e-4, "tile seams differ by {max}");
 }
+
+/// RIFE: same structure as v4.26 (4-channel encoder, five IFBlocks passing 4 flow + 1 mask + 8 feature channels),
+/// narrower layers. Weights are kept small so the predicted flow stays in a realistic range.
+#[test]
+fn rife_on_gpu_matches_cpu() {
+    let Some(g) = gpu() else { return };
+    let mut r = Rng(7);
+    let mut w = W::default();
+    w.conv(&mut r, "encode.cnn0", 8, 3, 3, true);
+    w.conv(&mut r, "encode.cnn1", 8, 8, 3, true);
+    w.conv(&mut r, "encode.cnn2", 8, 8, 3, true);
+    w.t(&mut r, "encode.cnn3.weight", &[8, 4, 4, 4], 0.2);
+    w.t(&mut r, "encode.cnn3.bias", &[4], 0.05);
+    for b in 0..5 {
+        let cin = if b == 0 { 15 } else { 28 };
+        let p = format!("block{b}");
+        w.conv(&mut r, &format!("{p}.conv0.0.0"), 8, cin, 3, true);
+        w.conv(&mut r, &format!("{p}.conv0.1.0"), 16, 8, 3, true);
+        for i in 0..2 {
+            w.conv(&mut r, &format!("{p}.convblock.{i}.conv"), 16, 16, 3, true);
+            w.t(&mut r, &format!("{p}.convblock.{i}.beta"), &[1, 16, 1, 1], 0.5);
+        }
+        w.t(&mut r, &format!("{p}.lastconv.0.weight"), &[16, 52, 4, 4], 0.08);
+        w.t(&mut r, &format!("{p}.lastconv.0.bias"), &[52], 0.05);
+    }
+    let weights = w.build();
+    let cpu = clearframe_inference::InterpModel::load(&weights, Precision::Fp32).unwrap();
+    let mut on_gpu = clearframe_inference::InterpModel::load(&weights, Precision::Fp32).unwrap();
+    on_gpu.use_gpu(g).unwrap();
+    assert!(on_gpu.on_gpu());
+    // Odd size: exercises the replicate padding to the 64-pixel alignment and the crop back.
+    let (a, b) = (image(&mut r, 93, 70), image(&mut r, 93, 70));
+    for (t, scale) in [(0.5f32, 1.0f64), (0.25, 1.0), (0.5, 0.5)] {
+        let x = cpu.interpolate(&a, &b, t, scale).unwrap();
+        let y = on_gpu.interpolate(&a, &b, t, scale).unwrap();
+        assert_eq!((x.width, x.height), (y.width, y.height));
+        let max = x.data.iter().zip(&y.data).map(|(p, q)| (p - q).abs()).fold(0f32, f32::max);
+        let spread = x.data.iter().map(|v| (v - x.data[0]).abs()).fold(0f32, f32::max);
+        eprintln!("RIFE t={t} scale={scale}: max diff {max:.2e} (output spread {spread:.2})");
+        assert!(spread > 0.05, "output is flat; the test would prove nothing");
+        assert!(max <= 2e-3, "GPU RIFE differs from CPU by {max}");
+    }
+}

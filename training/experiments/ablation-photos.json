@@ -1,0 +1,196 @@
+{
+ "note": "PRD E6/E7 quality ablations: 2400 steps each from original General v3, schema-v2 photos (b001-v2, b002-v2), full still suite (60 photos x light/medium/heavy).",
+ "runs": {
+  "abl-A-base": {
+   "baseline": {
+    "still/light": {
+     "psnr": 26.70858344369849,
+     "lpips": 0.3652158897990982,
+     "lpips_worst10": 0.5298137724399566,
+     "n": 60,
+     "pan_consistency": 2.4969369415375695
+    },
+    "still/medium": {
+     "psnr": 24.984929454954898,
+     "lpips": 0.529592789337039,
+     "lpips_worst10": 0.7815986573696136,
+     "n": 60,
+     "pan_consistency": 2.034400028147502
+    },
+    "still/heavy": {
+     "psnr": 23.863482152612594,
+     "lpips": 0.5985672660171986,
+     "lpips_worst10": 0.8528124690055847,
+     "n": 60,
+     "pan_consistency": 2.6070125829719473
+    },
+    "still/mean": {
+     "psnr": 25.185665017088663,
+     "lpips": 0.49779198171777855,
+     "lpips_worst10": 0.7214082996050517,
+     "pan_consistency": 2.3794498508856727
+    }
+   },
+   "final": {
+    "still/light": {
+     "psnr": 26.966769476278973,
+     "lpips": 0.34585978612303736,
+     "lpips_worst10": 0.5174638628959656,
+     "n": 60,
+     "pan_consistency": 1.9218620086285227
+    },
+    "still/medium": {
+     "psnr": 25.117680637755704,
+     "lpips": 0.4732738251487414,
+     "lpips_worst10": 0.6860792994499206,
+     "n": 60,
+     "pan_consistency": 1.9361088170117
+    },
+    "still/heavy": {
+     "psnr": 23.884644765743772,
+     "lpips": 0.5554265653093656,
+     "lpips_worst10": 0.7912523448467255,
+     "n": 60,
+     "pan_consistency": 2.2444410110765602
+    },
+    "still/mean": {
+     "psnr": 25.32303162659282,
+     "lpips": 0.45818672552704814,
+     "lpips_worst10": 0.6649318357308706,
+     "pan_consistency": 2.0341372789055945
+    }
+   },
+   "step": 2400,
+   "updates_per_s": 1.371
+  },
+  "abl-B-d_every2": {
+   "baseline": {
+    "still/light": {
+     "psnr": 26.708583443052838,
+     "lpips": 0.3652158890540401,
+     "lpips_worst10": 0.5298137724399566,
+     "n": 60,
+     "pan_consistency": 2.496936921746965
+    },
+    "still/medium": {
+     "psnr": 24.984929453431473,
+     "lpips": 0.5295927988986174,
+     "lpips_worst10": 0.7815987646579743,
+     "n": 60,
+     "pan_consistency": 2.0344000261684414
+    },
+    "still/heavy": {
+     "psnr": 23.86348215971743,
+     "lpips": 0.5985672637820244,
+     "lpips_worst10": 0.852812522649765,
+     "n": 60,
+     "pan_consistency": 2.6070125849510077
+    },
+    "still/mean": {
+     "psnr": 25.185665018733914,
+     "lpips": 0.4977919839115607,
+     "lpips_worst10": 0.7214083532492319,
+     "pan_consistency": 2.379449844288805
+    }
+   },
+   "final": {
+    "still/light": {
+     "psnr": 26.961357855588645,
+     "lpips": 0.34740235675126313,
+     "lpips_worst10": 0.5189449191093445,
+     "n": 60,
+     "pan_consistency": 1.9218631184485275
+    },
+    "still/medium": {
+     "psnr": 25.111396150204776,
+     "lpips": 0.471855607504646,
+     "lpips_worst10": 0.6832541406154633,
+     "n": 60,
+     "pan_consistency": 1.9777042122586863
+    },
+    "still/heavy": {
+     "psnr": 23.883829734612267,
+     "lpips": 0.5530134142686923,
+     "lpips_worst10": 0.7898082256317139,
+     "n": 60,
+     "pan_consistency": 2.2852627940592356
+    },
+    "still/mean": {
+     "psnr": 25.318861246801898,
+     "lpips": 0.45742379284153384,
+     "lpips_worst10": 0.6640024284521738,
+     "pan_consistency": 2.0616100415888163
+    }
+   },
+   "step": 2400,
+   "updates_per_s": 1.782
+  },
+  "abl-C-patch80": {
+   "baseline": {
+    "still/light": {
+     "psnr": 26.70858344369849,
+     "lpips": 0.3652158897990982,
+     "lpips_worst10": 0.5298137724399566,
+     "n": 60,
+     "pan_consistency": 2.4969369415375695
+    },
+    "still/medium": {
+     "psnr": 24.984929454954898,
+     "lpips": 0.529592789337039,
+     "lpips_worst10": 0.7815986573696136,
+     "n": 60,
+     "pan_consistency": 2.034400028147502
+    },
+    "still/heavy": {
+     "psnr": 23.863482152612594,
+     "lpips": 0.5985672660171986,
+     "lpips_worst10": 0.8528124690055847,
+     "n": 60,
+     "pan_consistency": 2.6070125829719473
+    },
+    "still/mean": {
+     "psnr": 25.185665017088663,
+     "lpips": 0.49779198171777855,
+     "lpips_worst10": 0.7214082996050517,
+     "pan_consistency": 2.3794498508856727
+    }
+   },
+   "final": {
+    "still/light": {
+     "psnr": 26.945094944124286,
+     "lpips": 0.34628804481277864,
+     "lpips_worst10": 0.5118900120258332,
+     "n": 60,
+     "pan_consistency": 1.9155844776723825
+    },
+    "still/medium": {
+     "psnr": 25.128056417517552,
+     "lpips": 0.47379420859118304,
+     "lpips_worst10": 0.6877504765987397,
+     "n": 60,
+     "pan_consistency": 1.9224229667015607
+    },
+    "still/heavy": {
+     "psnr": 23.88234450443346,
+     "lpips": 0.5545405837396781,
+     "lpips_worst10": 0.789450627565384,
+     "n": 60,
+     "pan_consistency": 2.246256383950822
+    },
+    "still/mean": {
+     "psnr": 25.3184986220251,
+     "lpips": 0.45820761238121327,
+     "lpips_worst10": 0.6630303720633189,
+     "pan_consistency": 2.028087942774922
+    }
+   },
+   "step": 2400,
+   "updates_per_s": 1.322
+  }
+ },
+ "decision": {
+  "d_every": 2,
+  "lq_patch": 64,
+  "why": "B matches A (LPIPS 0.4574 vs 0.4582, PSNR 25.319 vs 25.323, pan 2.062 vs 2.034) at 1.78 vs 1.37 updates/s; C (patch 80) equals A within noise (LPIPS 0.4582, pan 2.028) at lower update rate."
+ }
+}

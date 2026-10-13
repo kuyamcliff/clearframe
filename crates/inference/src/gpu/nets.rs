@@ -51,7 +51,7 @@ impl Planar {
     }
 
     /// Replicate the last row/column to add `right` columns and `bottom` rows.
-    fn pad_replicate(&self, right: usize, bottom: usize) -> Self {
+    pub(crate) fn pad_replicate(&self, right: usize, bottom: usize) -> Self {
         let (h, w) = (self.h + bottom, self.w + right);
         let mut data = vec![0f32; self.c * h * w];
         for c in 0..self.c {
@@ -500,5 +500,153 @@ impl GpuNet {
             GpuNet::Dru(_) => px * 64,
             GpuNet::Naf(n) => px * n.intro.cout as u64 * 2,
         }
+    }
+}
+
+// ---------------------------------------------------------------- RIFE (frame interpolation)
+
+/// A transposed convolution prepared for the GPU.
+struct GConvT {
+    weight: wgpu::Buffer,
+    bias: wgpu::Buffer,
+    cout: u32,
+    k: u32,
+    stride: u32,
+    pad: u32,
+}
+
+impl GConvT {
+    fn new(gpu: &Gpu, c: &ConvTranspose2d) -> R<Self> {
+        let (_cin, cout, k, k2) = c.weight.dims4().map_err(|e| e.to_string())?;
+        if k != k2 {
+            return Err("non-square transposed kernels are not supported on the GPU".into());
+        }
+        let bias = match &c.bias {
+            Some(b) => vec(b)?,
+            None => vec![0.0; cout],
+        };
+        Ok(Self { weight: gpu.constant(&vec(&c.weight)?), bias: gpu.constant(&bias), cout: cout as u32, k: k as u32, stride: c.stride as u32, pad: c.padding as u32 })
+    }
+    fn run(&self, r: &mut Recorder, x: super::View<'_>) -> R<GTensor> {
+        r.conv_transpose(x, &self.weight, &self.bias, self.cout, self.k, self.stride, self.pad)
+    }
+}
+
+struct GIfBlock {
+    conv0: [GConv; 2],
+    blocks: Vec<(GConv, wgpu::Buffer)>,
+    last: GConvT,
+}
+
+/// RIFE v4.26 IFNet on the GPU; mirrors `arch::rife::Rife::forward`.
+pub struct GRife {
+    head: [GConv; 3],
+    head_up: GConvT,
+    blocks: Vec<GIfBlock>,
+}
+
+/// Concatenate channel views into a new tensor.
+fn cat(r: &mut Recorder, parts: &[super::View<'_>]) -> R<GTensor> {
+    let (h, w) = (parts[0].t.h, parts[0].t.w);
+    let c: u32 = parts.iter().map(|v| v.len).sum();
+    let out = GTensor::new(r.gpu(), c, h, w)?;
+    let mut off = 0;
+    for v in parts {
+        assert!(v.t.h == h && v.t.w == w, "cat size mismatch");
+        r.axpy_into(*v, 1.0, out.ch(off, v.len), 0.0);
+        off += v.len;
+    }
+    Ok(out)
+}
+
+impl GRife {
+    pub fn new(gpu: &Arc<Gpu>, n: &crate::arch::rife::Rife) -> R<Self> {
+        let e = &n.encode;
+        let blocks = n
+            .blocks
+            .iter()
+            .map(|b| {
+                Ok(GIfBlock {
+                    conv0: [gconv(gpu, &b.conv0[0])?, gconv(gpu, &b.conv0[1])?],
+                    blocks: b.blocks.iter().map(|(c, beta)| Ok((gconv(gpu, c)?, gpu.constant(&vec(beta)?)))).collect::<R<Vec<_>>>()?,
+                    last: GConvT::new(gpu, &b.last)?,
+                })
+            })
+            .collect::<R<Vec<_>>>()?;
+        Ok(Self { head: [gconv(gpu, &e.cnn0)?, gconv(gpu, &e.cnn1)?, gconv(gpu, &e.cnn2)?], head_up: GConvT::new(gpu, &e.cnn3)?, blocks })
+    }
+
+    fn encode(&self, r: &mut Recorder, x: &GTensor) -> R<GTensor> {
+        let l = GAct::Leaky(0.2);
+        let a = r.conv(&self.head[0], x.all(), l)?;
+        let a = r.conv(&self.head[1], a.all(), l)?;
+        let a = r.conv(&self.head[2], a.all(), l)?;
+        self.head_up.run(r, a.all())
+    }
+
+    /// Returns (flow 4ch, mask 1ch, feat) at the input resolution.
+    fn block(&self, r: &mut Recorder, b: &GIfBlock, x: &GTensor, flow: Option<&GTensor>, scale: f64) -> R<(GTensor, GTensor, GTensor)> {
+        let l = GAct::Leaky(0.2);
+        let xs = r.resize_bilinear_factor(x.all(), 1.0 / scale, 1.0)?;
+        let inp = match flow {
+            Some(f) => {
+                let fs = r.resize_bilinear_factor(f.all(), 1.0 / scale, (1.0 / scale) as f32)?;
+                cat(r, &[xs.all(), fs.all()])?
+            }
+            None => xs,
+        };
+        let mut feat = r.conv(&b.conv0[0], inp.all(), l)?;
+        feat = r.conv(&b.conv0[1], feat.all(), l)?;
+        for (conv, beta) in &b.blocks {
+            let t = r.conv(conv, feat.all(), GAct::None)?;
+            feat = r.scale_add_leaky(t.all(), beta, feat.all(), 0.2)?;
+        }
+        let up = b.last.run(r, feat.all())?;
+        let tmp = r.pixel_shuffle(up.all(), 2)?;
+        let flow = r.resize_bilinear_factor(tmp.ch(0, 4), scale, scale as f32)?;
+        let mask = r.resize_bilinear_factor(tmp.ch(4, 1), scale, 1.0)?;
+        let feat = r.resize_bilinear_factor(tmp.ch(5, tmp.c - 5), scale, 1.0)?;
+        Ok((flow, mask, feat))
+    }
+
+    /// Interpolate between padded planar frames (sizes already a multiple of the RIFE alignment).
+    pub fn forward(&self, gpu: &Arc<Gpu>, a: &Planar, b: &Planar, timestep: f32, scale: f64) -> R<Planar> {
+        let mut r = Recorder::new(gpu);
+        let (h, w) = (a.h as u32, a.w as u32);
+        let img0 = r.upload(3, h, w, &a.data)?;
+        let img1 = r.upload(3, h, w, &b.data)?;
+        let ts = r.upload(1, h, w, &vec![timestep; a.h * a.w])?;
+        let f0 = self.encode(&mut r, &img0)?;
+        let f1 = self.encode(&mut r, &img1)?;
+        let scales = [16.0 / scale, 8.0 / scale, 4.0 / scale, 2.0 / scale, 1.0 / scale];
+        let (mut flow, mut mask, mut feat): (Option<GTensor>, Option<GTensor>, Option<GTensor>) = (None, None, None);
+        let (mut wi0, mut wi1): (Option<GTensor>, Option<GTensor>) = (None, None);
+        for (i, blk) in self.blocks.iter().enumerate() {
+            match flow.take() {
+                None => {
+                    let inp = cat(&mut r, &[img0.all(), img1.all(), f0.all(), f1.all(), ts.all()])?;
+                    let (fl, m, ft) = self.block(&mut r, blk, &inp, None, scales[i])?;
+                    flow = Some(fl);
+                    mask = Some(m);
+                    feat = Some(ft);
+                }
+                Some(fl) => {
+                    let wf0 = r.warp(f0.all(), fl.ch(0, 2))?;
+                    let wf1 = r.warp(f1.all(), fl.ch(2, 2))?;
+                    let (w0, w1, m0, ft0) = (wi0.as_ref().unwrap(), wi1.as_ref().unwrap(), mask.as_ref().unwrap(), feat.as_ref().unwrap());
+                    let inp = cat(&mut r, &[w0.all(), w1.all(), wf0.all(), wf1.all(), ts.all(), m0.all(), ft0.all()])?;
+                    let (fd, m, ft) = self.block(&mut r, blk, &inp, Some(&fl), scales[i])?;
+                    flow = Some(r.add(fl.all(), fd.all())?);
+                    mask = Some(m);
+                    feat = Some(ft);
+                }
+            }
+            let fl = flow.as_ref().unwrap();
+            wi0 = Some(r.warp(img0.all(), fl.ch(0, 2))?);
+            wi1 = Some(r.warp(img1.all(), fl.ch(2, 2))?);
+        }
+        let out = r.sigmoid_blend(wi0.as_ref().unwrap().all(), wi1.as_ref().unwrap().all(), mask.as_ref().unwrap().all())?;
+        let data = r.finish_read(&out)?;
+        Ok(Planar { c: 3, h: a.h, w: a.w, data })
     }
 }
