@@ -12,7 +12,7 @@ CACHE_SCHEMA = 3; SCALE = 4
 def list_meta(r2, prefix):
     out, tok = [], None
     while True:
-        r = r2.s3.list_objects_v2(Bucket=r2.BUCKET, Prefix=prefix, **({'ContinuationToken': tok} if tok else {}))
+        r = r2.list_page(prefix, tok) if hasattr(r2, 'list_page') else r2.s3.list_objects_v2(Bucket=r2.BUCKET, Prefix=prefix, **({'ContinuationToken': tok} if tok else {}))
         out += [(o['Key'], o['Size'], o['ETag']) for o in r.get('Contents', [])]
         if not r.get('IsTruncated'): return out
         tok = r['NextContinuationToken']
