@@ -263,7 +263,7 @@ jobs:
           cache-dependency-path: apps/desktop/package-lock.json
       - run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf ffmpeg mesa-vulkan-drivers imagemagick xvfb xdotool x11-utils
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf ffmpeg mesa-vulkan-drivers imagemagick xvfb xdotool x11-utils gdb
       - name: Build deb, rpm, AppImage
         working-directory: apps/desktop
         run: |
@@ -288,6 +288,9 @@ jobs:
             kill -0 $app
             local win; win=$(DISPLAY=:99 xdotool search --name "ClipFX Enhance" | tail -1)
             echo "window: ${win:-none}" >> "screens/$name.log"
+            if [ -z "$win" ]; then # where is the app stuck?
+              sudo gdb -p $app -batch -ex "thread apply all bt 15" 2>&1 | grep -E "^Thread|^#" | head -150 >> "screens/$name.log" || true
+            fi
             DISPLAY=:99 xwininfo -root -tree | head -40 >> "screens/$name.log"
             DISPLAY=:99 import -window root "screens/$name.png"
             kill $app; wait $app 2>/dev/null || true
@@ -298,6 +301,11 @@ jobs:
           if [ "$colours" -le 50 ]; then
             echo "--- app output and X windows"; cat screens/linux-app.log
             echo "--- app log files"; find "$HOME" -name "*.log" -path "*ClipFX*" -exec tail -40 {} \; 2>/dev/null || true
+            echo "--- kernel"; uname -r; sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone 2>&1 || true
+            # Diagnosis only: does WebKit's sandbox (user namespaces) hold the window back?
+            nosandbox=$(shot linux-app-no-sandbox WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1)
+            echo "without the WebKit sandbox (diagnosis only): $nosandbox colours"
+            grep -E "^window" screens/linux-app-no-sandbox.log || true
             # Tell a broken app from this VM's display: try without WebKit's GPU compositing.
             fallback=$(shot linux-app-no-compositing WEBKIT_DISABLE_COMPOSITING_MODE=1)
             echo "without GPU compositing: $fallback colours"
