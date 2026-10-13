@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Blend, Boxes, ChevronRight, Columns2, FolderInput, Layers, PanelRightClose, PanelRightOpen, RectangleHorizontal, Settings as Gear, Sparkles, SquareSplitHorizontal } from "lucide-react";
 
 import { Confirm, Toasts, useMenu, type MenuItem } from "./components/ui";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { api, inTauri, onFileDrop, VIDEO_EXTENSIONS } from "./lib/ipc";
 import { basename, timecode } from "./lib/format";
 import { boot, clearPipeline, playSource, refreshPresets, stopSource, closeSource, errorToast, openSource, redo, renderClip, renderStill, toast, undo, useStore, type CompareMode } from "./state/store";
@@ -242,6 +243,7 @@ export function App() {
   return (
     <div className={`app${sideOpen ? "" : " no-side"}`}>
       <TopBar presets={presets} setPresets={setPresets} />
+      <UpdateBanner />
       <Player />
       <Sidebar />
       <BottomBar />

@@ -28,6 +28,9 @@ pub struct HardwareInfo {
     pub ram_available_mb: u64,
     pub gpus: Vec<GpuInfo>,
     pub backends: Vec<BackendStatus>,
+    /// GPUs usable by the cross-vendor backend (Vulkan / DirectX 12 / Metal), best first.
+    #[serde(default)]
+    pub gpu_adapters: Vec<device::GpuAdapter>,
     pub precisions: Vec<String>,
     pub cpu_features: Vec<String>,
 }
@@ -240,6 +243,7 @@ pub fn detect() -> HardwareInfo {
         ram_available_mb: sys.available_memory() / (1 << 20),
         gpus,
         backends,
+        gpu_adapters: device::gpu_adapters(),
         precisions,
         cpu_features: cpu_features(),
     }
@@ -298,11 +302,11 @@ mod tests {
         assert!(hw.ram_total_mb > 0);
         assert!(hw.backends.iter().any(|b| b.kind == BackendKind::Cpu && b.available));
         let plat = format!("{}-{}", if hw.os == "macos" { "macos" } else { &hw.os }, if hw.arch == "x86_64" { "x64" } else { "arm64" });
-        let c = capability(&hw, &["cpu".into()], &[plat.clone()], &plat, 0);
+        let c = capability(&hw, &["cpu".into()], std::slice::from_ref(&plat), &plat, 0);
         assert!(matches!(c.level, CapabilityLevel::CpuFallbackOnly | CapabilityLevel::Supported | CapabilityLevel::CompatibleNotCertified));
         let c = capability(&hw, &["cpu".into()], &["nowhere".into()], &plat, 0);
         assert_eq!(c.level, CapabilityLevel::Unavailable);
-        let c = capability(&hw, &["cpu".into()], &[plat.clone()], &plat, u64::MAX / 2);
+        let c = capability(&hw, &["cpu".into()], std::slice::from_ref(&plat), &plat, u64::MAX / 2);
         assert_eq!(c.level, CapabilityLevel::Unavailable);
     }
 

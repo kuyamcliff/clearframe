@@ -32,7 +32,7 @@ function General({ s, patch }: { s: Settings; patch: Patch }) {
       <F label="Closing"><Check checked={s.confirm_before_quit_with_jobs} onChange={(v) => patch((x) => ({ ...x, confirm_before_quit_with_jobs: v }))} label="Ask while exports are running" /></F>
       <F label="Start dialog"><Check checked={!s.hide_start_dialog} onChange={(v) => patch((x) => ({ ...x, hide_start_dialog: !v }))} label="Show after opening a video" /></F>
       <div className="pref-h">Network</div>
-      <F label="Updates"><Check checked={s.check_updates_on_launch} onChange={(v) => patch((x) => ({ ...x, check_updates_on_launch: v }))} label="Check on launch" /></F>
+      <F label="Updates"><Check checked={s.check_updates_on_launch} onChange={(v) => patch((x) => ({ ...x, check_updates_on_launch: v }))} label="Check for updates automatically" /></F>
       <F label="Model catalog"><Check checked={s.allow_catalog_updates} onChange={(v) => patch((x) => ({ ...x, allow_catalog_updates: v }))} label="Allow signed updates" /></F>
     </div>
   );
@@ -258,8 +258,13 @@ function Performance({ s, patch }: { s: Settings; patch: Patch }) {
   const cores = h?.logical_cores ?? 8;
   const ram = h?.ram_total_mb ?? 16384;
   const devices: { value: string; label: string; disabled?: boolean }[] = [{ value: "auto", label: "Automatic" }, { value: "cpu", label: `CPU · ${h?.cpu_brand ?? ""}` }];
+  const API: Record<string, string> = { vulkan: "Vulkan", dx12: "DirectX 12", metal: "Metal" };
+  for (const a of h?.gpu_adapters ?? []) {
+    const soft = a.kind === "cpu";
+    devices.push({ value: `gpu:${a.index}`, label: `${a.name} · ${API[a.api] ?? a.api}${soft ? " (software, slow)" : ""}` });
+  }
   for (const b of h?.backends ?? []) {
-    if (b.kind === "cpu") continue;
+    if (b.kind === "cpu" || b.kind === "gpu") continue;
     const gpus = (h?.gpus ?? []).filter((g) => (b.kind === "cuda" ? /nvidia/i.test(g.vendor) : /apple|amd|intel/i.test(g.vendor) || h?.os === "macos"));
     (gpus.length ? gpus : [{ name: b.kind.toUpperCase() }]).forEach((g, i) => devices.push({ value: `${b.kind}:${i}`, label: `${g.name} · ${b.kind.toUpperCase()}${b.available ? "" : " (unavailable)"}`, disabled: !b.available }));
   }
@@ -285,7 +290,7 @@ function Performance({ s, patch }: { s: Settings; patch: Patch }) {
       <F label="When memory is low"><Select label="Memory pressure action" value={p.memory_pressure} onChange={(v) => setP((q) => ({ ...q, memory_pressure: v }))} options={[{ value: "pause", label: "Pause exports" }, { value: "continue", label: "Keep going" }]} /></F>
       <div className="pref-h">Graphics</div>
       <F label="Device"><Select label="Compute device" value={p.device} onChange={(v) => setP((q) => ({ ...q, device: v }))} options={devices} /></F>
-      {!anyGpu && <F label=""><span className="faint">No usable GPU backend in this build — CPU only.</span></F>}
+      {!anyGpu && <F label=""><span className="faint">No GPU found. Processing runs on the CPU.</span></F>}
       {anyGpu && <F label="GPU memory (MB)"><NumberInput label="GPU memory limit" value={p.vram_budget_mb} min={0} max={262144} step={256} suffix={p.vram_budget_mb === 0 ? "auto" : "MB"} onChange={(v) => setP((q) => ({ ...q, vram_budget_mb: Math.round(v) }))} /></F>}
       <F label="Out of memory"><Check checked={p.oom_tile_fallback} onChange={(v) => setP((q) => ({ ...q, oom_tile_fallback: v }))} label="Retry with smaller tiles" /></F>
       <div className="pref-h"><Activity size={11} style={{ verticalAlign: -1 }} /> Live</div>
@@ -353,10 +358,9 @@ function About() {
       <F label="Platform">{app?.os} {app?.arch}</F>
       <F label="Compute">{app?.compiled_backends.join(", ").toUpperCase()}</F>
       <F label="FFmpeg">{app?.ffmpeg ? app.ffmpeg.version : app?.ffmpeg_error}</F>
-      <F label="Licenses">Model licenses are listed per model. Third-party notices ship with the app.</F>
       <F label="Updates">
         <div className="row">
-          <button className="btn sm" onClick={() => api.checkUpdate().then((u) => setUpd(u.newer ? `${u.latest} available — ${u.url}` : "Up to date")).catch((e) => setUpd(e instanceof Error ? e.message : String(e)))}>Check now</button>
+          <button className="btn sm" onClick={() => api.checkUpdate().then((u) => { useStore.setState({ update: u.newer ? u : null }); setUpd(u.newer ? `${u.latest} is available` : "Up to date"); }).catch((e) => setUpd(e instanceof Error ? e.message : String(e)))}>Check now</button>
           {upd && <span className="muted selectable">{upd}</span>}
         </div>
       </F>

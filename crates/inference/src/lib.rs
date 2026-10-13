@@ -6,6 +6,8 @@ pub mod arch;
 pub mod device;
 pub mod face;
 pub mod fastconv;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 pub mod image;
 pub mod model;
 pub mod ops;

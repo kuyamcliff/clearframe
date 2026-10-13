@@ -122,6 +122,8 @@ pub struct ImageModel {
     dtype: DType,
     pub tile: usize,
     pub tile_pad: usize,
+    #[cfg(feature = "gpu")]
+    gpu: Option<(std::sync::Arc<crate::gpu::Gpu>, crate::gpu::nets::GpuNet)>,
 }
 
 fn convert_weights(w: &Weights, dtype: DType) -> Result<Weights> {
@@ -143,7 +145,63 @@ impl ImageModel {
             other => candle_core::bail!("{} is not an image-to-image model", other.id()),
         };
         let (tile, tile_pad) = arch.default_tiling();
-        Ok(Self { net, arch, device, dtype, tile, tile_pad })
+        Ok(Self {
+            net,
+            arch,
+            device,
+            dtype,
+            tile,
+            tile_pad,
+            #[cfg(feature = "gpu")]
+            gpu: None,
+        })
+    }
+
+    /// Run this model on a GPU (any vendor) instead of the CPU, with tiles as large as the
+    /// GPU accepts.
+    #[cfg(feature = "gpu")]
+    pub fn use_gpu(&mut self, gpu: std::sync::Arc<crate::gpu::Gpu>) -> Result<()> {
+        self.use_gpu_with_budget(gpu, 0)
+    }
+
+    /// Like [`use_gpu`](Self::use_gpu), keeping one tile's working memory within
+    /// `vram_budget_mb` of video memory (0 = no limit beyond what the GPU allows).
+    #[cfg(feature = "gpu")]
+    pub fn use_gpu_with_budget(&mut self, gpu: std::sync::Arc<crate::gpu::Gpu>, vram_budget_mb: u64) -> Result<()> {
+        use crate::gpu::nets::*;
+        let err = |e: String| candle_core::Error::Msg(format!("GPU: {e}"));
+        let net = match &self.net {
+            ImageNet::SrVgg(n) => GpuNet::SrVgg(GSrVgg::new(&gpu, n).map_err(err)?),
+            ImageNet::Rrdb(n) => GpuNet::Rrdb(Box::new(GRrdb::new(&gpu, n).map_err(err)?)),
+            ImageNet::Ffd(n) => GpuNet::Ffd(GFfd::new(&gpu, n).map_err(err)?),
+            ImageNet::Dru(n) => GpuNet::Dru(Box::new(GDru::new(&gpu, n).map_err(err)?)),
+            ImageNet::Naf(n) => GpuNet::Naf(Box::new(GNaf::new(&gpu, n).map_err(err)?)),
+        };
+        // Big tiles keep the GPU busy and cut per-tile overhead, so start from 2048 px (a
+        // whole 1080p frame in one pass for most models) and shrink until the largest tensor
+        // fits in one GPU buffer and, with a budget, the working set (about 4x the largest
+        // tensor) fits in the allowed video memory.
+        let limit = gpu.max_binding;
+        let budget = if vram_budget_mb > 0 { vram_budget_mb << 20 } else { u64::MAX };
+        let mut t = 2048usize;
+        while t > 64 && {
+            let big = net.largest_tensor_bytes(t + 2 * self.tile_pad, t + 2 * self.tile_pad);
+            big > limit || big.saturating_mul(4) > budget
+        } {
+            t = t * 7 / 8;
+        }
+        self.tile = t;
+        self.gpu = Some((gpu, net));
+        Ok(())
+    }
+
+    /// Name of the GPU this model runs on, if any.
+    pub fn gpu_name(&self) -> Option<String> {
+        #[cfg(feature = "gpu")]
+        if let Some((g, _)) = &self.gpu {
+            return Some(g.info.name.clone());
+        }
+        None
     }
 
     /// Output scale factor relative to input.
@@ -164,9 +222,22 @@ impl ImageModel {
 
     /// Run the network on a single crop (no tiling).
     pub fn run(&self, img: &RgbImage, p: &ImageParams) -> Result<RgbImage> {
+        let (y, padded) = self.run_raw(img, p)?;
+        self.finish(y, img, &padded)
+    }
+
+    /// The network output before clamping and cropping (used by parity tests).
+    #[doc(hidden)]
+    pub fn run_raw(&self, img: &RgbImage, p: &ImageParams) -> Result<(candle_core::Tensor, RgbImage)> {
         let m = self.pad_multiple();
         let padded = pad_to_multiple(img, m);
         let x = padded.to_tensor(&self.device, self.dtype)?;
+        #[cfg(feature = "gpu")]
+        if let Some((gpu, net)) = &self.gpu {
+            let x = if self.dtype == DType::F32 { x.clone() } else { x.to_dtype(DType::F32)? };
+            let y = net.forward(gpu, &x, p.noise_sigma).map_err(|e| candle_core::Error::Msg(format!("GPU: {e}")))?;
+            return Ok((y, padded));
+        }
         let y = match &self.net {
             ImageNet::SrVgg(n) => n.forward(&x)?,
             ImageNet::Rrdb(n) => n.forward(&x)?,
@@ -174,6 +245,10 @@ impl ImageModel {
             ImageNet::Dru(n) => n.forward(&x, p.noise_sigma)?,
             ImageNet::Naf(n) => n.forward(&x)?,
         };
+        Ok((y, padded))
+    }
+
+    fn finish(&self, y: candle_core::Tensor, img: &RgbImage, padded: &RgbImage) -> Result<RgbImage> {
         let y = y.clamp(0f32, 1f32)?;
         let s = self.scale();
         let y = if padded.width != img.width || padded.height != img.height { y.narrow(2, 0, img.height * s)?.narrow(3, 0, img.width * s)? } else { y };

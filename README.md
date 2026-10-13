@@ -1,15 +1,19 @@
 <div align="center">
 
-<a href="https://www.clipfx.me/a/c8DN7xPn"><img src="docs/media/hero.jpg" alt="ClipFX Enhance: free AI video enhancer" width="100%"></a>
+<a href="https://www.clipfx.me/a/LFeCDUGg"><img src="docs/media/hero.jpg" alt="ClipFX Enhance: free AI video enhancer" width="100%"></a>
 
 <h1>ClipFX Enhance</h1>
 
 <p><b>Upscale, denoise, deblur and restore video with AI, right on your own computer.</b><br>
 Free and open source. No account, no subscription, no cloud.</p>
 
-<a href="https://www.clipfx.me/a/c8DN7xPn"><img src="docs/media/btn-download.svg" alt="Download for Windows" height="52"></a>&nbsp;&nbsp;<a href="https://www.clipfx.me/a/c8DN7xPn"><img src="docs/media/btn-video.svg" alt="Watch the trailer" height="52"></a>
+<a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/ClipFX-Enhance-windows-x64-setup.exe"><img src="docs/media/btn-windows.svg" alt="Download for Windows" height="48"></a>&nbsp;
+<a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/ClipFX-Enhance-macos-universal.dmg"><img src="docs/media/btn-macos.svg" alt="Download for macOS" height="48"></a>&nbsp;
+<a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/ClipFX-Enhance-linux-x86_64.AppImage"><img src="docs/media/btn-linux.svg" alt="Download for Linux" height="48"></a>
 
-<sub>Windows 10/11 (x64) · 96 MB installer · FFmpeg included · Linux: <a href="docs/guide.md#install">deb / AppImage from source</a></sub>
+<a href="https://www.clipfx.me/a/LFeCDUGg"><img src="docs/media/btn-video.svg" alt="Watch the trailer" height="48"></a>
+
+<sub>Windows 10/11 x64 · macOS 11+ (Apple Silicon and Intel) · Linux x64 (<a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/clipfx-enhance-linux-amd64.deb">.deb</a> · <a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/clipfx-enhance-linux-x86_64.rpm">.rpm</a> · <a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/ClipFX-Enhance-linux-x86_64.AppImage">AppImage</a>) · <a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest">all downloads</a><br>Also on <b>clipfx.me</b>: <a href="https://www.clipfx.me/a/LFeCDUGg">Windows</a> · <a href="https://www.clipfx.me/a/Scn6uqeP">macOS</a> · <a href="https://www.clipfx.me/a/AZwabs2e">Linux</a></sub>
 
 <br><br>
 
@@ -19,7 +23,7 @@ Free and open source. No account, no subscription, no cloud.</p>
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/media/app-models.jpg" alt="Models"><p align="center"><sub><b>Models.</b> Pick one, install it with one click, and see its license first.</sub></p></td>
+    <td width="50%"><img src="docs/media/app-models.jpg" alt="Models"><p align="center"><sub><b>Models.</b> Pick one, see the hardware it needs, and install it with one click.</sub></p></td>
     <td width="50%"><img src="docs/media/app-presets.jpg" alt="Presets"><p align="center"><sub><b>Presets.</b> Start from a recipe or save your own.</sub></p></td>
   </tr>
   <tr>
@@ -44,12 +48,26 @@ Stack as many steps as you like, preview any moment against the original, and ex
 
 ## Get started
 
-1. **[Download](https://www.clipfx.me/a/c8DN7xPn)** and run the installer.
+1. **Download** for your system above and install it. FFmpeg is included on Windows and macOS.
 2. Drop a video in, turn on **Enhancement**, and install the model it suggests.
 3. Press **Render frame** to preview, then **Export**.
 
+The app tells you when an update is out. On Windows and Linux it installs with one click, and on Windows only the app itself (a few MB) is downloaded.
+
+<details>
+<summary><b>First launch on macOS</b></summary>
+
+The app isn't notarized by Apple, which needs a paid developer account, so macOS asks before the first launch. Drag **ClipFX Enhance** to Applications and open it once. Then go to **System Settings → Privacy & Security**, click **Open Anyway**, and confirm.
+</details>
+
+<details>
+<summary><b>Linux</b></summary>
+
+The `.deb` (Debian, Ubuntu, Mint) and `.rpm` (Fedora, openSUSE) packages install FFmpeg from your distribution. For the AppImage, install `ffmpeg` with your package manager, then run `chmod +x ClipFX-Enhance-linux-x86_64.AppImage` and open it.
+</details>
+
 > [!NOTE]
-> This build runs AI models on the CPU. A short 360p clip upscaled 4× takes minutes; long or high-resolution videos take much longer. GPU support is in progress. See [known limitations](docs/limitations.md).
+> Upscaling, denoising and deblurring run on your GPU (NVIDIA, AMD, Intel or Apple, through Vulkan, DirectX 12 or Metal). Frame interpolation and face recovery still use the CPU. Without a GPU, AI processing is slow. See [known limitations](docs/limitations.md).
 
 ## Build from source
 

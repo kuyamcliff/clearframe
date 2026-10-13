@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Cursor;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
@@ -53,7 +53,7 @@ pub struct StillResult {
 /// Convert packed RGB48 to an 8-bit PNG.
 pub fn raw_to_png(f: &RawFrame) -> Result<Vec<u8>> {
     let mut rgb8 = Vec::with_capacity(f.width * f.height * 3);
-    for c in f.data.chunks_exact(2) {
+    for c in f.data.as_chunks::<2>().0 {
         let v = u16::from_le_bytes([c[0], c[1]]);
         rgb8.push(((v as u32 + 128) / 257).min(255) as u8);
     }
@@ -75,11 +75,12 @@ fn crop_raw(f: &RawFrame, x: u32, y: u32, w: u32, h: u32) -> RawFrame {
     RawFrame { width: w, height: h, data }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn decode_at(
     tools: &FfmpegTools,
     info: &MediaInfo,
     plan: &ExecutionPlan,
-    source: &PathBuf,
+    source: &Path,
     time: f64,
     filters: Vec<String>,
     fmt: &plan::Format,
@@ -87,7 +88,7 @@ fn decode_at(
 ) -> Result<Vec<RawFrame>> {
     let v = info.video()?;
     let tags = ColorTags::from_stream(v);
-    let mut d = DecodeSpec::new(source.clone(), fmt.width as usize, fmt.height as usize);
+    let mut d = DecodeSpec::new(source.to_path_buf(), fmt.width as usize, fmt.height as usize);
     d.stream_index = Some(v.index);
     d.filters = filters;
     d.cfr = plan.cfr_conversion;
@@ -124,7 +125,7 @@ pub fn render_still(tools: &FfmpegTools, info: &MediaInfo, req: &StillRequest, l
     let pass = &plan.passes[0];
     let needs_pair = req.pipeline.enabled().any(|s| matches!(s.op, Operation::Interpolate(_)));
     let n_frames = if needs_pair { 2 } else { 1 };
-    let (_, dev) = crate::runner::select_device(&req.resources, &req.engine).map_err(|e| anyhow!(e))?;
+    let compute = crate::runner::select_compute(&req.resources, &req.engine).map_err(|e| anyhow!(e))?;
     let enabled: Vec<&Stage> = req.pipeline.enabled().collect();
     let mut procs: Vec<Timed> = Vec::new();
     for seg in &pass.segments {
@@ -132,7 +133,7 @@ pub fn render_still(tools: &FfmpegTools, info: &MediaInfo, req: &StillRequest, l
             Segment::Native { stage } => {
                 let sp = &plan.stages[*stage];
                 procs.push(Timed {
-                    inner: build_native(&enabled[sp.index].op, sp, &req.models, &dev, req.engine.precision, &req.resources)?,
+                    inner: build_native(&enabled[sp.index].op, sp, &req.models, &compute, req.engine.precision, &req.resources)?,
                     seconds: 0.0,
                     stage_id: sp.stage_id.clone(),
                 });

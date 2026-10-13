@@ -256,7 +256,6 @@ pub fn parse_probe_json(path: &str, json: &str, first_frame_json: Option<&str>) 
                                             let (a, b) = (a.parse::<f64>().ok()?, b.parse::<f64>().ok()?);
                                             Some(a / b)
                                         })
-                                        .map(|x| x)
                                         .unwrap_or(0.0) as i64
                                 };
                                 let c = |k: &str, scale: f64| -> i64 {
@@ -345,7 +344,7 @@ pub fn probe(tools: &FfmpegTools, path: &Path) -> Result<MediaInfo, MediaError> 
 }
 
 /// Decide whether presentation timestamps are irregular. Returns (is_vfr, average rate).
-pub fn analyse_timestamps(ts: &mut Vec<f64>) -> Option<(bool, Rational)> {
+pub fn analyse_timestamps(ts: &mut [f64]) -> Option<(bool, Rational)> {
     if ts.len() < 8 {
         return None;
     }

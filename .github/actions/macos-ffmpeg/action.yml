@@ -1,0 +1,23 @@
+name: FFmpeg for macOS
+description: >
+  Builds the app's FFmpeg (packaging/macos/build-ffmpeg.sh) into apps/desktop/src-tauri/ffmpeg,
+  reusing a cached build when the script hasn't changed, and puts it on PATH.
+runs:
+  using: composite
+  steps:
+    - id: cache
+      uses: actions/cache@v4
+      with:
+        path: apps/desktop/src-tauri/ffmpeg
+        key: macos-ffmpeg-${{ hashFiles('packaging/macos/build-ffmpeg.sh') }}
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        brew install nasm meson ninja autoconf automake libtool
+        ./packaging/macos/build-ffmpeg.sh
+    - shell: bash
+      run: |
+        dir="$PWD/apps/desktop/src-tauri/ffmpeg"
+        "$dir/ffmpeg" -hide_banner -version | head -1
+        echo "CLIPFX_FFMPEG_DIR=$dir" >> "$GITHUB_ENV"
+        echo "$dir" >> "$GITHUB_PATH"

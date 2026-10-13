@@ -3,11 +3,18 @@
 These are the limits of the current release, stated plainly.
 
 ## Performance
-- **CPU-only by default.** Release builds run models on the CPU, and AI upscaling on a CPU is
-  slow. Measured on a 4-thread Xeon (2.8 GHz, AVX-512) with the Balanced mode's 3 threads:
-  Real-ESRGAN AnimeVideo v3 (the lightest upscaler) takes **about 3 s per 640×360 frame**
-  (4× to 2560×1440). Larger models (x4plus, DRUNet) and larger inputs scale up from there.
-  GPU builds (`cuda`, `metal` features) exist in code but are untested.
+- **GPU support covers the image models only.** Upscaling (Real-ESRGAN), denoising
+  (FFDNet, DRUNet) and deblurring (NAFNet) run on any GPU through Vulkan, DirectX 12 or
+  Metal. Frame interpolation (RIFE) and face recovery (GFPGAN) still run on the CPU.
+- **GPU speed has not been measured on real graphics cards yet.** Correctness is tested
+  on every graphics API in CI (Mesa lavapipe for Vulkan, Microsoft WARP for DirectX 12 and
+  Apple's GPU for Metal) by comparing against the CPU path, but those test devices are
+  software or virtual, so they say nothing about speed. The kernels are hand-written and
+  not yet tuned (no FP16, no tensor cores).
+- **Without a GPU, AI processing is slow.** Measured on a 4-thread Xeon (2.8 GHz, AVX-512)
+  with the Balanced mode's 3 threads: Real-ESRGAN AnimeVideo v3 (the lightest upscaler)
+  takes **about 3 s per 640×360 frame** (4× to 2560×1440). Software GPU drivers (shown as
+  "software, slow") are never picked automatically because they are slower than the CPU path.
 - Memory budgets are targets. The operating system can still swap under pressure. The app
   pauses exports when free memory runs low, if that option is on (it is by default).
 - GPU utilisation is measured only for NVIDIA cards, through `nvidia-smi`. Other GPUs show

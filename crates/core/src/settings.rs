@@ -148,7 +148,7 @@ impl Default for Settings {
             notifications: true,
             inspector_mode_advanced: false,
             confirm_before_quit_with_jobs: true,
-            check_updates_on_launch: false,
+            check_updates_on_launch: true,
             allow_catalog_updates: false,
             onboarding_complete: false,
             shortcuts: default_shortcuts(),
@@ -220,7 +220,7 @@ pub struct Performance {
     pub memory_pressure: MemoryPressureAction,
     /// Run more than one job at a time when the budget allows.
     pub max_concurrent_jobs: u32,
-    /// Compute device: "auto", "cpu", "cuda:0", "metal:0".
+    /// Compute device: "auto", "cpu", "gpu:0" (any GPU via Vulkan/DX12/Metal), "cuda:0", "metal:0".
     pub device: String,
     /// Limit for GPU memory used by models (MB, 0 = automatic).
     pub vram_budget_mb: u64,
@@ -231,11 +231,13 @@ pub struct Performance {
 impl Default for Performance {
     fn default() -> Self {
         Self {
-            mode: PerformanceMode::Balanced,
+            // Use the machine fully by default: every core but one at normal priority (so the
+            // window stays responsive) and most of the memory. Maximum uses every core.
+            mode: PerformanceMode::HighPerformance,
             cpu_threads: 0,
             reserve_cpu_threads: 2,
-            priority: ProcessPriority::BelowNormal,
-            memory_preset: MemoryPreset::Balanced,
+            priority: ProcessPriority::Normal,
+            memory_preset: MemoryPreset::PrioritizeApp,
             memory_budget_mb: 8192,
             memory_pressure: MemoryPressureAction::Pause,
             max_concurrent_jobs: 1,
@@ -284,11 +286,15 @@ impl Performance {
                 (t, self.priority)
             }
         };
+        let balanced_reserve = (ram_mb / 4).max(4096.min(ram_mb / 2));
         let reserve = match self.memory_preset {
             MemoryPreset::MoreForOthers => ram_mb / 2,
-            MemoryPreset::Balanced => (ram_mb / 4).max(4096.min(ram_mb / 2)),
+            MemoryPreset::Balanced => balanced_reserve,
             MemoryPreset::PrioritizeApp => 2048.min(ram_mb / 4),
-            MemoryPreset::Custom => ram_mb.saturating_sub(self.memory_budget_mb),
+            // A small budget means "use less", not "keep everything else free": without the
+            // cap, 600 MB on an 8 GB machine would pause jobs whenever less than ~3.7 GB
+            // was free and never resume them.
+            MemoryPreset::Custom => ram_mb.saturating_sub(self.memory_budget_mb).min(balanced_reserve),
         };
         let budget = match self.memory_preset {
             MemoryPreset::Custom => self.memory_budget_mb.min(ram_mb).max(512),
@@ -333,7 +339,7 @@ impl Settings {
         self.performance.max_concurrent_jobs = self.performance.max_concurrent_jobs.clamp(1, 8);
         self.performance.memory_budget_mb = self.performance.memory_budget_mb.clamp(512, 4 << 20);
         let d = self.performance.device.trim().to_ascii_lowercase();
-        let valid = d == "auto" || d == "cpu" || ["cuda:", "metal:"].iter().any(|p| d.strip_prefix(p).is_some_and(|n| n.parse::<u32>().is_ok()));
+        let valid = d == "auto" || d == "cpu" || ["gpu:", "cuda:", "metal:"].iter().any(|p| d.strip_prefix(p).is_some_and(|n| n.parse::<u32>().is_ok()));
         self.performance.device = if valid { d } else { "auto".into() };
         self.segment_seconds = self.segment_seconds.clamp(2.0, 120.0);
         if self.naming_template.trim().is_empty() || self.naming_template.len() > 200 {
@@ -382,7 +388,10 @@ mod tests {
 
     #[test]
     fn performance_modes() {
-        let mut p = Performance::default();
+        // Out of the box the app uses all but one thread and nearly all memory.
+        let r = Performance::default().resolve(16, 32768);
+        assert_eq!((r.threads, r.priority, r.memory_budget_mb), (15, ProcessPriority::Normal, 32768 - 2048));
+        let mut p = Performance { mode: PerformanceMode::Balanced, memory_preset: MemoryPreset::Balanced, ..Performance::default() };
         let r = p.resolve(16, 32768);
         assert_eq!(r.threads, 12);
         assert_eq!(r.priority, ProcessPriority::BelowNormal);
@@ -398,7 +407,14 @@ mod tests {
         p.memory_preset = MemoryPreset::Custom;
         p.memory_budget_mb = 6000;
         let r = p.resolve(8, 16000);
-        assert_eq!((r.threads, r.memory_budget_mb, r.reserve_memory_mb), (4, 6000, 10000));
+        assert_eq!((r.threads, r.memory_budget_mb, r.reserve_memory_mb), (4, 6000, 4096));
+        // A small custom budget must not demand that nearly all memory stays free.
+        p.memory_budget_mb = 600;
+        let r = p.resolve(8, 7168);
+        assert_eq!((r.memory_budget_mb, r.reserve_memory_mb), (600, 3584));
+        // A budget close to all RAM still leaves what's outside it.
+        p.memory_budget_mb = 15000;
+        assert_eq!(p.resolve(8, 16000).reserve_memory_mb, 1000);
         assert_eq!(Performance::default().resolve(1, 2048).threads, 1);
         let s = Settings::from_json(r#"{"performance":{"device":"rm -rf"}}"#).unwrap();
         assert_eq!(s.performance.device, "auto");

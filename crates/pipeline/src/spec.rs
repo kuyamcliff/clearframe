@@ -772,14 +772,11 @@ mod tests {
 
     #[test]
     fn bounds_rejected() {
-        let mut g = GrainSettings::default();
-        g.strength = 5.0;
+        let g = GrainSettings { strength: 5.0, ..Default::default() };
         assert!(Operation::Grain(g).validate().is_err());
-        let mut i = InterpolateSettings::default();
-        i.slow_motion = 0.5;
+        let i = InterpolateSettings { slow_motion: 0.5, ..Default::default() };
         assert!(Operation::Interpolate(i).validate().is_err());
-        let mut e = EnhanceSettings::default();
-        e.strength = f32::NAN;
+        let e = EnhanceSettings { strength: f32::NAN, ..Default::default() };
         assert!(Operation::Enhance(e).validate().is_err());
         let dup = Pipeline { stages: vec![Stage { id: "x".into(), enabled: true, op: Operation::Grain(GrainSettings::default()) }; 2] };
         assert!(dup.validate().is_err());

@@ -105,6 +105,30 @@ function Uninstall({ c, onClose }: { c: ModelCard; onClose: () => void }) {
   );
 }
 
+const TIER: Record<string, { speed: string; vram: number; ram: number }> = {
+  light: { speed: "Fast", vram: 2, ram: 8 },
+  medium: { speed: "Medium", vram: 4, ram: 16 },
+  heavy: { speed: "Slow · highest quality", vram: 6, ram: 16 },
+};
+
+/** Recommended hardware, derived from the model's measured memory use and speed tier. */
+function Recommended({ m }: { m: ModelCard["manifest"] & object }) {
+  const t = TIER[m.performance_tier] ?? TIER.medium;
+  const minRam = Math.max(1, Math.round(m.minimum_ram_bytes / 2 ** 30));
+  const gpu = m.backends.includes("gpu");
+  return (
+    <div>
+      <div className="faint" style={{ fontSize: 11, marginBottom: 4 }}>Recommended hardware</div>
+      <dl className="kv">
+        <dt>GPU</dt><dd>{gpu ? `${t.vram} GB+ video memory · NVIDIA, AMD, Intel or Apple` : "Not used yet · runs on the CPU"}</dd>
+        <dt>Memory</dt><dd>{Math.max(t.ram, minRam)} GB RAM · {minRam} GB minimum</dd>
+        <dt>CPU</dt><dd>{gpu ? "Any 64-bit CPU" : "8+ cores for good speed"}</dd>
+        <dt>Disk</dt><dd>{bytes(m.installed_size_bytes)}</dd>
+      </dl>
+    </div>
+  );
+}
+
 function Detail({ c }: { c: ModelCard }) {
   const [uninstall, setUninstall] = useState(false);
   const m = c.manifest;
@@ -112,7 +136,7 @@ function Detail({ c }: { c: ModelCard }) {
     <div className="detail" data-testid="model-detail">
       <div>
         <div style={{ fontSize: 14 }}>{cardName(c)}</div>
-        <div className="faint">{m ? `${m.publisher} · v${m.version}` : "Custom import"}</div>
+        <div className="faint">{m ? `v${m.version}` : "Custom import"}</div>
       </div>
       <Actions c={c} onUninstall={() => setUninstall(true)} />
       {c.state === "missing" && <div className="issue err">Folder deleted or moved outside the app. Nothing is downloaded until you choose Reinstall.</div>}
@@ -121,27 +145,15 @@ function Detail({ c }: { c: ModelCard }) {
       {m && <p className="muted" style={{ fontSize: 11.5, fontWeight: 400 }}>{m.summary}</p>}
       {m && (
         <dl className="kv">
-          <dt>Scale</dt><dd>{m.scale}× · {m.architecture}</dd>
+          <dt>Speed</dt><dd>{TIER[m.performance_tier]?.speed ?? m.performance_tier}</dd>
+          {m.scale > 1 && <><dt>Upscale</dt><dd>{m.scale}×</dd></>}
           <dt>Download</dt><dd>{bytes(m.download_size_bytes)}</dd>
-          <dt>On disk</dt><dd>{bytes(c.disk_bytes || m.installed_size_bytes)}</dd>
-          <dt>RAM</dt><dd>{Math.round(m.minimum_ram_bytes / 2 ** 30)} GB minimum</dd>
           <dt>This PC</dt><dd>{c.capability.reason}</dd>
         </dl>
       )}
+      {m && <Recommended m={m} />}
       {m && m.best_for.length > 0 && <div><div className="faint" style={{ fontSize: 11, marginBottom: 4 }}>Good for</div><ul className="bullets">{m.best_for.map((x) => <li key={x}>{x}</li>)}</ul></div>}
       {m && m.weaknesses.length > 0 && <div><div className="faint" style={{ fontSize: 11, marginBottom: 4 }}>Limitations</div><ul className="bullets">{m.weaknesses.map((x) => <li key={x}>{x}</li>)}</ul></div>}
-      {m && (
-        <dl className="kv">
-          <dt>Weights</dt><dd>{m.weights_license}</dd>
-          <dt>Code</dt><dd>{m.code_license}</dd>
-          <dt>Commercial</dt><dd className={m.commercial_use_allowed ? "ok" : "warn"}>{m.commercial_use_allowed ? "Allowed" : "Not allowed / unclear"}</dd>
-          <dt>Source</dt><dd className="path">{m.source_repository}</dd>
-          <dt>Training</dt><dd>{m.training_data}</dd>
-          <dt>Reviewed</dt><dd>{m.provenance_reviewed_at}</dd>
-          {m.license_notes && <><dt>Notes</dt><dd className="muted">{m.license_notes}</dd></>}
-        </dl>
-      )}
-      {c.installed?.custom_info && <dl className="kv"><dt>License</dt><dd>{c.installed.custom_info.license}</dd><dt>From</dt><dd className="path">{c.installed.custom_info.source}</dd></dl>}
       {c.path && <dl className="kv"><dt>Folder</dt><dd className="path">{c.path}</dd></dl>}
       {uninstall && <Uninstall c={c} onClose={() => setUninstall(false)} />}
     </div>
@@ -151,13 +163,12 @@ function Detail({ c }: { c: ModelCard }) {
 function ImportDialog({ onClose }: { onClose: () => void }) {
   const [file, setFile] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [license, setLicense] = useState("");
   const [busy, setBusy] = useState(false);
   const go = async () => {
     if (!file) return;
     setBusy(true);
     try {
-      await api.modelImportCustom(name.trim(), license.trim(), file);
+      await api.modelImportCustom(name.trim(), "Unspecified", file);
       toast("success", `Imported ${name}`);
       await refreshModels();
       onClose();
@@ -166,7 +177,7 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog title="Import upscaling model" onClose={onClose} footer={<>
       <button className="btn ghost" onClick={onClose}>Cancel</button>
-      <button className="btn primary" disabled={!file || !name.trim() || !license.trim() || busy} onClick={go}>{busy ? "Testing…" : "Import"}</button>
+      <button className="btn primary" disabled={!file || !name.trim() || busy} onClick={go}>{busy ? "Testing…" : "Import"}</button>
     </>}>
       <div className="prefs" style={{ gap: 10 }}>
         <F label="Weights (.pth, .safetensors)">
@@ -179,7 +190,6 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
           </div>
         </F>
         <F label="Name" htmlFor="im-n"><input id="im-n" className="input" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} /></F>
-        <F label="License" htmlFor="im-l"><input id="im-l" className="input" value={license} maxLength={200} placeholder="e.g. BSD-3-Clause" onChange={(e) => setLicense(e.target.value)} /></F>
       </div>
     </Dialog>
   );

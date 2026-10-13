@@ -10,6 +10,20 @@ use tauri::{Emitter, Manager};
 
 use clearframe_app::{App, AppEvent, WorkerCommand};
 
+/// GPU adapters and a small GPU-vs-CPU computation check for `--self-test`.
+fn gpu_report() -> serde_json::Value {
+    let adapters = clearframe_inference::device::gpu_adapters();
+    let check = if adapters.is_empty() {
+        serde_json::json!({ "error": "no GPU adapter" })
+    } else {
+        match clearframe_inference::gpu::self_check(0) {
+            Ok(c) => serde_json::json!(c),
+            Err(e) => serde_json::json!({ "error": e }),
+        }
+    };
+    serde_json::json!({ "adapters": adapters, "check": check })
+}
+
 fn main() {
     // The installed executable doubles as the isolated processing worker.
     let args: Vec<String> = std::env::args().collect();
@@ -39,7 +53,7 @@ fn main() {
                         .iter()
                         .all(|d| std::fs::create_dir_all(d).is_ok() && clearframe_core::fsutil::ensure_writable_dir(d, false).is_ok());
                     let ffmpeg = t.as_ref().map(|t| serde_json::json!({ "version": t.version, "path": t.ffmpeg, "source": t.source, "vidstab": t.has_filter("vidstabdetect"), "zscale": t.has_filter("zscale") }));
-                    serde_json::json!({ "ok": writable, "version": env!("CARGO_PKG_VERSION"), "exe": std::env::current_exe().ok(), "paths": p, "folders_writable": writable, "ffmpeg": ffmpeg, "ffmpeg_error": e, "models": a.model_cards().iter().filter(|c| c.status.installed.is_some()).count() })
+                    serde_json::json!({ "ok": writable, "version": env!("CARGO_PKG_VERSION"), "exe": std::env::current_exe().ok(), "paths": p, "folders_writable": writable, "ffmpeg": ffmpeg, "ffmpeg_error": e, "models": a.model_cards().iter().filter(|c| c.status.installed.is_some()).count(), "gpu": gpu_report() })
                 }
                 Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
             };

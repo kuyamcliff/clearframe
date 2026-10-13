@@ -270,6 +270,7 @@ impl EncodeSpec {
             if self.color.full_range { "pc" } else { "tv" }
         ));
         vf.push(format!("format={}", self.video.pix_fmt));
+        vf.push(self.color.setparams_filter());
         if let Some(sar) = &self.sar {
             vf.push(format!("setsar={}", sar.replace(':', "/")));
         }

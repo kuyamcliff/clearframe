@@ -22,7 +22,7 @@ impl RgbImage {
 
     /// Build from packed little-endian RGB48 bytes.
     pub fn from_rgb48le(width: usize, height: usize, bytes: &[u8]) -> Self {
-        let data = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]) as f32 / 65535.0).collect();
+        let data = bytes.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c) as f32 / 65535.0).collect();
         Self::from_data(width, height, data)
     }
 

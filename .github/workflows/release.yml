@@ -1,0 +1,243 @@
+name: Release
+
+# Builds and publishes a release for Windows, macOS and Linux, plus the signed update.json that
+# installed apps read to find the small update package for their platform.
+#
+# Start it by pushing a tag like v1.1.0 (matching the version in Cargo.toml), by running the
+# workflow by hand, or by pushing a commit whose message contains "[release]"; in the last two
+# cases the v<version> tag is created on that commit when the release is published.
+on:
+  push:
+    tags: ["v*"]
+    branches: ["main", "ccr-**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# A newer release commit replaces one that is still building.
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_VERSION: "1.99.0"
+
+jobs:
+  version:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]')
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: Version is consistent and not yet released
+        run: |
+          app=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version *= *"\(.*\)"/\1/p' Cargo.toml)
+          ui=$(python3 -c "import json; print(json.load(open('apps/desktop/src-tauri/tauri.conf.json'))['version'])")
+          [ "$app" = "$ui" ] || { echo "Cargo.toml ($app) and tauri.conf.json ($ui) disagree"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            [ "${GITHUB_REF_NAME#v}" = "$app" ] || { echo "tag $GITHUB_REF_NAME does not match version $app"; exit 1; }
+          elif git ls-remote --exit-code --tags origin "refs/tags/v$app" >/dev/null; then
+            echo "v$app is already released; bump the version first"; exit 1
+          fi
+          echo "version=$app" >> "$GITHUB_OUTPUT"
+          echo "tag=v$app" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: version
+    runs-on: windows-2022
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        shell: bash
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Bundle FFmpeg
+        shell: pwsh
+        run: ./packaging/windows/fetch-ffmpeg.ps1
+      - name: Full installer
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npx tauri build --bundles nsis
+      - name: App-only update installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          Copy-Item $setup.FullName "dist/ClipFX-Enhance-windows-x64-setup.exe"
+          $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path $nsis)) { choco install nsis -y --no-progress; $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
+          & $nsis -V2 "-DVERSION=$env:VERSION" "-DAPP_EXE=$((Resolve-Path target/release/ClipFXEnhance.exe).Path)" "-DOUT=$((Resolve-Path dist).Path)\ClipFX-Enhance-windows-x64-update.exe" packaging/windows/update.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
+          Get-ChildItem dist | Format-Table Name, Length
+      - name: Install, apply the update, self-test
+        shell: pwsh
+        run: |
+          Start-Process -FilePath "dist/ClipFX-Enhance-windows-x64-setup.exe" -ArgumentList "/S" -Wait
+          $dir = Join-Path $env:ProgramFiles "ClipFX Enhance"
+          $p = Start-Process -FilePath "dist/ClipFX-Enhance-windows-x64-update.exe" -ArgumentList @("/S", "/D=$dir") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "update installer exited with $($p.ExitCode)" }
+          Start-Sleep -Seconds 5
+          Get-Process ClipFXEnhance -ErrorAction SilentlyContinue | Stop-Process -Force
+          $st = Join-Path $env:RUNNER_TEMP "selftest.json"
+          $r = Start-Process -FilePath (Join-Path $dir "ClipFXEnhance.exe") -ArgumentList @("--self-test", "`"$st`"") -Wait -PassThru
+          $report = Get-Content $st -Raw
+          Write-Host $report
+          if ($r.ExitCode -ne 0) { throw "self-test failed" }
+          $json = $report | ConvertFrom-Json
+          if ($json.version -ne $env:VERSION) { throw "installed version is $($json.version), expected $env:VERSION" }
+          if (-not ($json.ffmpeg.vidstab -and $json.ffmpeg.zscale)) { throw "bundled FFmpeg lacks stabilization or HDR" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist
+
+  macos:
+    needs: version
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain (Apple Silicon and Intel)
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal --target aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: FFmpeg (universal, bundled into the app)
+        uses: ./.github/actions/macos-ffmpeg
+      - name: Universal app and disk image
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npx tauri build --target universal-apple-darwin --bundles app,dmg
+      - name: Self-test on Apple Silicon and Intel (Rosetta)
+        run: |
+          app=$(find target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
+          bin=$(find "$app/Contents/MacOS" -type f -perm +111 | head -1)
+          lipo -info "$bin"
+          lipo -info "$app/Contents/Resources/ffmpeg/ffmpeg"
+          check='import json,sys; d=json.load(open(sys.argv[1])); f=d["ffmpeg"]; assert d["ok"] and f["vidstab"] and f["zscale"] and ".app/Contents/" in f["path"] and "/Resources/ffmpeg/" in f["path"], d'
+          env -u CLIPFX_FFMPEG_DIR "$bin" --self-test "$RUNNER_TEMP/arm.json" && python3 -c "$check" "$RUNNER_TEMP/arm.json"
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then
+            env -u CLIPFX_FFMPEG_DIR arch -x86_64 "$bin" --self-test "$RUNNER_TEMP/intel.json" && python3 -c "$check" "$RUNNER_TEMP/intel.json"
+          else
+            echo "Rosetta is not available on this runner; Intel slice not run"
+          fi
+          mkdir -p dist
+          cp target/universal-apple-darwin/release/bundle/dmg/*.dmg dist/ClipFX-Enhance-macos-universal.dmg
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist
+
+  linux:
+    needs: version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 xvfb mesa-vulkan-drivers
+      - name: deb, rpm and AppImage
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npx tauri build --bundles deb,rpm,appimage
+      - name: Install the .deb and self-test
+        run: |
+          sudo apt-get install -y ./target/release/bundle/deb/*.deb
+          export HOME=$(mktemp -d)
+          xvfb-run -a clipfx-enhance --self-test "$RUNNER_TEMP/st.json" || (cat "$RUNNER_TEMP/st.json"; exit 1)
+          python3 -c "import json; d=json.load(open('$RUNNER_TEMP/st.json')); assert d['ok'] and d['ffmpeg']['vidstab'] and d['ffmpeg']['zscale'], d"
+          mkdir -p dist
+          cp target/release/bundle/deb/*.deb dist/clipfx-enhance-linux-amd64.deb
+          cp target/release/bundle/rpm/*.rpm dist/clipfx-enhance-linux-x86_64.rpm
+          cp target/release/bundle/appimage/*.AppImage dist/ClipFX-Enhance-linux-x86_64.AppImage
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist
+
+  publish:
+    needs: [version, windows, macos, linux]
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Release notes
+        run: |
+          f="docs/release-notes/$TAG.md"
+          if [ -f "$f" ]; then cp "$f" notes.md; else echo "ClipFX Enhance $VERSION" > notes.md; fi
+      - name: Signed update manifest
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          [ -n "$RELEASE_SIGNING_KEY" ] || { echo "Add the RELEASE_SIGNING_KEY secret (Settings > Secrets and variables > Actions)"; exit 1; }
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          python3 - "$base" <<'PY'
+          import hashlib, json, os, sys, datetime
+          base, v = sys.argv[1], os.environ["VERSION"]
+          def pkg(name, kind):
+              data = open(f"dist/{name}", "rb").read()
+              return {"url": f"{base}/{name}", "sha256": hashlib.sha256(data).hexdigest(), "size": len(data), "kind": kind}
+          manifest = {
+              "version": v,
+              "date": datetime.date.today().isoformat(),
+              "notes": open("notes.md").read().strip(),
+              "page": f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/tag/{os.environ['TAG']}",
+              "packages": {
+                  "windows-x64": pkg("ClipFX-Enhance-windows-x64-update.exe", "nsis-patch"),
+                  "linux-x64-deb": pkg("clipfx-enhance-linux-amd64.deb", "deb"),
+              },
+          }
+          json.dump(manifest, open("dist/update.json", "w"), indent=2)
+          PY
+          umask 077
+          printf '%s' "$RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/key"
+          cargo run -q --release -p clearframe-cli -- catalog sign-update dist/update.json --key-file "$RUNNER_TEMP/key"
+          rm -f "$RUNNER_TEMP/key"
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          cat dist/update.json
+          ls -la dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: ClipFX Enhance ${{ env.VERSION }}
+          body_path: notes.md
+          make_latest: true
+          files: dist/*

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -7,6 +7,8 @@ import { StageForm } from "../components/StageForm";
 import defaults from "../lib/fixtures/operation_defaults.json";
 import type { JobRecord } from "../lib/types";
 import { boot, handleEvent, redo, setPipeline, undo, useStore } from "../state/store";
+import { UpdateBanner } from "../components/UpdateBanner";
+import { api } from "../lib/ipc";
 import { ModelsDialog } from "../views/Models";
 import { Sidebar } from "../views/Sidebar";
 
@@ -89,11 +91,15 @@ describe("StageForm", () => {
 });
 
 describe("Models dialog", () => {
-  it("lists every catalog model with its license and storage location", async () => {
+  it("lists every catalog model with recommended hardware and its storage location", async () => {
     render(<ModelsDialog />);
     await waitFor(() => expect(screen.getByTestId("models-dir")).not.toHaveTextContent("…"));
     for (const m of useStore.getState().models) expect(screen.getByTestId(`model-${m.manifest!.id}`)).toBeInTheDocument();
-    expect(screen.getByTestId("model-detail")).toHaveTextContent("Weights");
+    const detail = screen.getByTestId("model-detail");
+    expect(detail).toHaveTextContent("Recommended hardware");
+    expect(detail).toHaveTextContent("video memory");
+    // Licensing and provenance details are kept out of the app's Models page.
+    for (const hidden of ["License", "Weights", "Source", "Training", "github.com"]) expect(detail).not.toHaveTextContent(hidden);
     expect(screen.getByRole("button", { name: "Install" })).toBeInTheDocument();
   });
 });
@@ -105,5 +111,33 @@ describe("Sidebar", () => {
       expect(screen.getByRole("switch", { name: t })).toBeInTheDocument();
     }
     expect(screen.getByTestId("export-as")).toBeDisabled();
+  });
+});
+
+describe("Update banner", () => {
+  it("announces a new version and only downloads after the user asks", async () => {
+    useStore.setState((s) => ({ settings: { ...s.settings!, check_updates_on_launch: true } }));
+    vi.spyOn(api, "checkUpdate").mockResolvedValue({ current: "1.0.0", latest: "1.1.0", newer: true, url: "", notes: "", size: 5_829_038, installable: true, downloaded: false });
+    const download = vi.spyOn(api, "updateDownload").mockResolvedValue(undefined);
+    const install = vi.spyOn(api, "updateInstall").mockResolvedValue(undefined);
+    render(<UpdateBanner />);
+    const banner = await screen.findByTestId("update-banner");
+    expect(banner).toHaveTextContent("ClipFX Enhance 1.1.0 is available · 5.8 MB");
+    expect(download).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: /Download/ }));
+    expect(download).toHaveBeenCalledOnce();
+    await userEvent.click(await screen.findByRole("button", { name: /Restart to update/ }));
+    expect(install).toHaveBeenCalledOnce();
+  });
+
+  it("stays silent when update checks are off", async () => {
+    cleanup();
+    useStore.setState((s) => ({ update: null, settings: { ...s.settings!, check_updates_on_launch: false } }));
+    const check = vi.spyOn(api, "checkUpdate");
+    check.mockClear();
+    render(<UpdateBanner />);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(check).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("update-banner")).toBeNull();
   });
 });

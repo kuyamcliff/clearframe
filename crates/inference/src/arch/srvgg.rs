@@ -6,8 +6,8 @@ use crate::ops::{pixel_shuffle, upsample_nearest, Act, Conv2d};
 use crate::weights::Weights;
 
 pub struct SrVggCompact {
-    convs: Vec<Conv2d>,
-    acts: Vec<Vec<f32>>,
+    pub(crate) convs: Vec<Conv2d>,
+    pub(crate) acts: Vec<Vec<f32>>,
     pub scale: usize,
 }
 

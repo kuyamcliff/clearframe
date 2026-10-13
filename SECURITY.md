@@ -3,7 +3,7 @@
 ## Reporting
 
 Please report vulnerabilities privately through GitHub's “Report a vulnerability” (Security
-tab) on https://github.com/kuyamcliff/clearframe. Do not open a public issue for security
+tab) on https://github.com/kuyamcliff/clipfx-enhance. Do not open a public issue for security
 problems. We aim to acknowledge reports within 7 days.
 
 ## Design

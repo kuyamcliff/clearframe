@@ -40,7 +40,7 @@ export interface OutputSettings {
   chapters: boolean;
 }
 
-export interface EngineSettings { backend: "cpu" | "cuda" | "metal" | null; precision: "fp32" | "fp16" }
+export interface EngineSettings { backend: "cpu" | "gpu" | "cuda" | "metal" | null; precision: "fp32" | "fp16" }
 export interface TimeRange { start: number; end: number }
 
 export interface NewJob {
@@ -176,10 +176,13 @@ export interface Settings {
 }
 export interface ResourcePlan { threads: number; priority: ProcessPriority; memory_budget_mb: number; reserve_memory_mb: number; max_concurrent_jobs: number; explanation: string[] }
 export interface GpuInfo { vendor: string; name: string; memory_total_mb: number | null; memory_free_mb: number | null; driver: string | null; source: string }
-export interface BackendStatus { kind: "cpu" | "cuda" | "metal"; compiled: boolean; available: boolean; detail: string }
+export interface BackendStatus { kind: "cpu" | "gpu" | "cuda" | "metal"; compiled: boolean; available: boolean; detail: string }
+/** A GPU usable by the cross-vendor backend (Vulkan / DirectX 12 / Metal). */
+export interface GpuAdapter { index: number; name: string; vendor: string; kind: string; api: string; max_buffer_mb: number }
+
 export interface HardwareInfo {
   os: string; os_version: string; arch: string; cpu_brand: string; logical_cores: number; physical_cores: number | null;
-  ram_total_mb: number; ram_available_mb: number; gpus: GpuInfo[]; backends: BackendStatus[]; precisions: string[]; cpu_features: string[];
+  ram_total_mb: number; ram_available_mb: number; gpus: GpuInfo[]; backends: BackendStatus[]; gpu_adapters?: GpuAdapter[]; precisions: string[]; cpu_features: string[];
 }
 export interface GpuSample { name: string; utilization_percent: number | null; memory_used_mb: number | null; memory_total_mb: number | null; temperature_c: number | null; measured: boolean }
 export interface SystemSample {
@@ -210,7 +213,7 @@ export interface Project {
   job_ids: string[]; preset_id: string | null; notes: string; created_at: string; updated_at: string;
 }
 export interface OpenReport { project: Project; source_found: boolean; source_changed: boolean; suggested_source: string | null; missing_models: string[]; migrated_from: number | null; backup_path: string | null }
-export interface UpdateInfo { current: string; latest: string; newer: boolean; url: string; notes: string }
+export interface UpdateInfo { current: string; latest: string; newer: boolean; url: string; notes: string; size: number | null; installable: boolean; downloaded: boolean }
 
 export type AppEvent =
   | { type: "job_updated"; job: JobRecord }
@@ -226,4 +229,5 @@ export type AppEvent =
   | { type: "job_resources"; id: string; sample: ResourceSample }
   | { type: "storage_progress"; kind: string; bytes_done: number; bytes_total: number }
   | { type: "storage_done"; kind: string; ok: boolean; message: string }
-  | { type: "notice"; level: string; message: string };
+  | { type: "notice"; level: string; message: string }
+  | { type: "update_progress"; done: number; total: number };

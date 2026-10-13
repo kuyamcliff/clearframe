@@ -146,20 +146,64 @@ impl ResourceMonitor {
     }
 }
 
-/// Resolve the compute device from job resources ("auto", "cpu", "cuda:N", "metal:N").
-pub fn select_device(res: &JobResources, engine: &EngineSettings) -> std::result::Result<(BackendKind, clearframe_inference::Device), String> {
+/// The GPU that image models run on (cross-vendor wgpu backend).
+#[cfg(feature = "gpu")]
+pub type GpuRef = std::sync::Arc<clearframe_inference::gpu::Gpu>;
+#[cfg(not(feature = "gpu"))]
+pub type GpuRef = ();
+
+/// Where a job computes: the tensor device, plus the GPU used for image models.
+pub struct Compute {
+    pub kind: BackendKind,
+    pub device: clearframe_inference::Device,
+    pub gpu: Option<GpuRef>,
+    /// Human-readable name for logs and reports.
+    pub label: String,
+}
+
+/// Resolve the compute device from job resources ("auto", "cpu", "gpu:N", "cuda:N", "metal:N").
+pub fn select_compute(res: &JobResources, engine: &EngineSettings) -> std::result::Result<Compute, String> {
     let d = res.device.trim().to_ascii_lowercase();
     let parse = |p: &str| d.strip_prefix(p).and_then(|n| n.parse::<usize>().ok());
+    let plain = |kind: BackendKind, device| Compute { kind, device, gpu: None, label: kind.label().to_string() };
     if d == "cpu" {
-        return Ok((BackendKind::Cpu, clearframe_inference::Device::Cpu));
+        return Ok(plain(BackendKind::Cpu, clearframe_inference::Device::Cpu));
     }
     if let Some(i) = parse("cuda:") {
-        return device::create(BackendKind::Cuda, i).map(|x| (BackendKind::Cuda, x));
+        return device::create(BackendKind::Cuda, i).map(|x| plain(BackendKind::Cuda, x));
     }
     if let Some(i) = parse("metal:") {
-        return device::create(BackendKind::Metal, i).map(|x| (BackendKind::Metal, x));
+        return device::create(BackendKind::Metal, i).map(|x| plain(BackendKind::Metal, x));
     }
-    device::select(engine.backend)
+    let gpu_index = parse("gpu:");
+    let (kind, dev, index) = match gpu_index {
+        Some(i) => (BackendKind::Gpu, device::create(BackendKind::Gpu, i)?, i),
+        None => {
+            let (k, dv) = device::select(engine.backend)?;
+            (k, dv, device::best_hardware_gpu().unwrap_or(0))
+        }
+    };
+    if kind != BackendKind::Gpu {
+        return Ok(plain(kind, dev));
+    }
+    gpu_compute(index, dev)
+}
+
+#[cfg(feature = "gpu")]
+fn gpu_compute(index: usize, device: clearframe_inference::Device) -> std::result::Result<Compute, String> {
+    let g = device::gpu_context(index)?;
+    let label = format!("GPU · {} ({})", g.info.name, g.info.api);
+    Ok(Compute { kind: BackendKind::Gpu, device, gpu: Some(g), label })
+}
+
+#[cfg(not(feature = "gpu"))]
+fn gpu_compute(_index: usize, _device: clearframe_inference::Device) -> std::result::Result<Compute, String> {
+    Err("this build has no GPU backend".into())
+}
+
+/// Resolve the compute device from job resources ("auto", "cpu", "gpu:N", "cuda:N", "metal:N").
+pub fn select_device(res: &JobResources, engine: &EngineSettings) -> std::result::Result<(BackendKind, clearframe_inference::Device), String> {
+    select_compute(res, engine).map(|c| (c.kind, c.device))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -443,10 +487,12 @@ pub fn run_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, st
     }
 
     // Device
-    let (backend, device) = select_device(&spec.resources, &spec.engine).map_err(|e| JobError::Invalid(format!("the selected compute device is unavailable: {e}")))?;
-    ctx.backend_label = backend.label().to_string();
-    if spec.engine.backend.is_none() && backend == BackendKind::Cpu && ctx.plan.stages.iter().any(|s| !s.models.is_empty()) {
-        ctx.log("Using CPU inference. AI processing on CPU is slow; a GPU build (CUDA or Metal) is much faster.");
+    let compute = select_compute(&spec.resources, &spec.engine).map_err(|e| JobError::Invalid(format!("the selected compute device is unavailable: {e}")))?;
+    ctx.backend_label = compute.label.clone();
+    if compute.kind == BackendKind::Cpu && ctx.plan.stages.iter().any(|s| !s.models.is_empty()) {
+        ctx.log("Using CPU inference. AI processing on the CPU is slow; no usable GPU was selected or found.");
+    } else if compute.gpu.is_some() {
+        ctx.log(format!("Using {} for image models.", compute.label));
     }
     ctx.timings.prepare_s = started.elapsed().as_secs_f64();
 
@@ -459,7 +505,7 @@ pub fn run_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, st
             ctx.done_units += units;
             continue;
         }
-        let r = run_pass(&mut ctx, &pass, &mut state, &device);
+        let r = run_pass(&mut ctx, &pass, &mut state, &compute);
         match r {
             Ok(n) => {
                 frames_written = n;
@@ -577,7 +623,7 @@ pub fn run_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, st
         job_id: spec.job_id.clone(),
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         ffmpeg_version: tools.version.clone(),
-        backend: backend.label().to_string(),
+        backend: compute.label.clone(),
         resources: spec.resources.clone(),
         source: spec.source.clone(),
         source_fingerprint: fingerprint,
@@ -676,7 +722,7 @@ fn decode_spec_for(ctx: &Ctx, pass: &PassPlan, pass_dir: &Path, filters: Vec<Str
     Ok(d)
 }
 
-fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, device: &clearframe_inference::Device) -> std::result::Result<u64, JobError> {
+fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, compute: &Compute) -> std::result::Result<u64, JobError> {
     let spec = ctx.spec;
     let tools = ctx.tools;
     let pass_dir = spec.work_dir.join(format!("pass{}", pass.index));
@@ -798,7 +844,7 @@ fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, device: &clear
             Segment::Native { stage } => {
                 let sp = &ctx.plan.stages[*stage];
                 let op = &enabled[sp.index].op;
-                let p = build_native(op, sp, &spec.models, device, spec.engine.precision, &spec.resources).map_err(JobError::Failed)?;
+                let p = build_native(op, sp, &spec.models, compute, spec.engine.precision, &spec.resources).map_err(JobError::Failed)?;
                 procs.push(Timed { inner: p, seconds: 0.0, stage_id: sp.stage_id.clone() });
             }
             Segment::Ffmpeg { filters, input, output } => {
@@ -996,12 +1042,9 @@ fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, device: &clear
             let _ = std::fs::remove_file(new_list);
         }
     };
-    match result {
-        Err(e) => {
-            merge(&list_file, &new_list);
-            return Err(e);
-        }
-        Ok(()) => {}
+    if let Err(e) = result {
+        merge(&list_file, &new_list);
+        return Err(e);
     }
     if let Err(e) = enc_result {
         merge(&list_file, &new_list);
@@ -1030,13 +1073,13 @@ fn count_video_packets(tools: &FfmpegTools, p: &Path) -> Option<u64> {
 /// processor in order and push its remaining output downstream.
 fn run_chain(procs: &mut [Timed], from: usize, frames: Vec<Frame>, flush: bool) -> std::result::Result<Vec<Frame>, JobError> {
     let mut cur = frames;
-    for i in from..procs.len() {
+    for p in procs.iter_mut().skip(from) {
         let mut next = Vec::new();
         for f in cur {
-            procs[i].push(f, &mut next).map_err(JobError::Failed)?;
+            p.push(f, &mut next).map_err(JobError::Failed)?;
         }
         if flush {
-            procs[i].finish(&mut next).map_err(JobError::Failed)?;
+            p.finish(&mut next).map_err(JobError::Failed)?;
         }
         cur = next;
     }

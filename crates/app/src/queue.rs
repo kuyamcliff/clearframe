@@ -173,7 +173,7 @@ impl App {
         let Ok(jobs) = self.db.jobs(true) else { return };
         let plan = self.resource_plan();
         // Previews have their own lane (one at a time) so they never wait behind long renders.
-        let running = self.queue.running.lock().iter().map(|(_, r)| r.kind).collect::<Vec<_>>();
+        let running = self.queue.running.lock().values().map(|r| r.kind).collect::<Vec<_>>();
         let renders = running.iter().filter(|k| **k == JobKind::Render).count() as u32;
         let previews = running.iter().filter(|k| **k == JobKind::Preview).count();
         if previews == 0 {
@@ -266,6 +266,8 @@ impl App {
                 }
                 let Ok(ev) = serde_json::from_str::<Event>(&line) else { continue };
                 match ev {
+                    // Terminal states come from the result line, after the report is saved.
+                    Event::State { state, .. } if state.is_terminal() => {}
                     Event::State { state, detail } => app.set_state(&id, state, Some(&detail)),
                     Event::Progress(p) => {
                         if last_db.elapsed() > Duration::from_millis(900) || p.fraction >= 1.0 {

@@ -49,7 +49,7 @@ fn check(img: &RgbImage, w: usize, h: usize) -> Result<()> {
 
 /// Pad an image to a multiple of `m` by replicating edges; returns the padded image.
 pub fn pad_to_multiple(img: &RgbImage, m: usize) -> RgbImage {
-    if m <= 1 || (img.width % m == 0 && img.height % m == 0) {
+    if m <= 1 || (img.width.is_multiple_of(m) && img.height.is_multiple_of(m)) {
         return img.clone();
     }
     let w = img.width.div_ceil(m) * m;

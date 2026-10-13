@@ -6,7 +6,7 @@ use crate::ops::{pad_replicate, pixel_shuffle, pixel_unshuffle, Conv2d};
 use crate::weights::Weights;
 
 pub struct FfdNet {
-    convs: Vec<Conv2d>,
+    pub(crate) convs: Vec<Conv2d>,
 }
 
 impl FfdNet {

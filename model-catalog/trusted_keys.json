@@ -1,4 +1,9 @@
 {
-  "comment": "Ed25519 public keys allowed to sign remote catalog updates. The bundled catalog is compiled into the app and needs no signature. Generate a key with `clipfx catalog keygen`, keep the secret key offline (e.g. as a CI secret) and add the public key here.",
-  "keys": []
+  "comment": "Ed25519 public keys allowed to sign app update manifests (update.json) and remote catalog updates. The secret key lives only in the RELEASE_SIGNING_KEY GitHub Actions secret; never commit it.",
+  "keys": [
+    {
+      "id": "clipfx-release-2026",
+      "public_key_base64": "Kx1SqnUOluxP0VcUv/nJjFhhbTp9x20ghjcVOVufpNk="
+    }
+  ]
 }

@@ -165,7 +165,9 @@ fn worker_crash_and_app_restart_recover() {
             std::thread::sleep(Duration::from_millis(100));
         }
         for pid in app.queue.worker_pids() {
-            let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+            let pid = pid.to_string();
+            let st = if cfg!(windows) { Command::new("taskkill").args(["/F", "/PID", &pid]).status() } else { Command::new("kill").args(["-9", &pid]).status() };
+            assert!(st.map(|s| s.success()).unwrap_or(false), "could not kill worker {pid}");
         }
         let s = wait(&app, &id, |s| s == JobState::Recoverable, 30);
         assert_eq!(s, JobState::Recoverable, "{:?}", app.db.job(&id).unwrap());
@@ -325,6 +327,8 @@ fn performance_settings_reach_the_worker() {
     s.performance.cpu_threads = 1;
     s.performance.memory_preset = MemoryPreset::Custom;
     s.performance.memory_budget_mb = 600;
+    // The CPU tile rule is checked here; GPU tiles are covered by the pipeline tests.
+    s.performance.device = "cpu".into();
     app.save_settings(s).unwrap();
     let r = app.job_resources();
     assert_eq!(r.threads, 1);
