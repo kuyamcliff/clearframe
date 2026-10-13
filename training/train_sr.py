@@ -72,6 +72,7 @@ def worker(rank, world, cfg, P, work, fp, index, test_items, ck, run_config, tim
     if ck:
         G.load_state_dict(ck['G']); D.load_state_dict(ck['D']); Gema.load_state_dict(ck['Gema']); oG.load_state_dict(ck['oG']); oD.load_state_dict(ck['oD'])
         scaler.load_state_dict(ck['scaler']); step = ck['step']; state = ck['state']
+        if rank == 0: log('resumed at step', step, 'sessions so far', state['sessions'], 'pareto', sorted(state['pareto']))
         # rank 0 restores its exact generators; other ranks reseed deterministically from the step
         if rank == 0 and ck.get('rng'): ckpt.set_rng_state(ck['rng'][0])
         else: random.seed(cfg['seed'] + rank + 1000 * step); np.random.seed((cfg['seed'] + rank + 1000 * step) % 2 ** 32); torch.manual_seed(cfg['seed'] + rank + 1000 * step)
