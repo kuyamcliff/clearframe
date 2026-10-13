@@ -27,7 +27,7 @@
     "memory_budget_mb": 8192,
     "memory_preset": "prioritize_app",
     "memory_pressure": "pause",
-    "mode": "high_performance",
+    "mode": "maximum",
     "oom_tile_fallback": true,
     "priority": "normal",
     "reserve_cpu_threads": 2,
@@ -59,6 +59,6 @@
   "stop_queue_on_error": false,
   "theme": "dark",
   "ui_scale": 1.0,
-  "version": 1,
+  "version": 2,
   "write_sidecar_report": false
 }

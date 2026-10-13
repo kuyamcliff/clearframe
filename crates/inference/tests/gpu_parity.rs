@@ -231,6 +231,42 @@ fn tiling_on_gpu_matches_whole_frame() {
     assert!(max < 1e-4, "tile seams differ by {max}");
 }
 
+#[test]
+fn concurrent_forwards_on_one_gpu_match_sequential() {
+    // Pipeline stages and frames in flight run forward passes from several threads on the shared GPU
+    // context. Pooled buffers are reused between passes, so the results must not depend on interleaving.
+    let Some(g) = gpu() else { return };
+    let mut r = Rng(11);
+    let mut w = W::default();
+    w.conv(&mut r, "body.0", 16, 3, 3, true);
+    w.t(&mut r, "body.1.weight", &[16], 0.25);
+    w.conv(&mut r, "body.2", 16, 16, 3, true);
+    w.t(&mut r, "body.3.weight", &[16], 0.25);
+    w.conv(&mut r, "body.4", 12, 16, 3, true);
+    let weights = w.build();
+    let mut m = ImageModel::load(&weights, Precision::Fp32).unwrap();
+    m.use_gpu(g).unwrap();
+    // Small tiles: many short passes per frame, so the threads interleave often.
+    m.tile = 16;
+    m.tile_pad = 4;
+    let imgs: Vec<RgbImage> = (0..8).map(|i| image(&mut r, 61 + 7 * i, 43 + 5 * i)).collect();
+    let p = ImageParams::default();
+    let expect: Vec<RgbImage> = imgs.iter().map(|img| m.process(img, &p).unwrap()).collect();
+    let m = &m;
+    std::thread::scope(|s| {
+        for (img, want) in imgs.iter().zip(&expect) {
+            let p = &p;
+            s.spawn(move || {
+                for _ in 0..25 {
+                    let got = m.process(img, p).unwrap();
+                    let max = got.data.iter().zip(&want.data).map(|(x, y)| (x - y).abs()).fold(0f32, f32::max);
+                    assert!(max == 0.0, "concurrent result differs by {max}");
+                }
+            });
+        }
+    });
+}
+
 /// RIFE: same structure as v4.26 (4-channel encoder, five IFBlocks passing 4 flow + 1 mask + 8 feature channels),
 /// narrower layers. Weights are kept small so the predicted flow stays in a realistic range.
 #[test]

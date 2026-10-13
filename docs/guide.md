@@ -21,7 +21,7 @@ Everything that doesn't fit on the front page: the full feature list, install no
 | Queue | Separate worker processes. Pause, resume, cancel, retry and reorder. Batch export. Crash-safe resume from the last finished segment. Never overwrites a file. |
 | Models | Install, pause, resume, cancel, verify, repair, update and uninstall. Install only happens when you ask. SHA-256 verification, a safe weight loader that never executes pickled code, and a smoke test before a model is marked installed. Missing or damaged files are detected. You can import custom Real-ESRGAN-compatible weights. |
 | Storage | Per-user folders. You can move the models or cache folder (copy, verify, switch, with cancel and crash recovery). Cache usage per area, safe clearing, a size limit, age-based cleanup and low-disk protection. |
-| Performance | Balanced, High performance and Maximum modes, or custom threads, priority and memory budget. Memory-pressure pause, compute-device choice, GPU memory limit, tile fallback when out of memory, and a live CPU/RAM/GPU monitor. |
+| Performance | Maximum (the default: every thread, the GPU and nearly all memory), High performance and Balanced modes, or custom threads, priority and memory budget. Memory-pressure pause, compute-device choice, GPU memory limit, tile fallback when out of memory, and a live CPU/RAM/GPU monitor. |
 
 ## Install
 

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-pub const SETTINGS_VERSION: u32 = 1;
+pub const SETTINGS_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -231,9 +231,9 @@ pub struct Performance {
 impl Default for Performance {
     fn default() -> Self {
         Self {
-            // Use the machine fully by default: every core but one at normal priority (so the
-            // window stays responsive) and most of the memory. Maximum uses every core.
-            mode: PerformanceMode::HighPerformance,
+            // Use the machine fully by default: every core at normal priority, the GPU and all
+            // but about 2 GB of the memory.
+            mode: PerformanceMode::Maximum,
             cpu_threads: 0,
             reserve_cpu_threads: 2,
             priority: ProcessPriority::Normal,
@@ -332,6 +332,10 @@ pub fn default_shortcuts() -> BTreeMap<String, String> {
 impl Settings {
     /// Clamp values into supported ranges (applied on load and save).
     pub fn sanitize(&mut self) {
+        // Version 2 made Maximum the default: settings still on the old default move to it once.
+        if self.version < 2 && self.performance.mode == PerformanceMode::HighPerformance {
+            self.performance.mode = PerformanceMode::Maximum;
+        }
         self.ui_scale = self.ui_scale.clamp(0.75, 2.0);
         self.preview_seconds = self.preview_seconds.clamp(0.5, 30.0);
         self.preview_max_height = self.preview_max_height.clamp(240, 4320);
@@ -388,9 +392,14 @@ mod tests {
 
     #[test]
     fn performance_modes() {
-        // Out of the box the app uses all but one thread and nearly all memory.
+        // Out of the box the app uses every thread and nearly all memory.
         let r = Performance::default().resolve(16, 32768);
-        assert_eq!((r.threads, r.priority, r.memory_budget_mb), (15, ProcessPriority::Normal, 32768 - 2048));
+        assert_eq!((r.threads, r.priority, r.memory_budget_mb), (16, ProcessPriority::Normal, 32768 - 2048));
+        // Settings saved on the old default (High performance) move to Maximum once; later choices stay.
+        let s = Settings::from_json(r#"{"version":1,"performance":{"mode":"high_performance"}}"#).unwrap();
+        assert_eq!(s.performance.mode, PerformanceMode::Maximum);
+        let s = Settings::from_json(r#"{"version":2,"performance":{"mode":"high_performance"}}"#).unwrap();
+        assert_eq!(s.performance.mode, PerformanceMode::HighPerformance);
         let mut p = Performance { mode: PerformanceMode::Balanced, memory_preset: MemoryPreset::Balanced, ..Performance::default() };
         let r = p.resolve(16, 32768);
         assert_eq!(r.threads, 12);

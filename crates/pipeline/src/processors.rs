@@ -91,17 +91,34 @@ pub struct ImageProc {
     mix: f32,
     oom_fallback: bool,
     oom_retries: u32,
+    /// Frames worked on at once. On a GPU two keep it busy: one frame's forward pass runs while the
+    /// other's tiles are prepared, read back and blended on the CPU.
+    in_flight: usize,
+    pending: Vec<Frame>,
 }
 
-impl Processor for ImageProc {
-    fn name(&self) -> String {
-        self.label.clone()
+impl ImageProc {
+    fn new(label: String, model: ImageModel, params: ImageParams, mix: f32, res: &JobResources, sp: &StagePlan) -> Self {
+        let in_flight = frames_in_flight(model.gpu_name().is_some(), sp, res);
+        Self { label, model, params, mix, oom_fallback: res.oom_tile_fallback, oom_retries: 0, in_flight, pending: Vec::new() }
     }
-    fn push(&mut self, f: Frame, out: &mut Vec<Frame>) -> Result<()> {
-        let (idx, img) = f.into_img();
-        let res = loop {
-            match self.model.process(&img, &self.params) {
-                Ok(r) => break r,
+
+    /// Run the model on one frame and blend by `mix`.
+    fn render(&self, img: &RgbImage) -> Result<RgbImage> {
+        let res = self.model.process(img, &self.params)?;
+        Ok(if self.mix < 0.999 {
+            let base = if (res.width, res.height) != (img.width, img.height) { img.resize_bilinear(res.width, res.height) } else { img.clone() };
+            base.blend(&res, self.mix.clamp(0.0, 1.0))
+        } else {
+            res
+        })
+    }
+
+    /// One frame at a time, retrying with smaller tiles when the device runs out of memory.
+    fn render_retrying(&mut self, img: &RgbImage) -> Result<RgbImage> {
+        loop {
+            match self.render(img) {
+                Ok(r) => return Ok(r),
                 Err(e) if self.oom_fallback && is_oom(&e.to_string()) && self.model.tile > MIN_TILE => {
                     // Device ran out of memory: retry this frame with smaller tiles.
                     let old = if self.model.tile == 0 { img.width.max(img.height) } else { self.model.tile };
@@ -112,21 +129,75 @@ impl Processor for ImageProc {
                 }
                 Err(e) => return Err(anyhow!("{}: {e}", self.label)),
             }
-        };
-        let res = if self.mix < 0.999 {
-            let base = if (res.width, res.height) != (img.width, img.height) { img.resize_bilinear(res.width, res.height) } else { img };
-            base.blend(&res, self.mix.clamp(0.0, 1.0))
-        } else {
-            res
-        };
-        out.push(Frame::img(idx, res));
+        }
+    }
+
+    fn run_pending(&mut self, out: &mut Vec<Frame>) -> Result<()> {
+        let frames: Vec<(u64, RgbImage)> = std::mem::take(&mut self.pending).into_iter().map(Frame::into_img).collect();
+        if frames.len() > 1 {
+            let this = &*self;
+            let results: Vec<Result<RgbImage>> = std::thread::scope(|s| {
+                let hs: Vec<_> = frames.iter().map(|(_, img)| s.spawn(move || this.render(img))).collect();
+                hs.into_iter().map(|h| h.join().unwrap_or_else(|_| Err(anyhow!("a processing thread panicked")))).collect()
+            });
+            if results.iter().all(|r| r.is_ok()) {
+                for ((idx, _), r) in frames.into_iter().zip(results) {
+                    out.push(Frame::img(idx, r?));
+                }
+                return Ok(());
+            }
+            match results.into_iter().find_map(|r| r.err()) {
+                // Two frames' working memory did not fit: go on one at a time (the frames are redone in order).
+                Some(e) if self.oom_fallback && is_oom(&e.to_string()) => {
+                    log::warn!("{}: out of memory with {} frames in flight; continuing one at a time", self.label, self.in_flight);
+                    self.in_flight = 1;
+                    self.oom_retries += 1;
+                }
+                Some(e) => return Err(anyhow!("{}: {e}", self.label)),
+                None => unreachable!(),
+            }
+        }
+        for (idx, img) in frames {
+            let r = self.render_retrying(&img)?;
+            out.push(Frame::img(idx, r));
+        }
         Ok(())
     }
-    fn finish(&mut self, _out: &mut Vec<Frame>) -> Result<()> {
+}
+
+/// How many frames an image stage works on at once: two on a GPU when both frames' buffers fit the
+/// memory budget comfortably, otherwise one.
+fn frames_in_flight(on_gpu: bool, sp: &StagePlan, res: &JobResources) -> usize {
+    if !on_gpu {
+        // On the CPU one frame already uses every core.
+        return 1;
+    }
+    let out = sp.native_output.as_ref().unwrap_or(&sp.output);
+    // Input, output, blend base and tile copies, as f32 RGB.
+    let per_frame_mb = ((sp.input.width as u64 * sp.input.height as u64 + 3 * out.width as u64 * out.height as u64) * 12) >> 20;
+    if res.memory_budget_mb == 0 || 2 * per_frame_mb <= res.memory_budget_mb / 4 {
+        2
+    } else {
+        1
+    }
+}
+
+impl Processor for ImageProc {
+    fn name(&self) -> String {
+        self.label.clone()
+    }
+    fn push(&mut self, f: Frame, out: &mut Vec<Frame>) -> Result<()> {
+        self.pending.push(f);
+        if self.pending.len() >= self.in_flight {
+            self.run_pending(out)?;
+        }
         Ok(())
+    }
+    fn finish(&mut self, out: &mut Vec<Frame>) -> Result<()> {
+        self.run_pending(out)
     }
     fn stats(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({ "tile": self.model.tile, "oom_retries": self.oom_retries }))
+        Some(serde_json::json!({ "tile": self.model.tile, "oom_retries": self.oom_retries, "frames_in_flight": self.in_flight }))
     }
 }
 
@@ -389,14 +460,7 @@ pub fn build_native(
             if sp.input.width * scale != expect {
                 anyhow::bail!("model {} scale x{scale} does not match the plan", m.id);
             }
-            Box::new(ImageProc {
-                label: format!("Enhance ({})", m.id),
-                model: im,
-                params: ImageParams::default(),
-                mix: e.strength,
-                oom_fallback: res.oom_tile_fallback,
-                oom_retries: 0,
-            })
+            Box::new(ImageProc::new(format!("Enhance ({})", m.id), im, ImageParams::default(), e.strength, res, sp))
         }
         Operation::Denoise(d) => {
             let id = op.required_models().into_iter().next().ok_or_else(|| anyhow!("denoise engine has no model"))?;
@@ -407,14 +471,7 @@ pub fn build_native(
             if !attach_gpu(&mut im, compute, &m.id, res) {
                 im.tile = auto_tile(im.tile, device, res, m.memory_per_megapixel_mb);
             }
-            Box::new(ImageProc {
-                label: format!("Denoise ({})", m.id),
-                model: im,
-                params: ImageParams { noise_sigma: d.strength / 255.0 },
-                mix: d.mix,
-                oom_fallback: res.oom_tile_fallback,
-                oom_retries: 0,
-            })
+            Box::new(ImageProc::new(format!("Denoise ({})", m.id), im, ImageParams { noise_sigma: d.strength / 255.0 }, d.mix, res, sp))
         }
         Operation::Deblur(d) => {
             let m = model(models, &d.model_id)?;
@@ -423,14 +480,7 @@ pub fn build_native(
             if !attach_gpu(&mut im, compute, &m.id, res) {
                 im.tile = auto_tile(im.tile, device, res, m.memory_per_megapixel_mb).min(512);
             }
-            Box::new(ImageProc {
-                label: format!("Deblur ({})", m.id),
-                model: im,
-                params: ImageParams::default(),
-                mix: d.strength,
-                oom_fallback: res.oom_tile_fallback,
-                oom_retries: 0,
-            })
+            Box::new(ImageProc::new(format!("Deblur ({})", m.id), im, ImageParams::default(), d.strength, res, sp))
         }
         Operation::FaceRestore(f) => {
             let m = model(models, &f.model_id)?;

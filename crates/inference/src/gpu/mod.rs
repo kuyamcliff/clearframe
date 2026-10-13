@@ -1,7 +1,7 @@
 //! Cross-vendor GPU inference on wgpu (Vulkan, DirectX 12 and Metal).
 //!
-//! The image-to-image networks (Real-ESRGAN compact and RRDB, FFDNet, DRUNet and
-//! NAFNet) have GPU implementations in [`nets`]; every other model runs on the CPU.
+//! Every network the app uses (Real-ESRGAN compact and RRDB, FFDNet, DRUNet, NAFNet,
+//! RIFE, GFPGAN and RetinaFace) has a GPU implementation in [`nets`].
 //! Tensors are planar NCHW `f32` buffers with a batch of one. A forward pass is
 //! recorded into one compute pass and submitted once, and intermediate buffers
 //! come from a pool so the deep networks don't allocate per layer.
@@ -9,7 +9,8 @@
 pub mod nets;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::thread::ThreadId;
 
 use wgpu::util::DeviceExt;
 
@@ -96,8 +97,33 @@ pub struct Gpu {
     queue: wgpu::Queue,
     pipelines: HashMap<&'static str, wgpu::ComputePipeline>,
     pool: Mutex<HashMap<u64, Vec<wgpu::Buffer>>>,
+    /// Which thread is recording and running a forward pass (see [`Gpu::turn`]), and how deeply.
+    turn: Mutex<(Option<ThreadId>, u32)>,
+    turn_free: Condvar,
     /// Largest storage buffer binding, in bytes.
     pub max_binding: u64,
+}
+
+/// One thread's exclusive use of a [`Gpu`] while it records, submits and waits for a forward pass.
+///
+/// Pooled buffers go back to the pool as soon as their tensor is dropped, while commands that use them
+/// may still be unsubmitted. Within one thread that is safe (later commands are ordered after earlier
+/// ones), but another thread could take such a buffer and fill it with `queue.write_buffer`, which lands
+/// before the next submission of either thread. Taking turns keeps forward passes from several threads
+/// (pipeline stages, frames in flight) apart; their CPU work still overlaps. Re-entrant per thread.
+pub struct GpuTurn {
+    gpu: Arc<Gpu>,
+}
+
+impl Drop for GpuTurn {
+    fn drop(&mut self) {
+        let mut t = self.gpu.turn.lock().unwrap();
+        t.1 -= 1;
+        if t.1 == 0 {
+            t.0 = None;
+            self.gpu.turn_free.notify_one();
+        }
+    }
 }
 
 static CONTEXTS: OnceLock<Mutex<HashMap<usize, Arc<Gpu>>>> = OnceLock::new();
@@ -146,7 +172,7 @@ impl Gpu {
             });
             pipelines.insert(*name, p);
         }
-        Ok(Self { info, device, queue, pipelines, pool: Mutex::new(HashMap::new()), max_binding })
+        Ok(Self { info, device, queue, pipelines, pool: Mutex::new(HashMap::new()), turn: Mutex::new((None, 0)), turn_free: Condvar::new(), max_binding })
     }
 
     /// Upload a read-only parameter array (weights, biases, slopes).
@@ -181,6 +207,19 @@ impl Gpu {
 
     fn give(&self, b: wgpu::Buffer) {
         self.pool.lock().unwrap().entry(b.size()).or_default().push(b);
+    }
+
+    /// Wait until no other thread is running a forward pass on this GPU, then hold it until the
+    /// returned guard is dropped.
+    pub fn turn(self: &Arc<Self>) -> GpuTurn {
+        let me = std::thread::current().id();
+        let mut t = self.turn.lock().unwrap();
+        while t.0.is_some_and(|o| o != me) {
+            t = self.turn_free.wait(t).unwrap();
+        }
+        t.0 = Some(me);
+        t.1 += 1;
+        GpuTurn { gpu: self.clone() }
     }
 
     /// Free every pooled buffer.
@@ -319,6 +358,8 @@ pub struct Recorder {
     scopes: Vec<(wgpu::ErrorScopeGuard, &'static str)>,
     /// Whether any kernel has been recorded (uploads after that must be ordered copies, see `upload`).
     recorded: bool,
+    /// Held until the recorder is finished or dropped (declared last so it is released last).
+    _turn: GpuTurn,
 }
 
 #[repr(C)]
@@ -340,13 +381,14 @@ impl Params {
 
 impl Recorder {
     pub fn new(gpu: &Arc<Gpu>) -> Self {
+        let turn = gpu.turn();
         let scopes = vec![
             (gpu.device.push_error_scope(wgpu::ErrorFilter::Validation), "GPU validation error"),
             (gpu.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory), "GPU out of memory"),
         ];
         let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("clipfx-forward") });
         let pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None, timestamp_writes: None }).forget_lifetime();
-        Self { gpu: gpu.clone(), encoder, pass: Some(pass), dummy: gpu.constant(&[0.0]), scopes, recorded: false }
+        Self { gpu: gpu.clone(), encoder, pass: Some(pass), dummy: gpu.constant(&[0.0]), scopes, recorded: false, _turn: turn }
     }
 
     pub fn gpu(&self) -> &Arc<Gpu> {
