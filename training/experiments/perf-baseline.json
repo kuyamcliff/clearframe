@@ -1,0 +1,470 @@
+{
+ "note": "PRD Phase 2 benchmarks, Kaggle 2x Tesla T4, General v3 fine-tune step (G + VGG + UNet D + temporal), 50 warm-up + 300 synchronised timed steps per variant, data b001-v2.",
+ "variants": {
+  "e0_ddp2_bs24": {
+   "config": {
+    "world": 2,
+    "batch_size": 24,
+    "lq_patch": 64,
+    "channels_last_gd": null,
+    "compile_g": null,
+    "compile_mode": null,
+    "d_every": null,
+    "num_workers": 2,
+    "prefetch_factor": 6,
+    "w_gan": 0.05
+   },
+   "world": 2,
+   "gpus": [
+    "Tesla T4",
+    "Tesla T4"
+   ],
+   "steps_timed": 300,
+   "ms_per_step": {
+    "d_update": 426.14,
+    "g_backward_allreduce": 244.75,
+    "vgg_forward": 93.72,
+    "d_forward_for_g": 68.88,
+    "g_forward_pix_temp": 30.86,
+    "ema": 4.2,
+    "h2d": 3.05,
+    "g_optimizer": 2.86,
+    "data_wait": 0.56
+   },
+   "total_ms_per_step": 875.0,
+   "updates_per_s": 1.143,
+   "pairs_per_s": 27.4,
+   "hr_megapixels_per_s": 3.6,
+   "peak_vram_gb": 5.08,
+   "setup": {
+    "setup_packages_s": 4.5,
+    "preflight_s": 122.9,
+    "resume_fetch_s": 0.3,
+    "discover_s": 71.7,
+    "cache_reused": false,
+    "cache_objects": 22828,
+    "cache_download_gb": 7.99,
+    "cache_download_s": 367,
+    "cache_build_s": 154,
+    "cache_cache_gb": 9.24,
+    "cache_sequences": 3512,
+    "model_init_s": 14.1
+   }
+  },
+  "e1a_single_bs24": {
+   "config": {
+    "world": 1,
+    "batch_size": 24,
+    "lq_patch": 64,
+    "channels_last_gd": null,
+    "compile_g": null,
+    "compile_mode": null,
+    "d_every": null,
+    "num_workers": 2,
+    "prefetch_factor": 6,
+    "w_gan": 0.05
+   },
+   "world": 1,
+   "gpus": [
+    "Tesla T4"
+   ],
+   "steps_timed": 300,
+   "ms_per_step": {
+    "d_update": 839.67,
+    "g_backward_allreduce": 457.16,
+    "vgg_forward": 192.66,
+    "d_forward_for_g": 143.54,
+    "g_forward_pix_temp": 74.37,
+    "ema": 7.3,
+    "h2d": 3.45,
+    "g_optimizer": 2.93,
+    "data_wait": 0.29
+   },
+   "total_ms_per_step": 1721.4,
+   "updates_per_s": 0.581,
+   "pairs_per_s": 13.9,
+   "hr_megapixels_per_s": 1.83,
+   "peak_vram_gb": 8.85,
+   "setup": {
+    "setup_packages_s": 4.5,
+    "preflight_s": 122.9,
+    "resume_fetch_s": 0.3,
+    "discover_s": 71.7,
+    "cache_reused": false,
+    "cache_objects": 22828,
+    "cache_download_gb": 7.99,
+    "cache_download_s": 367,
+    "cache_build_s": 154,
+    "cache_cache_gb": 9.24,
+    "cache_sequences": 3512,
+    "model_init_s": 3.3
+   }
+  },
+  "e1b_ddp2_bs48": {
+   "config": {
+    "world": 2,
+    "batch_size": 48,
+    "lq_patch": 64,
+    "channels_last_gd": null,
+    "compile_g": null,
+    "compile_mode": null,
+    "d_every": null,
+    "num_workers": 2,
+    "prefetch_factor": 6,
+    "w_gan": 0.05
+   },
+   "world": 2,
+   "gpus": [
+    "Tesla T4",
+    "Tesla T4"
+   ],
+   "steps_timed": 300,
+   "ms_per_step": {
+    "d_update": 855.94,
+    "g_backward_allreduce": 478.11,
+    "vgg_forward": 195.84,
+    "d_forward_for_g": 146.39,
+    "g_forward_pix_temp": 63.85,
+    "ema": 7.46,
+    "h2d": 6.07,
+    "g_optimizer": 2.86,
+    "data_wait": 0.58
+   },
+   "total_ms_per_step": 1757.1,
+   "updates_per_s": 0.569,
+   "pairs_per_s": 27.3,
+   "hr_megapixels_per_s": 3.58,
+   "peak_vram_gb": 8.85,
+   "setup": {
+    "setup_packages_s": 4.5,
+    "preflight_s": 122.9,
+    "resume_fetch_s": 0.3,
+    "discover_s": 71.7,
+    "cache_reused": false,
+    "cache_objects": 22828,
+    "cache_download_gb": 7.99,
+    "cache_download_s": 367,
+    "cache_build_s": 154,
+    "cache_cache_gb": 9.24,
+    "cache_sequences": 3512,
+    "model_init_s": 3.6
+   }
+  },
+  "e2_channels_last": {
+   "config": {
+    "world": 2,
+    "batch_size": 24,
+    "lq_patch": 64,
+    "channels_last_gd": true,
+    "compile_g": null,
+    "compile_mode": null,
+    "d_every": null,
+    "num_workers": 2,
+    "prefetch_factor": 6,
+    "w_gan": 0.05
+   },
+   "world": 2,
+   "gpus": [
+    "Tesla T4",
+    "Tesla T4"
+   ],
+   "steps_timed": 300,
+   "ms_per_step": {
+    "d_update": 354.9,
+    "g_backward_allreduce": 226.03,
+    "vgg_forward": 91.38,
+    "d_forward_for_g": 65.21,
+    "g_forward_pix_temp": 23.77,
+    "ema": 4.3,
+    "h2d": 3.11,
+    "g_optimizer": 2.84,
+    "data_wait": 0.66
+   },
+   "total_ms_per_step": 772.2,
+   "updates_per_s": 1.295,
+   "pairs_per_s": 31.1,
+   "hr_megapixels_per_s": 4.07,
+   "peak_vram_gb": 5.08,
+   "setup": {
+    "setup_packages_s": 4.5,
+    "preflight_s": 122.9,
+    "resume_fetch_s": 0.3,
+    "discover_s": 71.7,
+    "cache_reused": false,
+    "cache_objects": 22828,
+    "cache_download_gb": 7.99,
+    "cache_download_s": 367,
+    "cache_build_s": 154,
+    "cache_cache_gb": 9.24,
+    "cache_sequences": 3512,
+    "model_init_s": 3.4
+   }
+  },
+  "e3_compile_g": {
+   "config": {
+    "world": 2,
+    "batch_size": 24,
+    "lq_patch": 64,
+    "channels_last_gd": null,
+    "compile_g": true,
+    "compile_mode": null,
+    "d_every": null,
+    "num_workers": 2,
+    "prefetch_factor": 6,
+    "w_gan": 0.05
+   },
+   "world": 2,
+   "gpus": [
+    "Tesla T4",
+    "Tesla T4"
+   ],
+   "steps_timed": 300,
+   "ms_per_step": {
+    "d_update": 430.73,
+    "g_backward_allreduce": 243.1,
+    "vgg_forward": 91.78,
+    "d_forward_for_g": 71.06,
+    "g_forward_pix_temp": 26.22,
+    "ema": 4.63,
+    "g_optimizer": 3.05,
+    "h2d": 2.93,
+    "data_wait": 0.56
+   },
+   "total_ms_per_step": 874.1,
+   "updates_per_s": 1.144,
+   "pairs_per_s": 27.5,
+   "hr_megapixels_per_s": 3.6,
+   "peak_vram_gb": 5.08,
+   "setup": {
+    "setup_packages_s": 4.5,
+    "preflight_s": 122.9,
+    "resume_fetch_s": 0.3,
+    "discover_s": 71.7,
+    "cache_reused": false,
+    "cache_objects": 22828,
+    "cache_download_gb": 7.99,
+    "cache_download_s": 367,
+    "cache_build_s": 154,
+    "cache_cache_gb": 9.24,
+    "cache_sequences": 3512,
+    "model_init_s": 3.5,
+    "compile_setup_s": 3.6
+   }
+  },
+  "e6_d_every2": {
+   "config": {
+    "world": 2,
+    "batch_size": 24,
+    "lq_patch": 64,
+    "channels_last_gd": null,
+    "compile_g": null,
+    "compile_mode": null,
+    "d_every": 2,
+    "num_workers": 2,
+    "prefetch_factor": 6,
+    "w_gan": 0.05
+   },
+   "world": 2,
+   "gpus": [
+    "Tesla T4",
+    "Tesla T4"
+   ],
+   "steps_timed": 300,
+   "ms_per_step": {
+    "g_backward_allreduce": 253.98,
+    "d_update": 217.32,
+    "vgg_forward": 93.89,
+    "d_forward_for_g": 68.3,
+    "g_forward_pix_temp": 29.04,
+    "ema": 3.18,
+    "h2d": 2.96,
+    "g_optimizer": 2.87,
+    "data_wait": 0.61
+   },
+   "total_ms_per_step": 672.1,
+   "updates_per_s": 1.488,
+   "pairs_per_s": 35.7,
+   "hr_megapixels_per_s": 4.68,
+   "peak_vram_gb": 5.08,
+   "setup": {
+    "setup_packages_s": 4.5,
+    "preflight_s": 122.9,
+    "resume_fetch_s": 0.3,
+    "discover_s": 71.7,
+    "cache_reused": false,
+    "cache_objects": 22828,
+    "cache_download_gb": 7.99,
+    "cache_download_s": 367,
+    "cache_build_s": 154,
+    "cache_cache_gb": 9.24,
+    "cache_sequences": 3512,
+    "model_init_s": 3.4
+   }
+  },
+  "e7a_patch80": {
+   "config": {
+    "world": 2,
+    "batch_size": 16,
+    "lq_patch": 80,
+    "channels_last_gd": null,
+    "compile_g": null,
+    "compile_mode": null,
+    "d_every": null,
+    "num_workers": 2,
+    "prefetch_factor": 6,
+    "w_gan": 0.05
+   },
+   "world": 2,
+   "gpus": [
+    "Tesla T4",
+    "Tesla T4"
+   ],
+   "steps_timed": 300,
+   "ms_per_step": {
+    "d_update": 453.46,
+    "g_backward_allreduce": 261.76,
+    "vgg_forward": 97.31,
+    "d_forward_for_g": 74.93,
+    "g_forward_pix_temp": 30.78,
+    "ema": 4.66,
+    "h2d": 3.05,
+    "g_optimizer": 2.92,
+    "data_wait": 0.64
+   },
+   "total_ms_per_step": 929.5,
+   "updates_per_s": 1.076,
+   "pairs_per_s": 17.2,
+   "hr_megapixels_per_s": 3.53,
+   "peak_vram_gb": 5.38,
+   "setup": {
+    "setup_packages_s": 4.5,
+    "preflight_s": 122.9,
+    "resume_fetch_s": 0.3,
+    "discover_s": 71.7,
+    "cache_reused": false,
+    "cache_objects": 22828,
+    "cache_download_gb": 7.99,
+    "cache_download_s": 367,
+    "cache_build_s": 154,
+    "cache_cache_gb": 9.24,
+    "cache_sequences": 3512,
+    "model_init_s": 3.5
+   }
+  },
+  "e7b_patch96": {
+   "config": {
+    "world": 2,
+    "batch_size": 12,
+    "lq_patch": 96,
+    "channels_last_gd": null,
+    "compile_g": null,
+    "compile_mode": null,
+    "d_every": null,
+    "num_workers": 2,
+    "prefetch_factor": 6,
+    "w_gan": 0.05
+   },
+   "world": 2,
+   "gpus": [
+    "Tesla T4",
+    "Tesla T4"
+   ],
+   "steps_timed": 300,
+   "ms_per_step": {
+    "d_update": 494.14,
+    "g_backward_allreduce": 287.6,
+    "vgg_forward": 105.56,
+    "d_forward_for_g": 78.74,
+    "g_forward_pix_temp": 32.53,
+    "ema": 4.88,
+    "h2d": 3.32,
+    "g_optimizer": 2.9,
+    "data_wait": 0.61
+   },
+   "total_ms_per_step": 1010.3,
+   "updates_per_s": 0.99,
+   "pairs_per_s": 11.9,
+   "hr_megapixels_per_s": 3.5,
+   "peak_vram_gb": 6.47,
+   "setup": {
+    "setup_packages_s": 4.5,
+    "preflight_s": 122.9,
+    "resume_fetch_s": 0.3,
+    "discover_s": 71.7,
+    "cache_reused": false,
+    "cache_objects": 22828,
+    "cache_download_gb": 7.99,
+    "cache_download_s": 367,
+    "cache_build_s": 154,
+    "cache_cache_gb": 9.24,
+    "cache_sequences": 3512,
+    "model_init_s": 3.3
+   }
+  }
+ },
+ "summary": {
+  "e0_ddp2_bs24": {
+   "updates_per_s": 1.143,
+   "pairs_per_s": 27.4,
+   "hr_megapixels_per_s": 3.6,
+   "vs_e0": 1.0,
+   "peak_vram_gb": 5.08
+  },
+  "e1a_single_bs24": {
+   "updates_per_s": 0.581,
+   "pairs_per_s": 13.9,
+   "hr_megapixels_per_s": 1.83,
+   "vs_e0": 0.508,
+   "peak_vram_gb": 8.85
+  },
+  "e1b_ddp2_bs48": {
+   "updates_per_s": 0.569,
+   "pairs_per_s": 27.3,
+   "hr_megapixels_per_s": 3.58,
+   "vs_e0": 0.498,
+   "peak_vram_gb": 8.85
+  },
+  "e2_channels_last": {
+   "updates_per_s": 1.295,
+   "pairs_per_s": 31.1,
+   "hr_megapixels_per_s": 4.07,
+   "vs_e0": 1.133,
+   "peak_vram_gb": 5.08
+  },
+  "e3_compile_g": {
+   "updates_per_s": 1.144,
+   "pairs_per_s": 27.5,
+   "hr_megapixels_per_s": 3.6,
+   "vs_e0": 1.001,
+   "peak_vram_gb": 5.08
+  },
+  "e6_d_every2": {
+   "updates_per_s": 1.488,
+   "pairs_per_s": 35.7,
+   "hr_megapixels_per_s": 4.68,
+   "vs_e0": 1.302,
+   "peak_vram_gb": 5.08
+  },
+  "e7a_patch80": {
+   "updates_per_s": 1.076,
+   "pairs_per_s": 17.2,
+   "hr_megapixels_per_s": 3.53,
+   "vs_e0": 0.941,
+   "peak_vram_gb": 5.38
+  },
+  "e7b_patch96": {
+   "updates_per_s": 0.99,
+   "pairs_per_s": 11.9,
+   "hr_megapixels_per_s": 3.5,
+   "vs_e0": 0.866,
+   "peak_vram_gb": 6.47
+  }
+ },
+ "decisions": {
+  "e1": "keep DDP on 2 GPUs (single T4 is 0.51x); batch 48 gives no extra pairs/s, keep 24",
+  "e2": "adopt channels_last for G and D (+13%)",
+  "e3": "reject torch.compile (no gain, adds compile time)",
+  "e6": "discriminator every 2nd step is +30%: pending quality ablation",
+  "e7": "patch 80/96 cost the same per HR pixel: pending quality ablation"
+ }
+}
