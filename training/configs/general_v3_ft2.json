@@ -31,5 +31,6 @@
     "perceptual_video_temporal_max_ratio": 1.1,
     "balanced_score": "lpips_mean / lpips_mean0 + 0.5 * video_T / video_T0"
   },
-  "channels_last_gd": true
+  "channels_last_gd": true,
+  "d_every": 2
 }
