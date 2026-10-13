@@ -59,32 +59,40 @@ def kernel(rng):
     c, s = np.cos(th), np.sin(th); x, y = c * xx + s * yy, -s * xx + c * yy
     g = np.exp(-0.5 * (x ** 2 / s1 ** 2 + y ** 2 / s2 ** 2)); return (g / g.sum()).astype(np.float32)
 
-def noise(img, rng, scale):
-    if rng.random() < 0.4: return img
-    if rng.random() < 0.6:
-        sig = rng.uniform(1, 25) * scale
-        n = rng.normal(0, sig, img.shape[:2] + (1,)) if rng.random() < 0.4 else rng.normal(0, sig, img.shape)
-        return img + n
-    v = 10 ** rng.uniform(1.5, 3.2); return rng.poisson(np.clip(img, 0, 255) / 255 * v) / v * 255
+def noise(img, prng, nrng, scale):
+    """Gaussian (colour or grey) or Poisson noise. prng picks the type and strength (recreated from the same seed for
+    every frame of a sequence, so they stay constant); nrng draws the actual noise, so every frame gets fresh noise."""
+    if prng.random() < 0.4: return img
+    if prng.random() < 0.6:
+        sig = prng.uniform(1, 25) * scale; grey = prng.random() < 0.4
+        return img + (nrng.normal(0, sig, img.shape[:2] + (1,)) if grey else nrng.normal(0, sig, img.shape))
+    v = 10 ** prng.uniform(1.5, 3.2); return nrng.poisson(np.clip(img, 0, 255) / 255 * v) / v * 255
+
+def sinc_kernel(rng):
+    """Windowed-sinc low-pass kernel: the ringing/overshoot that sharpening and resampling leave around edges."""
+    k = int(rng.choice([7, 9, 11, 13, 15, 17, 19, 21])); fc = rng.uniform(1 / 6, 1 / 2)  # cutoff, cycles per pixel
+    ax = np.arange(k) - k // 2; h = 2 * fc * np.sinc(2 * fc * ax) * np.hamming(k)
+    g = np.outer(h, h); return (g / g.sum()).astype(np.float32)
 
 def degrade_spatial(frames, rng, cfg):
-    """Second-order degradation (Real-ESRGAN style), applied identically per sequence."""
+    """Second-order degradation (Real-ESRGAN style): parameters fixed per sequence, noise fresh per frame."""
     out = []
     k1 = kernel(rng); k2 = kernel(rng) if rng.random() < 0.5 else None
     interp = [cv2.INTER_AREA, cv2.INTER_LINEAR, cv2.INTER_CUBIC]
     r1 = rng.uniform(0.3, 1.2); i1, i2 = rng.choice(interp), rng.choice(interp)
-    nsd = rng.integers(1 << 30)
+    nsd = int(rng.integers(1 << 30)); nrng = np.random.default_rng(int(rng.integers(1 << 62)))
+    ks = sinc_kernel(rng) if rng.random() < 0.8 else None
     for f in frames:
-        lr = rng  # same random draw pattern per frame for temporal consistency of noise level
         x = cv2.filter2D(f.astype(np.float32), -1, k1)
         h, w = x.shape[:2]
         if k2 is not None:
             x = cv2.resize(x, (int(w * r1), int(h * r1)), interpolation=i1)
-            x = noise(x, np.random.default_rng(nsd), 1.0); x = cv2.filter2D(np.clip(x, 0, 255), -1, k2)
+            x = noise(x, np.random.default_rng(nsd), nrng, 1.0); x = cv2.filter2D(np.clip(x, 0, 255), -1, k2)
         x = cv2.resize(x, (w // SCALE, h // SCALE), interpolation=i2)
-        x = noise(x, np.random.default_rng(nsd + 1), 0.7 if k2 is not None else 1.0)
+        x = noise(x, np.random.default_rng(nsd + 1), nrng, 0.7 if k2 is not None else 1.0)
+        if ks is not None: x = cv2.filter2D(x, -1, ks)
         out.append(np.clip(x, 0, 255).round().astype(np.uint8))
-    cfg.update(blur=True, second_order=k2 is not None)
+    cfg.update(blur=True, second_order=k2 is not None, sinc=ks is not None, noise_per_frame=True, schema=2)
     return out
 
 def codec(frames, rng, cfg):

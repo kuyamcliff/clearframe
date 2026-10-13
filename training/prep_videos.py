@@ -4,7 +4,7 @@ Each sample under data/<batch>/train/<id>/: gt_<t>.jpg (768 px crop of consecuti
 lq_0_<t>.png (degraded through blur/downscale/noise/real codec, same pipeline as photos), meta.json with
 'video': true, the source film, timestamp and licence.
 """
-import json, os, random, subprocess, sys, time, zipfile, glob, urllib.request
+import hashlib, json, os, random, subprocess, sys, time, zipfile, glob, urllib.request
 import numpy as np, cv2
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import r2util as r2
@@ -47,7 +47,7 @@ def main():
     sid = 0
     for film in FILMS:
         path = fetch(film); w, h, fps, dur = probe(path); print(film['name'], w, h, round(fps, 2), round(dur), flush=True)
-        rng = np.random.default_rng(abs(hash(film['name'])) % 2 ** 32); made = 0; tries = 0
+        rng = np.random.default_rng(int(hashlib.sha256(film['name'].encode()).hexdigest()[:15], 16)); made = 0; tries = 0  # seed stable across runs
         while made < PER_FILM and tries < PER_FILM * 4:
             tries += 1; t = float(rng.uniform(dur * 0.03, dur * 0.93))  # skip titles and credits
             pre = f'data/{BATCH}/train/{sid:05d}/'
