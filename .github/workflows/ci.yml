@@ -284,20 +284,27 @@ jobs:
           shot() { # <name> [env...]
             local name=$1; shift
             env DISPLAY=:99 RUST_LOG=info "$@" clipfx-enhance "$RUNNER_TEMP/Sample clip.mp4" > "screens/$name.log" 2>&1 & local app=$!
-            sleep 25
-            kill -0 $app
+            # WebKit on this 2-CPU, GPU-less VM can take a while: wait until the interface has
+            # drawn (more than 50 colours on screen), up to two minutes.
+            local t=0
+            while [ $t -lt 120 ]; do
+              sleep 5; t=$((t + 5))
+              kill -0 $app
+              DISPLAY=:99 import -window root "screens/$name.png"
+              [ "$(identify -format %k "screens/$name.png")" -gt 50 ] && break
+            done
+            echo "rendered after ${t}s" >> "screens/$name.log"
             local win; win=$(DISPLAY=:99 xdotool search --name "ClipFX Enhance" | tail -1)
             echo "window: ${win:-none}" >> "screens/$name.log"
             if [ -z "$win" ]; then # where is the app stuck?
               sudo gdb -p $app -batch -ex "thread apply all bt 15" 2>&1 | grep -E "^Thread|^#" | head -150 >> "screens/$name.log" || true
             fi
             DISPLAY=:99 xwininfo -root -tree | head -40 >> "screens/$name.log"
-            DISPLAY=:99 import -window root "screens/$name.png"
             kill $app; wait $app 2>/dev/null || true
             identify -format %k "screens/$name.png"
           }
           colours=$(shot linux-app)
-          echo "screenshot colours: $colours"
+          echo "screenshot colours: $colours ($(grep -o 'rendered after [0-9]*s' screens/linux-app.log))"
           if [ "$colours" -le 50 ]; then
             echo "--- app output and X windows"; cat screens/linux-app.log
             echo "--- app log files"; find "$HOME" -name "*.log" -path "*ClipFX*" -exec tail -40 {} \; 2>/dev/null || true
