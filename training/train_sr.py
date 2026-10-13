@@ -101,13 +101,16 @@ def worker(rank, world, cfg, P, work, fp, index, test_items, ck, run_config, tim
         if extra: st.update(extra)
         r2.put(P + 'status.json', json.dumps(st, default=str).encode())
 
-    def checkpoint():
+    pub = ckpt.BackgroundPublisher(r2, P, on_done=lambda ptr: log('checkpoint published', ptr['step'], ptr['key'].split('/')[-1]))
+
+    def checkpoint(final=False):
         t1 = time.time()
         obj = {'G': G.state_dict(), 'D': D.state_dict(), 'Gema': Gema.state_dict(), 'oG': oG.state_dict(), 'oD': oD.state_dict(), 'scaler': scaler.state_dict(),
                'step': step, 'state': {**state, 'train_seconds_total': state['train_seconds_total'] + acc['train_s']}, 'rng': [ckpt.rng_state()], 'run_config': run_config}
-        ckpt.save_local(obj, f'{work}/ck.pt'); ptr = ckpt.publish(r2, P, f'{work}/ck.pt', step)
-        ckpt.prune(r2, P, protect={v['key'] for v in state['pareto'].values() if 'key' in v})
-        acc['ckpt_s'] += time.time() - t1; status(); log('checkpoint', step, ptr['key'].split('/')[-1], f'{time.time() - t1:.1f}s')
+        path = f'{work}/ck-{step:08d}.pt'; ckpt.save_local(obj, path)  # frozen file; the uploader only ever reads it
+        queued = pub.submit(path, step, protect={v['key'] for v in state['pareto'].values() if 'key' in v}, wait=final)
+        acc['ckpt_s'] += time.time() - t1; acc['ckpt_upload_s'] = pub.upload_s; acc['ckpt_skipped'] = pub.skipped
+        status(); log('checkpoint', step, 'queued' if queued else 'skipped (previous upload still running)', f'{time.time() - t1:.1f}s blocking')
 
     def evaluate(suite):
         nonlocal last_eval
@@ -169,7 +172,7 @@ def worker(rank, world, cfg, P, work, fp, index, test_items, ck, run_config, tim
             dist.broadcast(stop, 0)
             if stop.item() > 0: break
     if rank == 0:
-        evaluate('full'); checkpoint(); log('session done', step, json.dumps({k: round(v, 1) for k, v in acc.items()}))
+        evaluate('full'); checkpoint(final=True); log('session done', step, json.dumps({k: round(v, 1) for k, v in acc.items()}))
     dist.barrier(); dist.destroy_process_group()
 
 def decide_promotions(m, sm, base_full, pareto, g):

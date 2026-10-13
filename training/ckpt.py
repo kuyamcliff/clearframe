@@ -53,3 +53,42 @@ def fetch_latest(r2, prefix, dest):
     ptr = json.loads(r2.get(prefix + 'latest.json')); r2.get_file(ptr['key'], dest)
     if sha256_file(dest) != ptr['sha256']: raise IOError(f'checkpoint {ptr["key"]} does not match latest.json')
     return ptr
+
+
+class BackgroundPublisher:
+    """Uploads frozen local checkpoint files on a worker thread so training does not wait for R2.
+
+    submit() takes a file that will never be modified again. If an upload is still running, the new snapshot is
+    skipped (and deleted) rather than queued: the next periodic checkpoint supersedes it. close() waits for the last
+    upload, so a session never ends with an unpublished final checkpoint.
+    """
+    def __init__(self, r2, prefix, on_done=None):
+        import threading
+        self.r2, self.prefix, self.on_done = r2, prefix, on_done; self.lock = threading.Lock(); self.thread = None; self.error = None
+        self.skipped = 0; self.upload_s = 0.0
+
+    def busy(self): return self.thread is not None and self.thread.is_alive()
+
+    def submit(self, path, step, protect=(), wait=False):
+        import threading
+        if self.error: raise self.error
+        if self.busy() and not wait:
+            os.remove(path); self.skipped += 1; return False
+        if self.busy(): self.thread.join()
+        def work():
+            t = time.time()
+            try:
+                ptr = publish(self.r2, self.prefix, path, step); prune(self.r2, self.prefix, protect=protect)
+                if self.on_done: self.on_done(ptr)
+            except Exception as e:
+                self.error = e
+            finally:
+                self.upload_s += time.time() - t
+                if os.path.exists(path): os.remove(path)
+        self.thread = threading.Thread(target=work, daemon=True); self.thread.start()
+        if wait: self.close()
+        return True
+
+    def close(self):
+        if self.thread is not None: self.thread.join()
+        if self.error: raise self.error

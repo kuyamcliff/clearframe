@@ -48,3 +48,20 @@ def test_prune_keeps_newest_and_protected():
     for s in range(1, 7): r2.put(f'r/checkpoints/step-{s:08d}-abc.pt', b'x')
     ckpt.prune(r2, 'r/', protect={'r/checkpoints/step-00000002-abc.pt'})
     assert [k.split('-')[1] for k in r2.ls('r/checkpoints/')] == ['00000002', '00000004', '00000005', '00000006']
+
+def test_background_publisher_skips_while_busy_and_flushes_final(tmp_path):
+    import threading, time as _t
+    r2 = FakeR2(); gate = threading.Event()
+    orig = ckpt.publish
+    def slow_publish(*a, **k):
+        gate.wait(5); return orig(*a, **k)
+    ckpt.publish = slow_publish
+    try:
+        pub = ckpt.BackgroundPublisher(r2, 'r/')
+        p1 = str(tmp_path / 'a.pt'); ckpt.save_local({'s': 1}, p1); assert pub.submit(p1, 1)
+        p2 = str(tmp_path / 'b.pt'); ckpt.save_local({'s': 2}, p2); assert not pub.submit(p2, 2)  # busy -> skipped
+        assert not os.path.exists(p2) and pub.skipped == 1
+        gate.set(); p3 = str(tmp_path / 'c.pt'); ckpt.save_local({'s': 3}, p3); assert pub.submit(p3, 3, wait=True)  # final waits
+        assert json.loads(r2.get('r/latest.json'))['step'] == 3 and not os.path.exists(p1) and not os.path.exists(p3)
+    finally:
+        ckpt.publish = orig
