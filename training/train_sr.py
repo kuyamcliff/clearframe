@@ -80,19 +80,40 @@ def load_items(split):
             d = os.path.dirname(m); items.append((d, json.load(open(m))))
     return items
 
+def build_cache(items):
+    """Unpack each training sequence once: the GT region the pan covers and its LQ frames, as raw uint8 on disk."""
+    idx_p = f'{WORK}/cache_index.json'
+    if os.path.exists(idx_p): return json.load(open(idx_p))
+    index, gt_off, lq_off = [], 0, 0; plan = []
+    for d, m in items:
+        for si, seq in enumerate(m['sequences']):
+            xs = [o[0] for o in seq['offsets']]; ys = [o[1] for o in seq['offsets']]; c = seq['crop']
+            x0, y0, w, h = min(xs), min(ys), max(xs) - min(xs) + c, max(ys) - min(ys) + c
+            n = len(seq['offsets']); l = c // 4
+            index.append({'gt': gt_off, 'w': w, 'h': h, 'lq': lq_off, 'l': l, 'n': n, 'offs': [[x - x0, y - y0] for x, y in seq['offsets']]})
+            plan.append((d, si, x0, y0, w, h, n)); gt_off += w * h * 3; lq_off += n * l * l * 3
+    gtm = np.lib.format.open_memmap(f'{WORK}/gt.npy', 'w+', np.uint8, (gt_off,)); lqm = np.lib.format.open_memmap(f'{WORK}/lq.npy', 'w+', np.uint8, (lq_off,))
+    from concurrent.futures import ThreadPoolExecutor
+    def fill(k):
+        d, si, x0, y0, w, h, n = plan[k]; e = index[k]
+        g = cv2.imread(d + '/gt.jpg')
+        gtm[e['gt']:e['gt'] + w * h * 3] = np.ascontiguousarray(g[y0:y0 + h, x0:x0 + w]).reshape(-1)
+        for t in range(n):
+            f = cv2.imread(f'{d}/lq_{si}_{t}.png'); o = e['lq'] + t * e['l'] ** 2 * 3
+            lqm[o:o + f.size] = f.reshape(-1)
+    with ThreadPoolExecutor(4) as ex: list(ex.map(fill, range(len(plan))))
+    gtm.flush(); lqm.flush(); del gtm, lqm
+    json.dump(index, open(idx_p, 'w')); log('cache built', len(index), 'sequences', round(gt_off / 1e9, 1), 'GB'); return index
+
 class PairDataset(torch.utils.data.Dataset):
-    def __init__(s, items): s.items = items; s.cache = {}
+    def __init__(s, index): s.index = index; s.gt = s.lq = None
     def __len__(s): return 10 ** 9
-    def gt(s, d):
-        if d not in s.cache:
-            if len(s.cache) > 400: s.cache.pop(next(iter(s.cache)))
-            s.cache[d] = cv2.imread(d + '/gt.jpg')
-        return s.cache[d]
     def __getitem__(s, _):
-        d, m = random.choice(s.items); si = random.randrange(len(m['sequences'])); seq = m['sequences'][si]
-        t = random.randrange(len(seq['offsets'])); ox, oy = seq['offsets'][t]
-        lq = cv2.imread(f'{d}/lq_{si}_{t}.png'); g = s.gt(d)
-        h, w = lq.shape[:2]; y = random.randrange(0, h - LQ + 1); x = random.randrange(0, w - LQ + 1)
+        if s.gt is None: s.gt = np.load(f'{WORK}/gt.npy', mmap_mode='r'); s.lq = np.load(f'{WORK}/lq.npy', mmap_mode='r')
+        e = random.choice(s.index); t = random.randrange(e['n']); L = e['l']; ox, oy = e['offs'][t]
+        lq = s.lq[e['lq'] + t * L * L * 3: e['lq'] + (t + 1) * L * L * 3].reshape(L, L, 3)
+        g = s.gt[e['gt']: e['gt'] + e['w'] * e['h'] * 3].reshape(e['h'], e['w'], 3)
+        y = random.randrange(0, L - LQ + 1); x = random.randrange(0, L - LQ + 1)
         l = lq[y:y + LQ, x:x + LQ]; gy, gx = oy + y * 4, ox + x * 4; hq = g[gy:gy + LQ * 4, gx:gx + LQ * 4]
         if random.random() < 0.5: l, hq = l[:, ::-1], hq[:, ::-1]
         if random.random() < 0.5: l, hq = l[::-1], hq[::-1]
@@ -143,63 +164,85 @@ def save_samples(G, test, tag):
     G.train(); r2.put(P + f'samples/{tag}.jpg', cv2.imencode('.jpg', np.vstack(tiles), [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tobytes())
 
 # ---------------- main ----------------
-def main():
-    torch.backends.cudnn.benchmark = True
-    G = SRVGGNetCompact().to(DEV); D = UNetD().to(DEV); vgg = VGGLoss().to(DEV); lp = lpips.LPIPS(net='alex').to(DEV).eval()
+def worker(rank, world, index, test):
+    import torch.distributed as dist
+    os.environ.setdefault('MASTER_ADDR', '127.0.0.1'); os.environ.setdefault('MASTER_PORT', '29511')
+    dist.init_process_group('nccl', rank=rank, world_size=world); torch.cuda.set_device(rank); dev = f'cuda:{rank}'
+    global DEV; DEV = dev; torch.backends.cudnn.benchmark = True; random.seed(1234 + rank + int(time.time()))
+    cv2.setNumThreads(1); torch.set_num_threads(1)
+    G = SRVGGNetCompact().to(dev); D = UNetD().to(dev); vgg = VGGLoss().to(dev).to(memory_format=torch.channels_last)
     base = torch.load(io.BytesIO(__import__('urllib.request').request.urlopen(BASE_URL).read()), map_location='cpu', weights_only=True)
     G.load_state_dict(base['params'] if 'params' in base else base)
     bd = torch.load(io.BytesIO(__import__('urllib.request').request.urlopen(BASE_D_URL).read()), map_location='cpu', weights_only=True)
     D.load_state_dict(bd['params'] if 'params' in bd else bd)
-    Gema = SRVGGNetCompact().to(DEV); Gema.load_state_dict(G.state_dict()); Gema.requires_grad_(False)
+    Gema = SRVGGNetCompact().to(dev); Gema.load_state_dict(G.state_dict()); Gema.requires_grad_(False)
     oG = torch.optim.Adam(G.parameters(), LR, betas=(0.9, 0.99)); oD = torch.optim.Adam(D.parameters(), LR, betas=(0.9, 0.99))
     scaler = torch.amp.GradScaler(); step = 0; state = {'best': None, 'baseline': None}
-    test = load_items('test'); train = load_items('train'); log('train items', len(train), 'test items', len(test))
-    if r2.exists(P + 'ckpt_latest.pt'):
-        r2.get_file(P + 'ckpt_latest.pt', f'{WORK}/ck.pt'); ck = torch.load(f'{WORK}/ck.pt', map_location='cpu', weights_only=False)
+    if os.path.exists(f'{WORK}/ck.pt'):
+        ck = torch.load(f'{WORK}/ck.pt', map_location='cpu', weights_only=False)
         G.load_state_dict(ck['G']); D.load_state_dict(ck['D']); Gema.load_state_dict(ck['Gema']); oG.load_state_dict(ck['oG']); oD.load_state_dict(ck['oD'])
-        step = ck['step']; state = ck['state']; log('resumed at step', step)
-    if state['baseline'] is None:
+        step = ck['step']; state = ck['state']
+        if rank == 0: log('resumed at step', step)
+    lp = lpips.LPIPS(net='alex', verbose=False).to(dev).eval() if rank == 0 else None
+    if rank == 0 and state['baseline'] is None:
         state['baseline'] = evaluate(Gema, test, lp); state['best'] = state['baseline']; log('baseline', json.dumps(state['baseline']['mean']))
         r2.put(P + 'baseline.json', json.dumps(state['baseline']).encode()); save_samples(Gema, test, 'baseline')
-    ngpu = torch.cuda.device_count(); Gp = nn.DataParallel(G) if ngpu > 1 else G; Dp = nn.DataParallel(D) if ngpu > 1 else D
-    dl = iter(torch.utils.data.DataLoader(PairDataset(train), batch_size=BS, num_workers=4, persistent_workers=True, prefetch_factor=4))
-    last_ck = time.time(); t_log = time.time()
+    dist.barrier()
+    Gp = nn.parallel.DistributedDataParallel(G, device_ids=[rank]); Dp = nn.parallel.DistributedDataParallel(D, device_ids=[rank], broadcast_buffers=False)
+    dl = iter(torch.utils.data.DataLoader(PairDataset(index), batch_size=BS // world, num_workers=2, persistent_workers=True, prefetch_factor=6, pin_memory=True))
+    last_ck = time.time(); t_log = time.time(); t_start = time.time(); s0 = step
     def checkpoint():
         torch.save({'G': G.state_dict(), 'D': D.state_dict(), 'Gema': Gema.state_dict(), 'oG': oG.state_dict(), 'oD': oD.state_dict(), 'step': step, 'state': state}, f'{WORK}/ck_new.pt')
         r2.put_file(P + 'ckpt_latest.pt', f'{WORK}/ck_new.pt'); r2.put(P + 'status.json', json.dumps({'step': step, 'time': time.time(), 'best': state['best']['mean'], 'baseline': state['baseline']['mean']}).encode())
         log('checkpoint', step)
-    while time.time() < DEADLINE:
-        lq, hq = next(dl); lq, hq = lq.to(DEV, non_blocking=True), hq.to(DEV, non_blocking=True)
+    stop = torch.zeros(1, device=dev)
+    while True:
+        lq, hq = next(dl); lq, hq = lq.to(dev, non_blocking=True), hq.to(dev, non_blocking=True)
         for p in D.parameters(): p.requires_grad = False
         with torch.autocast('cuda', dtype=torch.float16):
-            sr = Gp(lq); l_pix = F.l1_loss(sr, hq)
+            sr = Gp(lq); l_pix = F.l1_loss(sr, hq); l_perc = vgg(sr.contiguous(memory_format=torch.channels_last), hq.contiguous(memory_format=torch.channels_last))
             if W_GAN > 0:
-                fake = Dp(sr); l_gan = F.binary_cross_entropy_with_logits(fake, torch.ones_like(fake))
+                fake = D(sr); l_gan = F.binary_cross_entropy_with_logits(fake.float(), torch.ones_like(fake, dtype=torch.float32))
             else:
-                l_gan = torch.zeros((), device=DEV)
-        l_perc = vgg(sr.float(), hq)
-        lossG = l_pix + W_PERC * l_perc + W_GAN * l_gan
+                l_gan = torch.zeros((), device=dev)
+        lossG = l_pix + W_PERC * l_perc.float() + W_GAN * l_gan
         oG.zero_grad(set_to_none=True); scaler.scale(lossG).backward(); scaler.step(oG)
         if W_GAN > 0:
             for p in D.parameters(): p.requires_grad = True
+            oD.zero_grad(set_to_none=True)
             with torch.autocast('cuda', dtype=torch.float16):
-                dr = Dp(hq); df = Dp(sr.detach())
-                lossD = F.binary_cross_entropy_with_logits(dr, torch.ones_like(dr)) + F.binary_cross_entropy_with_logits(df, torch.zeros_like(df))
-            oD.zero_grad(set_to_none=True); scaler.scale(lossD).backward(); scaler.step(oD)
+                dr = Dp(hq).float(); l_real = F.binary_cross_entropy_with_logits(dr, torch.ones_like(dr))
+            scaler.scale(l_real).backward()
+            with torch.autocast('cuda', dtype=torch.float16):
+                df = Dp(sr.detach()).float(); l_fake = F.binary_cross_entropy_with_logits(df, torch.zeros_like(df))
+            scaler.scale(l_fake).backward(); scaler.step(oD)
         scaler.update(); step += 1
         with torch.no_grad():
             for pe, p in zip(Gema.parameters(), G.parameters()): pe.lerp_(p, 1 - 0.999)
-        if time.time() - t_log > 300:
-            log(f'step {step} pix {l_pix.item():.4f} perc {l_perc.item():.4f} gan {l_gan.item():.3f} {step / (time.time() - T0):.2f} it/s'); t_log = time.time()
-        if step % EVAL_EVERY == 0:
-            m = evaluate(Gema, test, lp); m['step'] = step; log('eval', json.dumps(m['mean']))
-            r2.put(P + f'evals/{step:07d}.json', json.dumps(m).encode())
-            if better(m, state['best']):
-                state['best'] = m; torch.save({'params': Gema.state_dict()}, f'{WORK}/best.pth'); r2.put_file(P + 'best_G.pth', f'{WORK}/best.pth')
-                save_samples(Gema, test, f'best_{step:07d}'); log('NEW BEST', step)
-        if time.time() - last_ck > CKPT_MIN * 60:
-            checkpoint(); last_ck = time.time()
-    checkpoint(); log('session done at step', step)
+        if rank == 0:
+            if time.time() - t_log > 300:
+                log(f'step {step} pix {l_pix.item():.4f} perc {l_perc.item():.4f} gan {l_gan.item():.3f} {(step - s0) / (time.time() - t_start):.2f} it/s'); t_log = time.time()
+            if step % EVAL_EVERY == 0:
+                m = evaluate(Gema, test, lp); m['step'] = step; log('eval', json.dumps(m['mean']))
+                r2.put(P + f'evals/{step:07d}.json', json.dumps(m).encode())
+                if better(m, state['best']):
+                    state['best'] = m; torch.save({'params': Gema.state_dict()}, f'{WORK}/best.pth'); r2.put_file(P + 'best_G.pth', f'{WORK}/best.pth')
+                    save_samples(Gema, test, f'best_{step:07d}'); log('NEW BEST', step)
+            if time.time() - last_ck > CKPT_MIN * 60:
+                checkpoint(); last_ck = time.time()
+            stop[0] = 1.0 if time.time() > DEADLINE else 0.0
+        if step % 50 == 0:
+            dist.broadcast(stop, 0)
+            if stop.item() > 0: break
+    if rank == 0: checkpoint(); log('session done at step', step)
+    dist.barrier(); dist.destroy_process_group()
+
+def main():
+    test = load_items('test'); train = load_items('train'); log('train items', len(train), 'test items', len(test))
+    index = build_cache(train)
+    if r2.exists(P + 'ckpt_latest.pt'): r2.get_file(P + 'ckpt_latest.pt', f'{WORK}/ck.pt')
+    world = torch.cuda.device_count()
+    torch.multiprocessing.spawn(worker, args=(world, index, test), nprocs=world, join=True)
 
 if __name__ == '__main__':
     main()
