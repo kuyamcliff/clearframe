@@ -204,8 +204,9 @@ jobs:
         shell: pwsh
         run: |
           $setup = (Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1).FullName
-          Start-Process -FilePath $setup -ArgumentList "/S" -Wait
           $dir = Join-Path $env:ProgramFiles "ClipFX Enhance"
+          # The installer remembers the last folder (the test above ends with a custom one), so say where.
+          Start-Process -FilePath $setup -ArgumentList @("/S", "/D=$dir") -Wait
           $exe = Join-Path $dir "ClipFXEnhance.exe"
           if (-not (Test-Path $exe)) { throw "not installed: $exe" }
           New-Item -ItemType Directory -Force -Path screens | Out-Null
