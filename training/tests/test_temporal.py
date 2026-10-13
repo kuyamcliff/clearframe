@@ -33,3 +33,11 @@ def test_occlusion_mask_flags_inconsistent_flow():
     f = torch.zeros(1, 2, 64, 64); f[:, 0] = 2.0
     good = mt.occlusion_mask(f, -f); bad = mt.occlusion_mask(f, f)
     assert good[..., 8:-8, 8:-8].mean() > 0.99 and bad[..., 8:-8, 8:-8].mean() < 0.01
+
+def test_video_temporal_loss_matches_metric_and_has_gradients():
+    big = img(4, 320, 320); gt0 = big[..., 20:276, 20:276]; gt1 = big[..., 20:276, 24:280]
+    f_fw = torch.zeros(1, 2, 256, 256); f_fw[:, 0] = 4.0; f_bw = -f_fw
+    sr0 = (gt0 + 0.02 * torch.randn_like(gt0)).requires_grad_(); sr1 = gt1 + 0.02 * torch.randn_like(gt1)
+    l = mt.video_temporal_loss(sr0, sr1, gt0, gt1, f_fw, f_bw, border=8); l.backward()
+    t, _ = mt.video_temporal_residual(sr0.detach(), sr1, gt0, gt1, (f_fw, f_bw), border=8)
+    assert abs(l.item() * 255 - t) < 1e-3 and sr0.grad.abs().sum() > 0

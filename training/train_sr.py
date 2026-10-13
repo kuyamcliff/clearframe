@@ -59,7 +59,8 @@ def main():
             vc = {**cfg, **v}; w = int(vc.get('world') or 0) or torch.cuda.device_count(); os.environ['MASTER_PORT'] = str(29511 + variants.index(v))
             log('profiling variant', json.dumps(v))
             try:
-                tmp.spawn(worker, args=(w, vc, P, work, fp, index, test_items, None, run_config, dict(timers)), nprocs=w, join=True)
+                Pv = f"runs/{vc['run']}/"  # each variant is its own run (own baseline, candidates, checkpoints)
+                tmp.spawn(worker, args=(w, vc, Pv, work, fp, index, test_items, ckpt.fetch_latest(r2, Pv, f'{work}/resume-{variants.index(v)}.pt') and torch.load(f'{work}/resume-{variants.index(v)}.pt', map_location='cpu', weights_only=False), {**run_config, 'config': vc}, dict(timers)), nprocs=w, join=True)
             except Exception as e:  # e.g. torch.compile failing on this stack is itself a result
                 log('variant failed', json.dumps(v), type(e).__name__, str(e)[:300]); r2.put(P + f"perf/{v.get('profile_name', 'variant')}.json", json.dumps({'config': v, 'failed': f'{type(e).__name__}: {str(e)[:500]}'}).encode())
         return
@@ -101,6 +102,9 @@ def worker(rank, world, cfg, P, work, fp, index, test_items, ck, run_config, tim
     if cfg.get('compile_g'):
         t1 = time.time(); Gp = torch.compile(Gp, mode=cfg.get('compile_mode', 'default')); timers['compile_setup_s'] = round(time.time() - t1, 1)
     cl = (lambda x: x.contiguous(memory_format=torch.channels_last)) if cfg.get('channels_last_gd') else (lambda x: x)
+    w_tv = float(cfg.get('w_temp_video') or 0); flow_net = None
+    if w_tv > 0:
+        import metrics_temporal as mtm; flow_net = mtm.FlowNet(dev)
     prof_n = int(cfg.get('profile_steps') or 0); prof_warm = int(cfg.get('profile_warmup') or 50); prof = {}
     def tick(name, t_prev):
         """Profile mode only: synchronise the GPU and charge the elapsed time to a section."""
@@ -166,7 +170,15 @@ def worker(rank, world, cfg, P, work, fp, index, test_items, ck, run_config, tim
             l_pix = (F.l1_loss(sr, hq) + F.l1_loss(sr2, hq2)) / 2; tp = tick('g_forward_pix_temp', tp)
             l_perc = vgg(sr.contiguous(memory_format=torch.channels_last), hq.contiguous(memory_format=torch.channels_last)); tp = tick('vgg_forward', tp)
             fake = D(sr); l_gan = F.binary_cross_entropy_with_logits(fake.float(), torch.ones_like(fake, dtype=torch.float32)) if cfg['w_gan'] > 0 else torch.zeros((), device=dev)
-        lossG = l_pix + cfg['w_perc'] * l_perc.float() + cfg['w_gan'] * l_gan + cfg['w_temp'] * l_temp
+        l_tv = torch.zeros((), device=dev)
+        if w_tv > 0:
+            vid = (shifts[:, 2] == 0).nonzero().flatten().tolist()  # real-video pairs (unknown motion)
+            if vid:
+                h2, h3 = hq[vid].float(), hq2[vid].float()
+                f_fw = flow_net(h2, h3); f_bw = flow_net(h3, h2)
+                l_tv = mtm.video_temporal_loss(sr[vid].float(), sr2[vid].float(), h2, h3, f_fw, f_bw) * len(vid) / lq.shape[0]
+            tp = tick('video_flow_temporal', tp)
+        lossG = l_pix + cfg['w_perc'] * l_perc.float() + cfg['w_gan'] * l_gan + cfg['w_temp'] * l_temp + w_tv * l_tv
         tp = tick('d_forward_for_g', tp)
         oG.zero_grad(set_to_none=True); scaler.scale(lossG).backward(); tp = tick('g_backward_allreduce', tp); scaler.step(oG); tp = tick('g_optimizer', tp)
         if cfg['w_gan'] > 0 and step % int(cfg.get('d_every') or 1) == 0:
@@ -195,12 +207,12 @@ def worker(rank, world, cfg, P, work, fp, index, test_items, ck, run_config, tim
         acc['train_s'] += time.time() - ts
         if rank == 0 and not prof_n:
             if time.time() - t_log > 300:
-                log(f"step {step} pix {l_pix.item():.4f} perc {l_perc.item():.3f} gan {l_gan.item():.3f} temp {l_temp.item() * 255:.2f} "
+                log(f"step {step} pix {l_pix.item():.4f} perc {l_perc.item():.3f} gan {l_gan.item():.3f} temp {l_temp.item() * 255:.2f} vtemp {l_tv.item() * 255:.2f} "
                     f"{(step - s0) / max(acc['train_s'], 1e-9):.2f} upd/s data-wait {acc['data_wait_s'] / max(time.time() - t_start, 1):.0%}"); t_log = time.time()
             if step % cfg['full_eval_every'] == 0: evaluate('full')
             elif step % cfg['quick_eval_every'] == 0: evaluate('quick')
             if time.time() - last_ck > cfg['ckpt_minutes'] * 60: checkpoint(); last_ck = time.time()
-            done = acc['train_s'] >= budget or time.time() >= wall_end
+            done = acc['train_s'] >= budget or time.time() >= wall_end or (cfg.get('max_steps') and step >= cfg['max_steps'])
             if step % 500 == 0 and r2.exists(P + 'STOP'): r2.delete(P + 'STOP'); log('stop requested'); done = True
             stop[0] = 1.0 if done else 0.0
         if step % 50 == 0:

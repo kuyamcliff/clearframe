@@ -53,3 +53,14 @@ def video_temporal_residual(sr_t, sr_t1, gt_t, gt_t1, flow, border=8):
     r = ((sr_t - w_sr) - (gt_t - w_gt)).abs().mean(1, keepdim=True)
     cov = m.mean().item()
     return ((r * m).sum() / m.sum().clamp(min=1)).item() * 255, cov
+
+
+def video_temporal_loss(sr_t, sr_t1, gt_t, gt_t1, f_fw, f_bw, border=4):
+    """Differentiable training form of video_temporal_residual: masked mean of the added temporal change (0..1 scale)."""
+    with torch.no_grad():
+        msk = occlusion_mask(f_fw, f_bw)
+        msk[..., :border, :] = 0; msk[..., -border:, :] = 0; msk[..., :, :border] = 0; msk[..., :, -border:] = 0
+        w_gt, _ = backwarp(gt_t1, f_fw); target = gt_t - w_gt
+    w_sr, _ = backwarp(sr_t1, f_fw)
+    r = ((sr_t - w_sr) - target).abs().mean(1, keepdim=True)
+    return (r * msk).sum() / msk.sum().clamp(min=1)
