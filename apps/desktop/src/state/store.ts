@@ -415,12 +415,17 @@ export function currentJob(overrides: Partial<NewJob> = {}): NewJob | null {
 export async function openSource(path: string) {
   set((s) => ({ sourcePlay: null, sourcePath: path, source: null, sourceLoading: true, sourceError: null, still: null, clip: null, stillError: null, clipError: null, playhead: 0, range: null, sources: s.sources.includes(path) ? s.sources : [...s.sources, path] }));
   try {
-    const info = await api.sourceInfo(path, true);
+    // Show the video first; the interlace scan decodes a few hundred frames, so it runs after.
+    const info = await api.sourceInfo(path, false);
     if (get().sourcePath !== path) return;
     set({ source: info, sourceLoading: false, playhead: Math.min(info.info.duration / 3, info.info.duration) });
-    const il = info.interlace;
-    const hasDeint = get().pipeline.stages.some((s) => s.type === "deinterlace");
-    if (il && il.tff + il.bff > il.progressive && !hasDeint) toast("warning", "Interlaced video detected.", { label: "Deinterlace", run: () => enableOp("deinterlace") });
+    api.sourceInfo(path, true).then((full) => {
+      if (get().sourcePath !== path) return;
+      set((s) => (s.source ? { source: { ...s.source, interlace: full.interlace } } : {}));
+      const il = full.interlace;
+      const hasDeint = get().pipeline.stages.some((st) => st.type === "deinterlace");
+      if (il && il.tff + il.bff > il.progressive && !hasDeint) toast("warning", "Interlaced video detected.", { label: "Deinterlace", run: () => enableOp("deinterlace") });
+    }).catch(() => {});
   } catch (e) {
     if (get().sourcePath !== path) return;
     set({ sourceLoading: false, sourceError: e instanceof Error ? e.message : String(e) });

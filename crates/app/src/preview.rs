@@ -70,7 +70,7 @@ impl App {
     /// Probe a source and prepare thumbnails (cached by fingerprint).
     pub fn source_info(&self, path: &Path, detect_interlace: bool) -> Result<SourceInfo> {
         let tools = self.tools()?;
-        let info = clearframe_media::probe::probe(&tools, path)?;
+        let info = self.probe_cached(&tools, path)?;
         let fp = fsutil::quick_fingerprint(path)?;
         let paths = self.paths();
         let tdir = paths.cache(CacheArea::Thumbnails).join(&fp);

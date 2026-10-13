@@ -429,9 +429,14 @@ impl Ctx<'_> {
 /// Plan a job without running it (used by the UI for validation and estimates).
 pub fn plan_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, detected_interlaced: Option<bool>) -> Result<(MediaInfo, ExecutionPlan)> {
     let info = probe(tools, &spec.source).context("reading the source video")?;
-    let opts = PlanOptions { detected_interlaced, caps: FilterCaps::from_tools(tools) };
-    let p = plan::plan(&info, spec.range, &spec.pipeline, &spec.output, lookup, &opts).map_err(|e| anyhow!(e))?;
+    let p = plan_probed(tools, &info, spec, lookup, detected_interlaced)?;
     Ok((info, p))
+}
+
+/// [`plan_job`] for a source that was already probed.
+pub fn plan_probed(tools: &FfmpegTools, info: &MediaInfo, spec: &JobSpec, lookup: &dyn ModelLookup, detected_interlaced: Option<bool>) -> Result<ExecutionPlan> {
+    let opts = PlanOptions { detected_interlaced, caps: FilterCaps::from_tools(tools) };
+    plan::plan(info, spec.range, &spec.pipeline, &spec.output, lookup, &opts).map_err(|e| anyhow!(e))
 }
 
 /// Run a job to completion.
