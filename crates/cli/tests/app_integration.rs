@@ -421,3 +421,20 @@ fn background_ffmpeg_detection_is_awaited_and_announced() {
     assert_eq!(app.tools_status().0.map(|t| t.version), Some(t.version));
     assert_eq!(changed.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
+
+#[test]
+fn detected_ffmpeg_is_ready_at_once_on_the_next_launch() {
+    if !have_ffmpeg() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let first = App::open_background_tools(Some(d.path()), worker(), vec![], Arc::new(|_| {})).unwrap();
+    let t = first.tools().unwrap();
+    drop(first);
+    // Second launch: FFmpeg is unchanged, so it is known immediately with no detection pending.
+    let second = App::open_background_tools(Some(d.path()), worker(), vec![], Arc::new(|_| {})).unwrap();
+    let (cached, _) = second.tools_status();
+    assert_eq!(cached.map(|c| c.ffmpeg), Some(t.ffmpeg.clone()), "FFmpeg should come from the saved detection");
+    assert!(!second.tools_pending());
+    assert_eq!(second.tools().unwrap().version, t.version);
+}

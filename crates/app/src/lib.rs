@@ -84,7 +84,12 @@ impl App {
     /// [`AppEvent::ToolsChanged`] is sent when it is done.
     pub fn open_background_tools(root: Option<&Path>, worker: WorkerCommand, bundled_tool_dirs: Vec<PathBuf>, events: EventSink) -> Result<Arc<Self>> {
         let app = Self::open_inner(root, worker, bundled_tool_dirs, events)?;
-        *app.tools_pending.lock() = true;
+        // Use what was detected last time when FFmpeg has not changed since, so it is ready at
+        // once; the background check below still runs and corrects anything that changed.
+        match app.cached_tools() {
+            Some(t) => *app.tools.write() = Some(t),
+            None => *app.tools_pending.lock() = true,
+        }
         let a = app.clone();
         std::thread::Builder::new().name("ffmpeg-detect".into()).spawn(move || a.refresh_tools())?;
         Ok(app)
@@ -154,24 +159,55 @@ impl App {
     /// Re-discover FFmpeg.
     pub fn refresh_tools(&self) {
         let s = self.settings();
+        let before = self.tools.read().as_ref().map(|t| (t.ffmpeg.clone(), t.version.clone()));
         match FfmpegTools::discover(s.ffmpeg_dir.as_deref(), &self.bundled_tool_dirs) {
             Ok(t) => {
                 log::info!("using ffmpeg {} from {}", t.version, t.ffmpeg.display());
+                self.save_tools_cache(&t);
                 *self.tools.write() = Some(t);
                 *self.tools_error.write() = None;
             }
             Err(e) => {
                 log::warn!("ffmpeg not found: {e}");
+                let _ = std::fs::remove_file(self.tools_cache_path());
                 *self.tools.write() = None;
                 *self.tools_error.write() = Some(e.to_string());
             }
         }
+        let changed = before != self.tools.read().as_ref().map(|t| (t.ffmpeg.clone(), t.version.clone()));
         let mut pending = self.tools_pending.lock();
-        if *pending {
-            *pending = false;
-            self.tools_ready.notify_all();
-            drop(pending);
+        let was_pending = *pending;
+        *pending = false;
+        self.tools_ready.notify_all();
+        drop(pending);
+        if was_pending || changed {
             (self.events)(AppEvent::ToolsChanged);
+        }
+    }
+
+    fn tools_cache_path(&self) -> PathBuf {
+        self.paths().data_dir.join("ffmpeg-detected.json")
+    }
+
+    /// The FFmpeg found last time, if this app version detected it and the configured folder and
+    /// both executables (size and modification time) are unchanged.
+    fn cached_tools(&self) -> Option<FfmpegTools> {
+        let c: ToolsCache = serde_json::from_slice(&std::fs::read(self.tools_cache_path()).ok()?).ok()?;
+        let fresh = c.app_version == env!("CARGO_PKG_VERSION")
+            && c.ffmpeg_dir == self.settings().ffmpeg_dir
+            && c.ffmpeg_stamp == file_stamp(&c.tools.ffmpeg)?
+            && c.ffprobe_stamp == file_stamp(&c.tools.ffprobe)?;
+        fresh.then_some(c.tools)
+    }
+
+    fn save_tools_cache(&self, t: &FfmpegTools) {
+        let (Some(ffmpeg_stamp), Some(ffprobe_stamp)) = (file_stamp(&t.ffmpeg), file_stamp(&t.ffprobe)) else { return };
+        let c = ToolsCache { app_version: env!("CARGO_PKG_VERSION").into(), ffmpeg_dir: self.settings().ffmpeg_dir, ffmpeg_stamp, ffprobe_stamp, tools: t.clone() };
+        // Write then rename, so a crash never leaves a half-written file behind.
+        let path = self.tools_cache_path();
+        let tmp = path.with_extension("json.part");
+        if serde_json::to_vec(&c).ok().is_some_and(|b| std::fs::write(&tmp, b).is_ok()) {
+            let _ = std::fs::rename(&tmp, &path);
         }
     }
 
@@ -217,4 +253,21 @@ impl App {
     pub fn emit(&self, e: AppEvent) {
         (self.events)(e);
     }
+}
+
+/// What [`App::cached_tools`] keeps between launches.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ToolsCache {
+    app_version: String,
+    ffmpeg_dir: Option<PathBuf>,
+    ffmpeg_stamp: (u64, i64),
+    ffprobe_stamp: (u64, i64),
+    tools: FfmpegTools,
+}
+
+/// Size and modification time (seconds) of a file, to notice when it was replaced.
+fn file_stamp(p: &Path) -> Option<(u64, i64)> {
+    let m = std::fs::metadata(p).ok()?;
+    let t = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
+    Some((m.len(), t))
 }
