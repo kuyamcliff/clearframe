@@ -7,7 +7,7 @@ wall-clock limit (from process start) keeps the session inside Kaggle's maximum.
 Config: configs/<CONFIG>.json, overridable by upper-case environment variables of the same name (e.g. W_TEMP=10).
 """
 import io, json, os, random, sys, time, subprocess, urllib.request
-T_PROCESS = time.time()
+T_PROCESS = float(os.environ.setdefault('T_PROCESS', str(time.time())))  # GPU worker processes re-import this file; keep the real start
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import r2util as r2
 
