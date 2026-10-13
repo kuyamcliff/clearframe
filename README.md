@@ -1,6 +1,6 @@
 <div align="center">
 
-<a href="https://www.clipfx.me/a/c8DN7xPn"><img src="docs/media/hero.jpg" alt="ClipFX Enhance: free AI video enhancer" width="100%"></a>
+<a href="https://www.clipfx.me/a/LFeCDUGg"><img src="docs/media/hero.jpg" alt="ClipFX Enhance: free AI video enhancer" width="100%"></a>
 
 <h1>ClipFX Enhance</h1>
 
@@ -11,9 +11,9 @@ Free and open source. No account, no subscription, no cloud.</p>
 <a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/ClipFX-Enhance-macos-universal.dmg"><img src="docs/media/btn-macos.svg" alt="Download for macOS" height="48"></a>&nbsp;
 <a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/ClipFX-Enhance-linux-x86_64.AppImage"><img src="docs/media/btn-linux.svg" alt="Download for Linux" height="48"></a>
 
-<a href="https://www.clipfx.me/a/c8DN7xPn"><img src="docs/media/btn-video.svg" alt="Watch the trailer" height="48"></a>
+<a href="https://www.clipfx.me/a/LFeCDUGg"><img src="docs/media/btn-video.svg" alt="Watch the trailer" height="48"></a>
 
-<sub>Windows 10/11 x64 · macOS 11+ (Apple Silicon and Intel) · Linux x64 (<a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/clipfx-enhance-linux-amd64.deb">.deb</a> · <a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/clipfx-enhance-linux-x86_64.rpm">.rpm</a> · <a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/ClipFX-Enhance-linux-x86_64.AppImage">AppImage</a>) · <a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest">all downloads</a></sub>
+<sub>Windows 10/11 x64 · macOS 11+ (Apple Silicon and Intel) · Linux x64 (<a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/clipfx-enhance-linux-amd64.deb">.deb</a> · <a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/clipfx-enhance-linux-x86_64.rpm">.rpm</a> · <a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/ClipFX-Enhance-linux-x86_64.AppImage">AppImage</a>) · <a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest">all downloads</a><br>Also on <b>clipfx.me</b>: <a href="https://www.clipfx.me/a/LFeCDUGg">Windows</a> · <a href="https://www.clipfx.me/a/Scn6uqeP">macOS</a> · <a href="https://www.clipfx.me/a/AZwabs2e">Linux</a></sub>
 
 <br><br>
 
