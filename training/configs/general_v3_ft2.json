@@ -1,0 +1,30 @@
+{
+  "run": "general-v3-ft2",
+  "batches": ["b001-v2", "b002-v2", "v001-v2"],
+  "need_video": true,
+  "init_g": "originals/realesr-general-x4v3.pth",
+  "init_d_url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.3/RealESRGAN_x4plus_netD.pth",
+  "train_seconds": 36000,
+  "max_wall_seconds": 41400,
+  "final_reserve_seconds": 900,
+  "ckpt_minutes": 10,
+  "quick_eval_every": 2000,
+  "full_eval_every": 8000,
+  "batch_size": 24,
+  "lq_patch": 64,
+  "lr": 5e-5,
+  "w_perc": 1.0,
+  "w_gan": 0.05,
+  "w_temp": 30.0,
+  "ema_decay": 0.999,
+  "num_workers": 2,
+  "prefetch_factor": 6,
+  "seed": 1234,
+  "gates": {
+    "psnr_drop_max_db": 0.2,
+    "pan_consistency_max_ratio": 1.05,
+    "video_temporal_max_ratio": 1.0,
+    "perceptual_video_temporal_max_ratio": 1.10,
+    "balanced_score": "lpips_mean / lpips_mean0 + 0.5 * video_T / video_T0"
+  }
+}

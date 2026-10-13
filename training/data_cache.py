@@ -83,7 +83,7 @@ def build(r2, items, work, fp, log=print):
         for t in range(e['n']):
             f = cv2.imread(f"{work}/{it['key']}lq_{si}_{t}.png"); o = e['lq'] + t * e['l'] ** 2 * 3; lqm[o:o + f.size] = f.reshape(-1)
     with ThreadPoolExecutor(4) as ex: list(ex.map(fill, range(len(plan))))
-    gtm.flush(); lqm.flush(); del gtm, lqm
+    gtm.flush(); lqm.flush()
     json.dump(index, open(tmp + '/index.json', 'w')); open(tmp + '/COMPLETE', 'w').write(fp)
     shutil.rmtree(final, ignore_errors=True); os.rename(tmp, final)
     stats = {'reused': False, 'objects': len(need), 'download_gb': round(nbytes / 1e9, 2), 'download_s': round(t_dl), 'build_s': round(time.time() - t0 - t_dl),

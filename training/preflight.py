@@ -4,7 +4,7 @@ Checks GPUs, library versions, free disk and RAM, R2 connectivity, the selected 
 video batches exist but are not selected), the original weights' SHA-256, and a resumable checkpoint's structure.
 Returns a report dict that the training job stores with its run config.
 """
-import hashlib, json, os, shutil, sys, urllib.request
+import hashlib, json, os, shutil, sys
 import r2util as r2
 
 GENERAL_SHA = '8dc7edb9ac80ccdc'

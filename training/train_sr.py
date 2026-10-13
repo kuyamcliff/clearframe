@@ -1,289 +1,200 @@
-"""Fine-tune Real-ESRGAN General v3 (SRVGG compact, x4) on Kaggle with 10-minute checkpoints to R2.
+"""Fine-tune Real-ESRGAN General v3 on Kaggle (PRD: clock, resume, cache, Pareto candidates, verified checkpoints).
 
-Resumes from runs/<RUN>/ckpt_latest.pt when present. Every EVAL_EVERY steps it scores the EMA generator on the
-held-out test set (PSNR on Y, LPIPS-Alex, temporal flicker on the known pan) and keeps the best as best_G.pth.
+Order of a session: preflight -> restore checkpoint pointer -> data discovery and fingerprinted cache -> evaluator
+(original-model baseline once per run) -> training. The training clock starts at the first optimizer step; a separate
+wall-clock limit (from process start) keeps the session inside Kaggle's maximum.
+
+Config: configs/<CONFIG>.json, overridable by upper-case environment variables of the same name (e.g. W_TEMP=10).
 """
-import io, json, os, random, sys, time, glob, math, subprocess
+import io, json, os, random, sys, time, subprocess, urllib.request
+T_PROCESS = time.time()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import r2util as r2
-subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', 'lpips'], check=False)
-import numpy as np, cv2, torch, torch.nn as nn, torch.nn.functional as F
-from torch.nn.utils import spectral_norm
-import lpips
 
-RUN = os.environ.get('RUN', 'general-v3-ft1'); BATCHES = os.environ.get('BATCHES', 'b001').split(',')
-HOURS = float(os.environ.get('HOURS', '11.3')); CKPT_MIN = float(os.environ.get('CKPT_MIN', '10'))
-EVAL_EVERY = int(os.environ.get('EVAL_EVERY', '2000')); BS = int(os.environ.get('BS', '24')); LQ = int(os.environ.get('LQ_PATCH', '64'))
-LR = float(os.environ.get('LR', '5e-5')); W_GAN = float(os.environ.get('W_GAN', '0.1')); W_PERC = float(os.environ.get('W_PERC', '1.0')); W_TEMP = float(os.environ.get('W_TEMP', '1.0'))
-BASE_URL = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth'
-BASE_D_URL = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.3/RealESRGAN_x4plus_netD.pth'
-T0 = time.time(); DEADLINE = T0 + HOURS * 3600; DEV = 'cuda'; P = f'runs/{RUN}/'
-WORK = '/kaggle/tmp' if os.path.isdir('/kaggle/tmp') else '/tmp/clipfx'; os.makedirs(WORK, exist_ok=True)
+def load_config():
+    name = os.environ.get('CONFIG', 'general_v3_ft2'); here = os.path.dirname(os.path.abspath(__file__))
+    cfg = json.load(open(f'{here}/configs/{name}.json')) if os.path.exists(f'{here}/configs/{name}.json') else json.loads(os.environ['CONFIG_JSON'])
+    for k, v in list(cfg.items()):
+        e = os.environ.get(k.upper())
+        if e is not None and not isinstance(v, dict): cfg[k] = e if isinstance(v, str) else json.loads(e)
+    return cfg
+
 def log(*a): print(time.strftime('%H:%M:%S'), *a, flush=True)
 
-# ---------------- models ----------------
-class SRVGGNetCompact(nn.Module):
-    def __init__(s, nf=64, nc=32, up=4):
-        super().__init__(); s.up = up; b = [nn.Conv2d(3, nf, 3, 1, 1), nn.PReLU(nf)]
-        for _ in range(nc): b += [nn.Conv2d(nf, nf, 3, 1, 1), nn.PReLU(nf)]
-        b += [nn.Conv2d(nf, 3 * up * up, 3, 1, 1)]; s.body = nn.ModuleList(b); s.ps = nn.PixelShuffle(up)
-    def forward(s, x):
-        o = x
-        for m in s.body: o = m(o)
-        return s.ps(o) + F.interpolate(x, scale_factor=s.up, mode='nearest')
+def main():
+    timers = {}; mark = lambda k, t0: timers.__setitem__(k, round(time.time() - t0, 1))
+    cfg = load_config(); P = f"runs/{cfg['run']}/"; t0 = time.time()
+    if subprocess.run([sys.executable, '-c', 'import lpips'], capture_output=True).returncode:
+        subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', 'lpips==0.1.4'], check=True)
+    mark('setup_packages_s', t0)
+    import torch
+    import preflight, ckpt, data_cache as dc, evaluate_sr as ev
+    t0 = time.time(); pre = preflight.run(cfg['batches'], need_video=cfg.get('need_video', False), run_prefix=P, need_gpus=1); mark('preflight_s', t0)
+    work = '/kaggle/tmp' if os.path.isdir('/kaggle/tmp') else '/tmp/clipfx'; os.makedirs(work, exist_ok=True)
+    # 1) resume state first: it is small, and tells us whether this is a continuation
+    t0 = time.time(); resume = ckpt.fetch_latest(r2, P, f'{work}/resume.pt'); mark('resume_fetch_s', t0)
+    # 2) data
+    t0 = time.time(); items = dc.discover(r2, cfg['batches'], work); fp, nobj = dc.fingerprint(r2, cfg['batches']); summ = dc.summary(items); mark('discover_s', t0)
+    log('data', fp, json.dumps(summ))
+    if cfg.get('need_video') and not any(k.endswith('/video') and '/train/' in k for k in summ['samples']): raise SystemExit('no training video loaded')
+    index, cstats = dc.build(r2, items, work, fp, log=log); timers.update({f'cache_{k}': v for k, v in cstats.items()})
+    run_config = {'config': cfg, 'git_sha': os.environ.get('GIT_SHA', 'unknown'), 'data_fingerprint': fp, 'data_objects': nobj, 'data_summary': summ,
+                  'preflight': pre, 'evaluator': ev.EVALUATOR_VERSION, 'torch': torch.__version__, 'world': torch.cuda.device_count()}
+    if resume:
+        ck = torch.load(f'{work}/resume.pt', map_location='cpu', weights_only=False)
+        old = ck['run_config']
+        if old['config']['lq_patch'] != cfg['lq_patch'] or old['evaluator'] != ev.EVALUATOR_VERSION:
+            raise SystemExit('checkpoint was made with an incompatible config/evaluator; start a new run name')
+        if old['data_fingerprint'] != fp: log('note: data changed since the checkpoint (new batches or files); continuing')
+    else:
+        ck = None
+    r2.put(P + 'run_config.json', json.dumps(run_config, indent=1, default=str).encode())
+    world = torch.cuda.device_count()
+    import torch.multiprocessing as tmp
+    test_items = [it for it in items if it['split'] == 'test']
+    tmp.spawn(worker, args=(world, cfg, P, work, fp, index, test_items, ck, run_config, timers), nprocs=world, join=True)
 
-class UNetD(nn.Module):  # Real-ESRGAN UNetDiscriminatorSN
-    def __init__(s, nf=64):
-        super().__init__(); sn = spectral_norm
-        s.conv0 = nn.Conv2d(3, nf, 3, 1, 1); s.conv1 = sn(nn.Conv2d(nf, nf * 2, 4, 2, 1, bias=False)); s.conv2 = sn(nn.Conv2d(nf * 2, nf * 4, 4, 2, 1, bias=False))
-        s.conv3 = sn(nn.Conv2d(nf * 4, nf * 8, 4, 2, 1, bias=False)); s.conv4 = sn(nn.Conv2d(nf * 8, nf * 4, 3, 1, 1, bias=False))
-        s.conv5 = sn(nn.Conv2d(nf * 4, nf * 2, 3, 1, 1, bias=False)); s.conv6 = sn(nn.Conv2d(nf * 2, nf, 3, 1, 1, bias=False))
-        s.conv7 = sn(nn.Conv2d(nf, nf, 3, 1, 1, bias=False)); s.conv8 = sn(nn.Conv2d(nf, nf, 3, 1, 1, bias=False)); s.conv9 = nn.Conv2d(nf, 1, 3, 1, 1)
-    def forward(s, x):
-        a = lambda t: F.leaky_relu(t, 0.2, True); up = lambda t: F.interpolate(t, scale_factor=2, mode='bilinear', align_corners=False)
-        x0 = a(s.conv0(x)); x1 = a(s.conv1(x0)); x2 = a(s.conv2(x1)); x3 = a(s.conv3(x2))
-        x4 = a(s.conv4(up(x3))) + x2; x5 = a(s.conv5(up(x4))) + x1; x6 = a(s.conv6(up(x5))) + x0
-        return s.conv9(a(s.conv8(a(s.conv7(x6)))))
-
-class VGGLoss(nn.Module):
-    def __init__(s):
-        super().__init__(); import torchvision
-        f = torchvision.models.vgg19(weights=torchvision.models.VGG19_Weights.IMAGENET1K_V1).features[:36].eval()
-        for p in f.parameters(): p.requires_grad = False
-        s.f = f; s.ids = {2: 0.1, 7: 0.1, 16: 1.0, 25: 1.0, 34: 1.0}  # conv1_2 conv2_2 conv3_4 conv4_4 conv5_4 (pre-ReLU)
-        s.register_buffer('m', torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)); s.register_buffer('sd', torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
-    def forward(s, x, y):
-        x = (x - s.m) / s.sd; y = (y - s.m) / s.sd; loss = 0
-        for i, l in enumerate(s.f):
-            x = l(x); y = l(y)
-            if i in s.ids: loss = loss + s.ids[i] * F.l1_loss(x, y.detach())
-            if i >= 34: break
-        return loss
-
-# ---------------- data ----------------
-def fetch_batch(b):
-    d = f'{WORK}/data/{b}'; flag = d + '/.complete'
-    if os.path.exists(flag): return d
-    keys = [k for k in r2.ls(f'data/{b}/') if '/train/' in k or '/test/' in k]
-    log('downloading', b, len(keys), 'files')
-    from concurrent.futures import ThreadPoolExecutor
-    def dl(k):
-        p = f'{WORK}/{k}'; os.makedirs(os.path.dirname(p), exist_ok=True)
-        if not os.path.exists(p): r2.get_file(k, p)
-    with ThreadPoolExecutor(32) as ex: list(ex.map(dl, keys))
-    open(flag, 'w').close(); return d
-
-def load_items(split):
-    items = []
-    for b in BATCHES:
-        for m in sorted(glob.glob(f'{fetch_batch(b)}/{split}/*/meta.json')):
-            d = os.path.dirname(m); items.append((d, json.load(open(m))))
-    return items
-
-def build_cache(items):
-    """Unpack each training sequence once: the GT region the pan covers and its LQ frames, as raw uint8 on disk."""
-    idx_p = f'{WORK}/cache_index.json'
-    if os.path.exists(idx_p): return json.load(open(idx_p))
-    index, gt_off, lq_off = [], 0, 0; plan = []
-    for d, m in items:
-        for si, seq in enumerate(m['sequences']):
-            xs = [o[0] for o in seq['offsets']]; ys = [o[1] for o in seq['offsets']]; c = seq['crop']
-            x0, y0, w, h = min(xs), min(ys), max(xs) - min(xs) + c, max(ys) - min(ys) + c
-            n = len(seq['offsets']); l = c // 4; video = bool(m.get('video'))
-            if video: w = h = c
-            index.append({'gt': gt_off, 'w': w, 'h': h, 'lq': lq_off, 'l': l, 'n': n, 'video': video,
-                          'offs': [[0, 0]] * n if video else [[x - x0, y - y0] for x, y in seq['offsets']]})
-            plan.append((d, si, x0, y0, w, h, n)); gt_off += w * h * 3 * (n if video else 1); lq_off += n * l * l * 3
-    gtm = np.lib.format.open_memmap(f'{WORK}/gt.npy', 'w+', np.uint8, (gt_off,)); lqm = np.lib.format.open_memmap(f'{WORK}/lq.npy', 'w+', np.uint8, (lq_off,))
-    from concurrent.futures import ThreadPoolExecutor
-    def fill(k):
-        d, si, x0, y0, w, h, n = plan[k]; e = index[k]
-        if e['video']:
-            for t in range(n): gtm[e['gt'] + t * w * h * 3: e['gt'] + (t + 1) * w * h * 3] = cv2.imread(f'{d}/gt_{t}.jpg').reshape(-1)
-        else:
-            g = cv2.imread(d + '/gt.jpg')
-            gtm[e['gt']:e['gt'] + w * h * 3] = np.ascontiguousarray(g[y0:y0 + h, x0:x0 + w]).reshape(-1)
-        for t in range(n):
-            f = cv2.imread(f'{d}/lq_{si}_{t}.png'); o = e['lq'] + t * e['l'] ** 2 * 3
-            lqm[o:o + f.size] = f.reshape(-1)
-    with ThreadPoolExecutor(4) as ex: list(ex.map(fill, range(len(plan))))
-    gtm.flush(); lqm.flush(); del gtm, lqm
-    json.dump(index, open(idx_p, 'w')); log('cache built', len(index), 'sequences', round(gt_off / 1e9, 1), 'GB'); return index
-
-def _aug_shift(dx, dy, hf, vf, k):
-    """How a content shift (frame2[y,x] = frame1[y+dy, x+dx]) changes under the same flips and np.rot90 k times."""
-    if hf: dx = -dx
-    if vf: dy = -dy
-    for _ in range(k): dx, dy = dy, -dx
-    return dx, dy
-
-class PairDataset(torch.utils.data.Dataset):
-    """Two consecutive frames of a pan: LQ patches at the same LQ position, their GT patches, and the GT-pixel shift."""
-    def __init__(s, index): s.index = index; s.gt = s.lq = None
-    def __len__(s): return 10 ** 9
-    def __getitem__(s, _):
-        if s.gt is None: s.gt = np.load(f'{WORK}/gt.npy', mmap_mode='r'); s.lq = np.load(f'{WORK}/lq.npy', mmap_mode='r')
-        e = random.choice(s.index); t = random.randrange(e['n'] - 1); L = e['l']
-        sz = e['w'] * e['h'] * 3; video = e.get('video', False)
-        y = random.randrange(0, L - LQ + 1); x = random.randrange(0, L - LQ + 1); ls, hs = [], []
-        for f in (t, t + 1):
-            ox, oy = e['offs'][f]; base = e['gt'] + (f * sz if video else 0)
-            g = s.gt[base: base + sz].reshape(e['h'], e['w'], 3)
-            ls.append(s.lq[e['lq'] + f * L * L * 3: e['lq'] + (f + 1) * L * L * 3].reshape(L, L, 3)[y:y + LQ, x:x + LQ])
-            hs.append(g[oy + y * 4: oy + y * 4 + LQ * 4, ox + x * 4: ox + x * 4 + LQ * 4])
-        (x1, y1), (x2, y2) = e['offs'][t], e['offs'][t + 1]; dx, dy = x2 - x1, y2 - y1
-        hf, vf, k = random.random() < 0.5, random.random() < 0.5, random.randrange(4)
-        def aug(a):
-            if hf: a = a[:, ::-1]
-            if vf: a = a[::-1]
-            return np.rot90(a, k)
-        dx, dy = _aug_shift(dx, dy, hf, vf, k)
-        tt = lambda a: torch.from_numpy(np.ascontiguousarray(aug(a)[..., ::-1]).transpose(2, 0, 1)).float() / 255
-        # Real camera motion is unknown, so video pairs do not take part in the temporal loss (flag 0).
-        return tt(ls[0]), tt(hs[0]), tt(ls[1]), tt(hs[1]), torch.tensor([dx, dy, 0 if video else 1])
-
-def temporal_loss(o1, o2, shifts):
-    """Mean |o1 - o2| over the overlap after aligning by the known pan shift; the reference is perfectly static."""
-    c = o1.shape[-1]; tot = 0; cnt = 0
-    for i, row in enumerate(shifts.tolist()):
-        dx, dy = row[0], row[1]
-        if len(row) > 2 and not row[2]: continue
-        cnt += 1
-        a = o1[i, :, max(dy, 0):c + min(dy, 0), max(dx, 0):c + min(dx, 0)]
-        b = o2[i, :, max(-dy, 0):c + min(-dy, 0), max(-dx, 0):c + min(-dx, 0)]
-        tot = tot + (a - b).abs().mean()
-    return tot / max(cnt, 1)
-
-# ---------------- eval ----------------
-def ycbcr_y(t):  # RGB in [0,1] -> BT.601 luma in [16,235]
-    return 16 + 65.481 * t[:, 0] + 128.553 * t[:, 1] + 24.966 * t[:, 2]
-
-@torch.no_grad()
-def evaluate(G, test, lp):
-    G.eval(); res = {}
-    for d, m in test:
-        g = cv2.imread(d + '/gt.jpg')
-        for si, seq in enumerate(m['sequences']):
-            lvl = seq['degradation'].get('level', str(si)); outs = []
-            for t in (1, 2, 3):
-                lq = torch.from_numpy(cv2.imread(f'{d}/lq_{si}_{t}.png')[..., ::-1].copy()).permute(2, 0, 1)[None].float().div(255).to(DEV)
-                outs.append(G(lq).clamp(0, 1))
-            c = seq['crop']; ox, oy = seq['offsets'][2]
-            gt = torch.from_numpy(g[oy:oy + c, ox:ox + c, ::-1].copy()).permute(2, 0, 1)[None].float().div(255).to(DEV)
-            o = outs[1]; b = 8
-            mse = F.mse_loss(ycbcr_y(o)[..., b:-b, b:-b], ycbcr_y(gt)[..., b:-b, b:-b]).item()
-            psnr = 10 * math.log10(255 ** 2 / max(mse, 1e-8))
-            l = lp(o * 2 - 1, gt * 2 - 1).item()
-            # flicker: consecutive outputs aligned by the known pan offsets (GT pixels); the reference is perfectly static
-            (x1, y1), (x2, y2) = seq['offsets'][1], seq['offsets'][2]; dx, dy = x2 - x1, y2 - y1
-            a = outs[0][..., max(dy, 0):c + min(dy, 0), max(dx, 0):c + min(dx, 0)]; bb = outs[1][..., max(-dy, 0):c + min(-dy, 0), max(-dx, 0):c + min(-dx, 0)]
-            fl = (a - bb).abs().mean().item() * 255
-            r = res.setdefault(lvl, {'psnr': [], 'lpips': [], 'flicker': []}); r['psnr'].append(psnr); r['lpips'].append(l); r['flicker'].append(fl)
-    G.train()
-    out = {k: {kk: float(np.mean(vv)) for kk, vv in v.items()} for k, v in res.items()}
-    out['mean'] = {kk: float(np.mean([out[k][kk] for k in res])) for kk in ['psnr', 'lpips', 'flicker']}; return out
-
-BASELINE = {}
-def better(m, best):
-    # Looks better (LPIPS), keeps accuracy (at most 0.2 dB PSNR lost) and does not flicker more than 5% over the original model.
-    flicker_cap = BASELINE.get('flicker', float('inf')) * 1.05
-    return m['mean']['lpips'] < best['mean']['lpips'] - 1e-4 and m['mean']['psnr'] > best['mean']['psnr'] - 0.2 and m['mean']['flicker'] <= flicker_cap
-
-@torch.no_grad()
-def save_samples(G, test, tag):
-    G.eval(); tiles = []
-    for d, m in test[:4]:
-        si = 2; lq = cv2.imread(f'{d}/lq_{si}_2.png'); c = m['sequences'][si]['crop']; ox, oy = m['sequences'][si]['offsets'][2]
-        o = G(torch.from_numpy(lq[..., ::-1].copy()).permute(2, 0, 1)[None].float().div(255).to(DEV)).clamp(0, 1)[0].permute(1, 2, 0).cpu().numpy()[..., ::-1] * 255
-        g = cv2.imread(d + '/gt.jpg')[oy:oy + c, ox:ox + c]
-        tiles.append(np.hstack([cv2.resize(lq, (c, c), interpolation=cv2.INTER_NEAREST), o.astype(np.uint8), g]))
-    G.train(); r2.put(P + f'samples/{tag}.jpg', cv2.imencode('.jpg', np.vstack(tiles), [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tobytes())
-
-# ---------------- main ----------------
-def worker(rank, world, index, test):
-    import torch.distributed as dist
+def worker(rank, world, cfg, P, work, fp, index, test_items, ck, run_config, timers):
+    import numpy as np, torch, torch.nn as nn, torch.nn.functional as F, torch.distributed as dist
+    import ckpt, sr_common as sc, evaluate_sr as ev
     os.environ.setdefault('MASTER_ADDR', '127.0.0.1'); os.environ.setdefault('MASTER_PORT', '29511')
     dist.init_process_group('nccl', rank=rank, world_size=world); torch.cuda.set_device(rank); dev = f'cuda:{rank}'
-    global DEV; DEV = dev; torch.backends.cudnn.benchmark = True; random.seed(1234 + rank + int(time.time()))
-    cv2.setNumThreads(1); torch.set_num_threads(1)
-    G = SRVGGNetCompact().to(dev); D = UNetD().to(dev); vgg = VGGLoss().to(dev).to(memory_format=torch.channels_last)
-    base = torch.load(io.BytesIO(__import__('urllib.request').request.urlopen(BASE_URL).read()), map_location='cpu', weights_only=True)
-    G.load_state_dict(base['params'] if 'params' in base else base)
-    bd = torch.load(io.BytesIO(__import__('urllib.request').request.urlopen(BASE_D_URL).read()), map_location='cpu', weights_only=True)
-    D.load_state_dict(bd['params'] if 'params' in bd else bd)
-    Gema = SRVGGNetCompact().to(dev); Gema.load_state_dict(G.state_dict()); Gema.requires_grad_(False)
-    oG = torch.optim.Adam(G.parameters(), LR, betas=(0.9, 0.99)); oD = torch.optim.Adam(D.parameters(), LR, betas=(0.9, 0.99))
-    scaler = torch.amp.GradScaler(); step = 0; state = {'best': None, 'baseline': None}
-    if os.path.exists(f'{WORK}/ck.pt'):
-        ck = torch.load(f'{WORK}/ck.pt', map_location='cpu', weights_only=False)
+    torch.backends.cudnn.benchmark = True; import cv2; cv2.setNumThreads(1); torch.set_num_threads(1)
+    random.seed(cfg['seed'] + rank); np.random.seed(cfg['seed'] + rank); torch.manual_seed(cfg['seed'] + rank)
+    t0 = time.time()
+    G = sc.SRVGGNetCompact().to(dev); D = sc.UNetD().to(dev); vgg = sc.VGGLoss().to(dev).to(memory_format=torch.channels_last)
+    G.load_state_dict(torch.load(io.BytesIO(r2.get(cfg['init_g'])), map_location='cpu', weights_only=True)['params'])
+    bd = torch.load(io.BytesIO(urllib.request.urlopen(cfg['init_d_url']).read()), map_location='cpu', weights_only=True); D.load_state_dict(bd.get('params', bd))
+    Gema = sc.SRVGGNetCompact().to(dev); Gema.load_state_dict(G.state_dict()); Gema.requires_grad_(False)
+    oG = torch.optim.Adam(G.parameters(), cfg['lr'], betas=(0.9, 0.99)); oD = torch.optim.Adam(D.parameters(), cfg['lr'], betas=(0.9, 0.99))
+    scaler = torch.amp.GradScaler(); step = 0
+    state = {'baseline': None, 'pareto': {}, 'train_seconds_total': 0.0, 'sessions': 0}
+    if ck:
         G.load_state_dict(ck['G']); D.load_state_dict(ck['D']); Gema.load_state_dict(ck['Gema']); oG.load_state_dict(ck['oG']); oD.load_state_dict(ck['oD'])
-        step = ck['step']; state = ck['state']
-        if rank == 0: log('resumed at step', step)
-    lp = lpips.LPIPS(net='alex', verbose=False).to(dev).eval() if rank == 0 else None
-    if rank == 0 and state['baseline'] is None:
-        state['baseline'] = evaluate(Gema, test, lp); state['best'] = state['baseline']; log('baseline', json.dumps(state['baseline']['mean']))
-        r2.put(P + 'baseline.json', json.dumps(state['baseline']).encode()); save_samples(Gema, test, 'baseline')
-    if rank == 0: BASELINE.update(state['baseline']['mean'])
+        scaler.load_state_dict(ck['scaler']); step = ck['step']; state = ck['state']
+        # rank 0 restores its exact generators; other ranks reseed deterministically from the step
+        if rank == 0 and ck.get('rng'): ckpt.set_rng_state(ck['rng'][0])
+        else: random.seed(cfg['seed'] + rank + 1000 * step); np.random.seed((cfg['seed'] + rank + 1000 * step) % 2 ** 32); torch.manual_seed(cfg['seed'] + rank + 1000 * step)
+    state['sessions'] += 1
+    timers['model_init_s'] = round(time.time() - t0, 1)
+    E = None
+    if rank == 0:
+        t1 = time.time(); E = ev.Evaluator(r2, test_items, work, dev, log=log); timers['evaluator_setup_s'] = round(time.time() - t1, 1)
+        if state['baseline'] is None:  # original model, same evaluator and data, once per run
+            t1 = time.time(); state['baseline'] = {'quick': E.run(Gema, 'quick'), 'full': E.run(Gema, 'full')}; timers['baseline_eval_s'] = round(time.time() - t1, 1)
+            r2.put(P + 'baseline.json', json.dumps(state['baseline']).encode()); log('baseline', json.dumps(summ_metrics(state['baseline']['full'])))
     dist.barrier()
     Gp = nn.parallel.DistributedDataParallel(G, device_ids=[rank]); Dp = nn.parallel.DistributedDataParallel(D, device_ids=[rank], broadcast_buffers=False)
-    dl = iter(torch.utils.data.DataLoader(PairDataset(index), batch_size=BS // world, num_workers=2, persistent_workers=True, prefetch_factor=6, pin_memory=True))
-    last_ck = time.time(); t_log = time.time(); t_start = time.time(); s0 = step
+    dl = iter(torch.utils.data.DataLoader(sc.PairDataset(index, f'{work}/cache-{fp}', cfg['lq_patch']), batch_size=cfg['batch_size'] // world,
+                                          num_workers=cfg['num_workers'], persistent_workers=True, prefetch_factor=cfg['prefetch_factor'], pin_memory=True))
+    acc = {'train_s': 0.0, 'data_wait_s': 0.0, 'eval_s': 0.0, 'ckpt_s': 0.0, 'pairs': 0}
+    t_start = time.time(); last_ck = time.time(); t_log = time.time(); s0 = step
+    budget = cfg['train_seconds']; wall_end = T_PROCESS + cfg['max_wall_seconds'] - cfg['final_reserve_seconds']
+    stop = torch.zeros(1, device=dev); last_eval = {}
+
+    def status(extra=None):
+        st = {'status_version': 2, 'run': cfg['run'], 'step': step, 'time': time.time(), 'batches': cfg['batches'], 'data_fingerprint': fp,
+              'baseline': summ_metrics(state['baseline']['full']), 'last_eval': last_eval, 'pareto': {k: {'step': v['step'], 'metrics': v['metrics']} for k, v in state['pareto'].items()},
+              'session': {**timers, **{k: round(v, 1) for k, v in acc.items()}, 'session_s': round(time.time() - T_PROCESS),
+                          'pairs_per_s': round(acc['pairs'] / max(acc['train_s'], 1e-9), 1), 'updates_per_s': round((step - s0) / max(acc['train_s'], 1e-9), 3)},
+              'train_seconds_total': round(state['train_seconds_total'] + acc['train_s'])}
+        if extra: st.update(extra)
+        r2.put(P + 'status.json', json.dumps(st, default=str).encode())
+
     def checkpoint():
-        torch.save({'G': G.state_dict(), 'D': D.state_dict(), 'Gema': Gema.state_dict(), 'oG': oG.state_dict(), 'oD': oD.state_dict(), 'step': step, 'state': state}, f'{WORK}/ck_new.pt')
-        r2.put_file(P + 'ckpt_latest.pt', f'{WORK}/ck_new.pt'); r2.put(P + 'status.json', json.dumps({'step': step, 'time': time.time(), 'best': state['best']['mean'], 'baseline': state['baseline']['mean']}).encode())
-        log('checkpoint', step)
-    stop = torch.zeros(1, device=dev)
+        t1 = time.time()
+        obj = {'G': G.state_dict(), 'D': D.state_dict(), 'Gema': Gema.state_dict(), 'oG': oG.state_dict(), 'oD': oD.state_dict(), 'scaler': scaler.state_dict(),
+               'step': step, 'state': {**state, 'train_seconds_total': state['train_seconds_total'] + acc['train_s']}, 'rng': [ckpt.rng_state()], 'run_config': run_config}
+        ckpt.save_local(obj, f'{work}/ck.pt'); ptr = ckpt.publish(r2, P, f'{work}/ck.pt', step)
+        ckpt.prune(r2, P, protect={v['key'] for v in state['pareto'].values() if 'key' in v})
+        acc['ckpt_s'] += time.time() - t1; status(); log('checkpoint', step, ptr['key'].split('/')[-1], f'{time.time() - t1:.1f}s')
+
+    def evaluate(suite):
+        nonlocal last_eval
+        t1 = time.time(); m = E.run(Gema, suite); acc['eval_s'] += time.time() - t1
+        sm = summ_metrics(m); last_eval = {'suite': suite, 'step': step, 'metrics': sm, 'at': time.time()}
+        r2.put(P + f'evals/{step:08d}-{suite}.json', json.dumps({'step': step, 'data_fingerprint': fp, 'suite_result': m}).encode())
+        log('eval', suite, step, json.dumps(sm))
+        if suite == 'full': promote(m, sm)
+        status()
+
+    def promote(m, sm):
+        wins, rec_extra = decide_promotions(m, sm, state['baseline']['full'], state['pareto'], cfg['gates'])
+        # every full-eval candidate is kept (immutable), promoted or not
+        torch.save({'params': {k: v.detach().cpu() for k, v in Gema.state_dict().items()}}, f'{work}/cand.pth')
+        sha = ckpt.sha256_file(f'{work}/cand.pth'); key = f'{P}candidates/step-{step:08d}-{sha[:12]}.pth'; r2.put_file(key, f'{work}/cand.pth')
+        if r2.s3.head_object(Bucket=r2.BUCKET, Key=key)['ContentLength'] != os.path.getsize(f'{work}/cand.pth'): raise IOError('candidate upload mismatch')
+        rec = {'step': step, 'key': key, 'sha256': sha, 'metrics': sm, **rec_extra,
+               'data_fingerprint': fp, 'evaluator': run_config['evaluator'], 'ema': True, 'at': time.time()}
+        r2.put(P + f'candidates/step-{step:08d}.json', json.dumps(rec).encode())
+        for w in wins:
+            state['pareto'][w] = rec; r2.put(P + f'{w}.json', json.dumps(rec).encode()); log('PROMOTED', w, step, json.dumps(sm))
+
     while True:
-        lq, hq, lq2, hq2, shifts = next(dl); lq, hq, lq2, hq2 = (v.to(dev, non_blocking=True) for v in (lq, hq, lq2, hq2))
+        tw = time.time(); lq, hq, lq2, hq2, shifts = next(dl); acc['data_wait_s'] += time.time() - tw
+        ts = time.time()
+        lq, hq, lq2, hq2 = (v.to(dev, non_blocking=True) for v in (lq, hq, lq2, hq2))
         for p in D.parameters(): p.requires_grad = False
         with torch.autocast('cuda', dtype=torch.float16):
-            both = Gp(torch.cat([lq, lq2])); sr, sr2 = both.chunk(2)
-            l_temp = temporal_loss(sr.float(), sr2.float(), shifts) if W_TEMP > 0 else torch.zeros((), device=dev)
-            l_pix = (F.l1_loss(sr, hq) + F.l1_loss(sr2, hq2)) / 2; l_perc = vgg(sr.contiguous(memory_format=torch.channels_last), hq.contiguous(memory_format=torch.channels_last))
-            if W_GAN > 0:
-                fake = D(sr); l_gan = F.binary_cross_entropy_with_logits(fake.float(), torch.ones_like(fake, dtype=torch.float32))
-            else:
-                l_gan = torch.zeros((), device=dev)
-        lossG = l_pix + W_PERC * l_perc.float() + W_GAN * l_gan + W_TEMP * l_temp
+            sr, sr2 = Gp(torch.cat([lq, lq2])).chunk(2)
+            l_temp = sc.temporal_loss(sr.float(), sr2.float(), shifts) if cfg['w_temp'] > 0 else torch.zeros((), device=dev)
+            l_pix = (F.l1_loss(sr, hq) + F.l1_loss(sr2, hq2)) / 2
+            l_perc = vgg(sr.contiguous(memory_format=torch.channels_last), hq.contiguous(memory_format=torch.channels_last))
+            fake = D(sr); l_gan = F.binary_cross_entropy_with_logits(fake.float(), torch.ones_like(fake, dtype=torch.float32)) if cfg['w_gan'] > 0 else torch.zeros((), device=dev)
+        lossG = l_pix + cfg['w_perc'] * l_perc.float() + cfg['w_gan'] * l_gan + cfg['w_temp'] * l_temp
         oG.zero_grad(set_to_none=True); scaler.scale(lossG).backward(); scaler.step(oG)
-        if W_GAN > 0:
+        if cfg['w_gan'] > 0:
             for p in D.parameters(): p.requires_grad = True
             oD.zero_grad(set_to_none=True)
-            with torch.autocast('cuda', dtype=torch.float16):
-                dr = Dp(hq).float(); l_real = F.binary_cross_entropy_with_logits(dr, torch.ones_like(dr))
+            with torch.autocast('cuda', dtype=torch.float16): dr = Dp(hq).float(); l_real = F.binary_cross_entropy_with_logits(dr, torch.ones_like(dr))
             scaler.scale(l_real).backward()
-            with torch.autocast('cuda', dtype=torch.float16):
-                df = Dp(sr.detach()).float(); l_fake = F.binary_cross_entropy_with_logits(df, torch.zeros_like(df))
+            with torch.autocast('cuda', dtype=torch.float16): df = Dp(sr.detach()).float(); l_fake = F.binary_cross_entropy_with_logits(df, torch.zeros_like(df))
             scaler.scale(l_fake).backward(); scaler.step(oD)
-        scaler.update(); step += 1
+        scaler.update(); step += 1; acc['pairs'] += lq.shape[0] * world
         with torch.no_grad():
-            for pe, p in zip(Gema.parameters(), G.parameters()): pe.lerp_(p, 1 - 0.999)
+            for pe, p in zip(Gema.parameters(), G.parameters()): pe.lerp_(p, 1 - cfg['ema_decay'])
+        if step % 50 == 0: torch.cuda.synchronize()
+        acc['train_s'] += time.time() - ts
         if rank == 0:
             if time.time() - t_log > 300:
-                log(f'step {step} pix {l_pix.item():.4f} perc {l_perc.item():.4f} gan {l_gan.item():.3f} temp {l_temp.item() * 255:.2f} {(step - s0) / (time.time() - t_start):.2f} it/s'); t_log = time.time()
-            if step % EVAL_EVERY == 0:
-                m = evaluate(Gema, test, lp); m['step'] = step; log('eval', json.dumps(m['mean']))
-                r2.put(P + f'evals/{step:07d}.json', json.dumps(m).encode())
-                if better(m, state['best']):
-                    state['best'] = m; torch.save({'params': Gema.state_dict()}, f'{WORK}/best.pth'); r2.put_file(P + 'best_G.pth', f'{WORK}/best.pth')
-                    save_samples(Gema, test, f'best_{step:07d}'); log('NEW BEST', step)
-            if time.time() - last_ck > CKPT_MIN * 60:
-                checkpoint(); last_ck = time.time()
-            if step % 500 == 0 and r2.exists(P + 'STOP'): log('stop requested'); r2.delete(P + 'STOP'); DEADLINE_HIT = True
-            else: DEADLINE_HIT = time.time() > DEADLINE
-            stop[0] = 1.0 if DEADLINE_HIT else 0.0
+                log(f"step {step} pix {l_pix.item():.4f} perc {l_perc.item():.3f} gan {l_gan.item():.3f} temp {l_temp.item() * 255:.2f} "
+                    f"{(step - s0) / max(acc['train_s'], 1e-9):.2f} upd/s data-wait {acc['data_wait_s'] / max(time.time() - t_start, 1):.0%}"); t_log = time.time()
+            if step % cfg['full_eval_every'] == 0: evaluate('full')
+            elif step % cfg['quick_eval_every'] == 0: evaluate('quick')
+            if time.time() - last_ck > cfg['ckpt_minutes'] * 60: checkpoint(); last_ck = time.time()
+            done = acc['train_s'] >= budget or time.time() >= wall_end
+            if step % 500 == 0 and r2.exists(P + 'STOP'): r2.delete(P + 'STOP'); log('stop requested'); done = True
+            stop[0] = 1.0 if done else 0.0
         if step % 50 == 0:
             dist.broadcast(stop, 0)
             if stop.item() > 0: break
-    if rank == 0: checkpoint(); log('session done at step', step)
+    if rank == 0:
+        evaluate('full'); checkpoint(); log('session done', step, json.dumps({k: round(v, 1) for k, v in acc.items()}))
     dist.barrier(); dist.destroy_process_group()
 
-def main():
-    test = load_items('test'); train = load_items('train'); log('train items', len(train), 'test items', len(test))
-    index = build_cache(train)
-    if r2.exists(P + 'ckpt_latest.pt'): r2.get_file(P + 'ckpt_latest.pt', f'{WORK}/ck.pt')
-    world = torch.cuda.device_count()
-    torch.multiprocessing.spawn(worker, args=(world, index, test), nprocs=world, join=True)
+def decide_promotions(m, sm, base_full, pareto, g):
+    """Which Pareto slots a full evaluation wins. best_perceptual: lowest LPIPS with PSNR kept and video flicker at most
+    10% worse. best_temporal: lowest real-video flicker with PSNR kept and LPIPS no worse than the original.
+    best_balanced: passes every gate and has the lowest predeclared score. Returns (slots, record fields)."""
+    b = summ_metrics(base_full)
+    psnr_ok = all(m[k]['psnr'] >= base_full[k]['psnr'] - g['psnr_drop_max_db'] for k in m if not k.startswith('_') and not k.endswith('/mean'))
+    pan_ok = sm['pan_consistency'] <= b['pan_consistency'] * g['pan_consistency_max_ratio']
+    vt, vt0 = sm['video_temporal'] or 0.0, b['video_temporal'] or 1.0  # runs without held-out video only gate on stills
+    vid_ok = vt <= vt0 * g['video_temporal_max_ratio']
+    score = sm['lpips_mean'] / b['lpips_mean'] + 0.5 * vt / vt0
+    cur = lambda slot, key, default: pareto.get(slot, {}).get('metrics', {}).get(key, default) if slot in pareto else default
+    wins = []
+    if psnr_ok and vt <= vt0 * g['perceptual_video_temporal_max_ratio'] and sm['lpips_mean'] < cur('best_perceptual', 'lpips_mean', b['lpips_mean']): wins.append('best_perceptual')
+    if psnr_ok and sm['lpips_mean'] <= b['lpips_mean'] and vt < (cur('best_temporal', 'video_temporal', None) or vt0): wins.append('best_temporal')
+    if psnr_ok and pan_ok and vid_ok and sm['lpips_mean'] < b['lpips_mean'] and score < pareto.get('best_balanced', {}).get('score', 1.5): wins.append('best_balanced')
+    return wins, {'score': score, 'gates': {'psnr_ok': psnr_ok, 'pan_ok': pan_ok, 'video_ok': vid_ok}}
+
+def summ_metrics(m):
+    """The headline numbers used for gates and status."""
+    still, video = m.get('still/mean', {}), m.get('video/mean', {})
+    return {'still_psnr': still.get('psnr'), 'still_lpips': still.get('lpips'), 'pan_consistency': still.get('pan_consistency'),
+            'video_psnr': video.get('psnr'), 'video_lpips': video.get('lpips'), 'video_temporal': video.get('temporal_residual'), 'flow_coverage': video.get('flow_coverage'),
+            'lpips_mean': float(sum(x for x in [still.get('lpips'), video.get('lpips')] if x is not None) / max(1, sum(x is not None for x in [still.get('lpips'), video.get('lpips')])))}
 
 if __name__ == '__main__':
     main()
