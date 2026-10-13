@@ -21,12 +21,16 @@ These are the limits of the current release, stated plainly.
   "—" rather than an invented number.
 
 ## Platforms
-- Windows and macOS builds and installers are set up in CI but have not been run or tested by
-  hand for this release. See the [support matrix](support-matrix.md).
-- Installers are not code-signed. Windows SmartScreen and macOS Gatekeeper will warn.
-- The Windows installer bundles FFmpeg. On Linux and macOS you need FFmpeg from your
-  package manager or Homebrew.
+- Each release is installed, self-tested and opened automatically on Windows, macOS (Apple
+  Silicon, plus Intel through Rosetta) and Linux virtual machines, but not on physical PCs with
+  real GPUs. See the [support matrix](support-matrix.md).
+- Installers are not code-signed or notarized. Windows SmartScreen and macOS Gatekeeper will warn.
+- The Windows installer and the macOS app bundle FFmpeg. On Linux, FFmpeg comes from your
+  distribution (the .deb and .rpm install it; the AppImage needs it installed).
 - If WebView2 is missing on Windows, the installer downloads it; that step needs internet.
+- Linux: with the theme set to "System", light or dark follows your GTK theme, not the desktop
+  portal's colour-scheme setting (asking the portal could hold the window back when it does not
+  answer). Choose Light or Dark in Preferences to override.
 
 ## Features
 - SDR→HDR re-encodes the picture as PQ/HLG with correct metadata. It does not invent highlight
