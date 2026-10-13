@@ -313,7 +313,7 @@ function Advanced({ s, patch }: { s: Settings; patch: Patch }) {
           <button className="btn sm ghost" onClick={async () => { try { await api.refreshTools(); useStore.setState({ app: await api.appInfo() }); toast("success", "FFmpeg found"); } catch (e) { errorToast(e); } }}>Detect</button>
         </div>
       </F>
-      <F label="Version">{app?.ffmpeg ? `${app.ffmpeg.version} · ${app.ffmpeg.license}` : <span className="err">{app?.ffmpeg_error}</span>}</F>
+      <F label="Version">{app?.ffmpeg ? `${app.ffmpeg.version} · ${app.ffmpeg.license}` : app?.ffmpeg_checking ? "Checking…" : <span className="err">{app?.ffmpeg_error}</span>}</F>
       {app?.ffmpeg && <F label="Filters"><span className="row"><span className={`tag ${app.ffmpeg.vidstab ? "ok" : "err"}`}>vid.stab</span><span className={`tag ${app.ffmpeg.zscale ? "ok" : "err"}`}>zscale</span></span></F>}
       <div className="pref-h">Processing</div>
       <F label="Segment length"><NumberInput label="Segment seconds" value={s.segment_seconds} min={2} max={120} suffix="s" onChange={(v) => patch((x) => ({ ...x, segment_seconds: v }))} /></F>
@@ -357,7 +357,7 @@ function About() {
       </div>
       <F label="Platform">{app?.os} {app?.arch}</F>
       <F label="Compute">{app?.compiled_backends.join(", ").toUpperCase()}</F>
-      <F label="FFmpeg">{app?.ffmpeg ? app.ffmpeg.version : app?.ffmpeg_error}</F>
+      <F label="FFmpeg">{app?.ffmpeg ? app.ffmpeg.version : app?.ffmpeg_checking ? "Checking…" : app?.ffmpeg_error}</F>
       <F label="Updates">
         <div className="row">
           <button className="btn sm" onClick={() => api.checkUpdate().then((u) => { useStore.setState({ update: u.newer ? u : null }); setUpd(u.newer ? `${u.latest} is available` : "Up to date"); }).catch((e) => setUpd(e instanceof Error ? e.message : String(e)))}>Check now</button>

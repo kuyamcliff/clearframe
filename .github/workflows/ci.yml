@@ -263,7 +263,7 @@ jobs:
           cache-dependency-path: apps/desktop/package-lock.json
       - run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf ffmpeg mesa-vulkan-drivers imagemagick xvfb
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf ffmpeg mesa-vulkan-drivers imagemagick xvfb xdotool x11-utils gdb
       - name: Build deb, rpm, AppImage
         working-directory: apps/desktop
         run: |
@@ -279,20 +279,40 @@ jobs:
           python3 -c "import json; d=json.load(open('screens/linux-selftest.json')); assert d['gpu']['check']['passed'], d['gpu']; assert d['ffmpeg']['vidstab'] and d['ffmpeg']['zscale'], d['ffmpeg']"
           ffmpeg -v error -y -f lavfi -i "testsrc2=size=640x360:rate=30" -t 3 -pix_fmt yuv420p "$RUNNER_TEMP/Sample clip.mp4"
           Xvfb :99 -screen 0 1600x960x24 & sleep 2
+          DISPLAY=:99 xdpyinfo >/dev/null || { echo "the virtual display did not start"; exit 1; }
           # Open the app with a video and screenshot it; a single-colour screen means nothing rendered.
           shot() { # <name> [env...]
             local name=$1; shift
-            env DISPLAY=:99 "$@" clipfx-enhance "$RUNNER_TEMP/Sample clip.mp4" > "screens/$name.log" 2>&1 & local app=$!
-            sleep 25
-            kill -0 $app
-            DISPLAY=:99 import -window root "screens/$name.png"
+            env DISPLAY=:99 RUST_LOG=info "$@" clipfx-enhance "$RUNNER_TEMP/Sample clip.mp4" > "screens/$name.log" 2>&1 & local app=$!
+            # WebKit on this 2-CPU, GPU-less VM can take a while: wait until the interface has
+            # drawn (more than 50 colours on screen), up to two minutes.
+            local t=0
+            while [ $t -lt 120 ]; do
+              sleep 5; t=$((t + 5))
+              kill -0 $app
+              DISPLAY=:99 import -window root "screens/$name.png"
+              [ "$(identify -format %k "screens/$name.png")" -gt 50 ] && break
+            done
+            echo "rendered after ${t}s" >> "screens/$name.log"
+            local win; win=$(DISPLAY=:99 xdotool search --name "ClipFX Enhance" | tail -1)
+            echo "window: ${win:-none}" >> "screens/$name.log"
+            if [ -z "$win" ]; then # where is the app stuck?
+              sudo gdb -p $app -batch -ex "thread apply all bt 15" 2>&1 | grep -E "^Thread|^#" | head -150 >> "screens/$name.log" || true
+            fi
+            DISPLAY=:99 xwininfo -root -tree | head -40 >> "screens/$name.log"
             kill $app; wait $app 2>/dev/null || true
             identify -format %k "screens/$name.png"
           }
           colours=$(shot linux-app)
-          echo "screenshot colours: $colours"
+          echo "screenshot colours: $colours ($(grep -o 'rendered after [0-9]*s' screens/linux-app.log))"
           if [ "$colours" -le 50 ]; then
-            echo "--- app log"; cat screens/linux-app.log
+            echo "--- app output and X windows"; cat screens/linux-app.log
+            echo "--- app log files"; find "$HOME" -name "*.log" -path "*ClipFX*" -exec tail -40 {} \; 2>/dev/null || true
+            echo "--- kernel"; uname -r; sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone 2>&1 || true
+            # Diagnosis only: does WebKit's sandbox (user namespaces) hold the window back?
+            nosandbox=$(shot linux-app-no-sandbox WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1)
+            echo "without the WebKit sandbox (diagnosis only): $nosandbox colours"
+            grep -E "^window" screens/linux-app-no-sandbox.log || true
             # Tell a broken app from this VM's display: try without WebKit's GPU compositing.
             fallback=$(shot linux-app-no-compositing WEBKIT_DISABLE_COMPOSITING_MODE=1)
             echo "without GPU compositing: $fallback colours"

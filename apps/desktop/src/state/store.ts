@@ -170,7 +170,10 @@ export async function boot() {
     set({ app, settings, defaults, output: structuredClone(defaults.output), queuePaused: app.queue_paused, engine: { backend: null, precision: settings.half_precision ? "fp16" : "fp32" } });
     applyAppearance(settings);
     if (!unlisten) unlisten = await onEvent(handleEvent);
-    await Promise.all([refreshModels(), refreshJobs(), refreshPresets(), api.codecs().then((codecs) => set({ codecs })).catch(() => {})]);
+    // Codecs need FFmpeg, which may still be being detected right after launch; don't hold the
+    // interface back for them (they load again on "tools_changed").
+    api.codecs().then((codecs) => set({ codecs })).catch(() => {});
+    await Promise.all([refreshModels(), refreshJobs(), refreshPresets()]);
     api.hardware(false).then((hardware) => set({ hardware })).catch(() => {});
     set({ ready: true });
   } catch (e) {
@@ -262,6 +265,11 @@ export function handleEvent(e: AppEvent) {
       break;
     case "notice":
       toast(e.level === "error" ? "error" : e.level === "warning" ? "warning" : "info", e.message);
+      break;
+    case "tools_changed":
+      // FFmpeg detection finished after launch: pick up its version and the available codecs.
+      api.appInfo().then((app) => set({ app })).catch(() => {});
+      api.codecs().then((codecs) => set({ codecs })).catch(() => {});
       break;
   }
 }

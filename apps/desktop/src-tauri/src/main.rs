@@ -90,7 +90,7 @@ fn main() {
                 dirs.push(r.clone());
                 dirs.push(r.join("ffmpeg"));
             }
-            let state = App::open(None, WorkerCommand::current_exe(), dirs, sink).map_err(|e| e.to_string())?;
+            let state = App::open_background_tools(None, WorkerCommand::current_exe(), dirs, sink).map_err(|e| e.to_string())?;
             clearframe_app::logging::init(&state.paths().logs_dir, "clipfx");
             log::info!("ClipFX Enhance {} starting", env!("CARGO_PKG_VERSION"));
             if let Err(err) = media_server::start() {

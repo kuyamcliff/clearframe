@@ -199,6 +199,8 @@ export interface AppInfo {
   version: string; os: string; arch: string; platform: string;
   ffmpeg: { version: string; path: string; source: string; license: string; vidstab: boolean; zscale: boolean } | null;
   ffmpeg_error: string | null; queue_paused: boolean; compiled_backends: string[];
+  /** FFmpeg is still being detected at startup; a `tools_changed` event follows. */
+  ffmpeg_checking?: boolean;
   /** Present only in the browser demo backend. */
   demo?: boolean;
 }
@@ -230,4 +232,5 @@ export type AppEvent =
   | { type: "storage_progress"; kind: string; bytes_done: number; bytes_total: number }
   | { type: "storage_done"; kind: string; ok: boolean; message: string }
   | { type: "notice"; level: string; message: string }
-  | { type: "update_progress"; done: number; total: number };
+  | { type: "update_progress"; done: number; total: number }
+  | { type: "tools_changed" };

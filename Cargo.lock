@@ -761,7 +761,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "clearframe-app"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -791,7 +791,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-cli"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -808,7 +808,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-core"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -828,7 +828,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-desktop"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "clearframe-app",
@@ -850,7 +850,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-hardware"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "clearframe-inference",
  "log",
@@ -861,7 +861,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-inference"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "bytemuck",
  "candle-core",
@@ -879,7 +879,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-media"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "crossbeam-channel",
  "log",
@@ -892,7 +892,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-models"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -915,7 +915,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-pipeline"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1224,17 +1224,6 @@ dependencies = [
  "darling_core",
  "quote",
  "syn 3.0.8",
-]
-
-[[package]]
-name = "dbus"
-version = "0.9.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ab69f03cc8c4340c9c8e315114e1658e6775a9b16a04357973aa21cec22b32e"
-dependencies = [
- "libc",
- "libdbus-sys",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3040,15 +3029,6 @@ name = "libc"
 version = "0.2.190"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
-
-[[package]]
-name = "libdbus-sys"
-version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "328c4789d42200f1eeec05bd86c9c13c7f091d2ba9a6ea35acdf51f31bc0f043"
-dependencies = [
- "pkg-config",
-]
 
 [[package]]
 name = "libloading"
@@ -5166,7 +5146,6 @@ dependencies = [
  "core-foundation 0.10.1",
  "core-graphics",
  "crossbeam-channel",
- "dbus",
  "dispatch2",
  "dlopen2",
  "dpi",

@@ -399,3 +399,25 @@ fn insufficient_space_for_relocation_is_rejected() {
     assert!(app.relocate_blocking(StorageKind::Cache, &busy, RelocationMode::Move).is_err());
     assert!(app.paths().cache_is_default);
 }
+
+#[test]
+fn background_ffmpeg_detection_is_awaited_and_announced() {
+    if !have_ffmpeg() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let changed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let c = changed.clone();
+    let sink: clearframe_app::EventSink = Arc::new(move |e| {
+        if matches!(e, clearframe_app::AppEvent::ToolsChanged) {
+            c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
+    let app = App::open_background_tools(Some(d.path()), worker(), vec![], sink).unwrap();
+    // Callers that need FFmpeg right after launch wait for detection instead of failing.
+    let t = app.tools().expect("tools after background detection");
+    assert!(t.has_filter("scale"));
+    assert!(!app.tools_pending());
+    assert_eq!(app.tools_status().0.map(|t| t.version), Some(t.version));
+    assert_eq!(changed.load(std::sync::atomic::Ordering::SeqCst), 1);
+}

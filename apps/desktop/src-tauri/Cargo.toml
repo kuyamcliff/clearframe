@@ -19,7 +19,11 @@ cuda = ["clearframe-app/cuda"]
 metal = ["clearframe-app/metal"]
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+# Tauri's default features minus "dbus": with it, every window creation on Linux blocks on the
+# desktop portal's colour-scheme query, so the window never appears where the portal does not
+# answer (seen on CI; also slow or broken portals on real desktops). Light/dark then follows the
+# GTK theme and the app's own theme setting.
+tauri = { version = "2", default-features = false, features = ["wry", "compression", "common-controls-v6", "dynamic-acl", "x11", "protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 serde.workspace = true
