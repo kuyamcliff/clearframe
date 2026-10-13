@@ -28,6 +28,9 @@ def manifest(limit):
     key = f'data/{BATCH}/_manifest.json'
     if r2.exists(key): return json.loads(r2.get(key))
     out, seen = [], set()
+    for prev in [x for x in os.environ.get('EXCLUDE', '').split(',') if x]:  # never reuse photos from earlier batches
+        seen.update(it['url'] for it in json.loads(r2.get(f'data/{prev}/_manifest.json')))
+    print('excluding', len(seen), 'photos from earlier batches', flush=True)
     for cat in ['Category:Featured pictures on Wikimedia Commons', 'Category:Quality images']:
         cont = {}
         while len(out) < limit:
