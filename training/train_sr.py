@@ -89,15 +89,20 @@ def build_cache(items):
         for si, seq in enumerate(m['sequences']):
             xs = [o[0] for o in seq['offsets']]; ys = [o[1] for o in seq['offsets']]; c = seq['crop']
             x0, y0, w, h = min(xs), min(ys), max(xs) - min(xs) + c, max(ys) - min(ys) + c
-            n = len(seq['offsets']); l = c // 4
-            index.append({'gt': gt_off, 'w': w, 'h': h, 'lq': lq_off, 'l': l, 'n': n, 'offs': [[x - x0, y - y0] for x, y in seq['offsets']]})
-            plan.append((d, si, x0, y0, w, h, n)); gt_off += w * h * 3; lq_off += n * l * l * 3
+            n = len(seq['offsets']); l = c // 4; video = bool(m.get('video'))
+            if video: w = h = c
+            index.append({'gt': gt_off, 'w': w, 'h': h, 'lq': lq_off, 'l': l, 'n': n, 'video': video,
+                          'offs': [[0, 0]] * n if video else [[x - x0, y - y0] for x, y in seq['offsets']]})
+            plan.append((d, si, x0, y0, w, h, n)); gt_off += w * h * 3 * (n if video else 1); lq_off += n * l * l * 3
     gtm = np.lib.format.open_memmap(f'{WORK}/gt.npy', 'w+', np.uint8, (gt_off,)); lqm = np.lib.format.open_memmap(f'{WORK}/lq.npy', 'w+', np.uint8, (lq_off,))
     from concurrent.futures import ThreadPoolExecutor
     def fill(k):
         d, si, x0, y0, w, h, n = plan[k]; e = index[k]
-        g = cv2.imread(d + '/gt.jpg')
-        gtm[e['gt']:e['gt'] + w * h * 3] = np.ascontiguousarray(g[y0:y0 + h, x0:x0 + w]).reshape(-1)
+        if e['video']:
+            for t in range(n): gtm[e['gt'] + t * w * h * 3: e['gt'] + (t + 1) * w * h * 3] = cv2.imread(f'{d}/gt_{t}.jpg').reshape(-1)
+        else:
+            g = cv2.imread(d + '/gt.jpg')
+            gtm[e['gt']:e['gt'] + w * h * 3] = np.ascontiguousarray(g[y0:y0 + h, x0:x0 + w]).reshape(-1)
         for t in range(n):
             f = cv2.imread(f'{d}/lq_{si}_{t}.png'); o = e['lq'] + t * e['l'] ** 2 * 3
             lqm[o:o + f.size] = f.reshape(-1)
@@ -119,10 +124,11 @@ class PairDataset(torch.utils.data.Dataset):
     def __getitem__(s, _):
         if s.gt is None: s.gt = np.load(f'{WORK}/gt.npy', mmap_mode='r'); s.lq = np.load(f'{WORK}/lq.npy', mmap_mode='r')
         e = random.choice(s.index); t = random.randrange(e['n'] - 1); L = e['l']
-        g = s.gt[e['gt']: e['gt'] + e['w'] * e['h'] * 3].reshape(e['h'], e['w'], 3)
+        sz = e['w'] * e['h'] * 3; video = e.get('video', False)
         y = random.randrange(0, L - LQ + 1); x = random.randrange(0, L - LQ + 1); ls, hs = [], []
         for f in (t, t + 1):
-            ox, oy = e['offs'][f]
+            ox, oy = e['offs'][f]; base = e['gt'] + (f * sz if video else 0)
+            g = s.gt[base: base + sz].reshape(e['h'], e['w'], 3)
             ls.append(s.lq[e['lq'] + f * L * L * 3: e['lq'] + (f + 1) * L * L * 3].reshape(L, L, 3)[y:y + LQ, x:x + LQ])
             hs.append(g[oy + y * 4: oy + y * 4 + LQ * 4, ox + x * 4: ox + x * 4 + LQ * 4])
         (x1, y1), (x2, y2) = e['offs'][t], e['offs'][t + 1]; dx, dy = x2 - x1, y2 - y1
@@ -133,16 +139,20 @@ class PairDataset(torch.utils.data.Dataset):
             return np.rot90(a, k)
         dx, dy = _aug_shift(dx, dy, hf, vf, k)
         tt = lambda a: torch.from_numpy(np.ascontiguousarray(aug(a)[..., ::-1]).transpose(2, 0, 1)).float() / 255
-        return tt(ls[0]), tt(hs[0]), tt(ls[1]), tt(hs[1]), torch.tensor([dx, dy])
+        # Real camera motion is unknown, so video pairs do not take part in the temporal loss (flag 0).
+        return tt(ls[0]), tt(hs[0]), tt(ls[1]), tt(hs[1]), torch.tensor([dx, dy, 0 if video else 1])
 
 def temporal_loss(o1, o2, shifts):
     """Mean |o1 - o2| over the overlap after aligning by the known pan shift; the reference is perfectly static."""
-    c = o1.shape[-1]; tot = 0
-    for i, (dx, dy) in enumerate(shifts.tolist()):
+    c = o1.shape[-1]; tot = 0; cnt = 0
+    for i, row in enumerate(shifts.tolist()):
+        dx, dy = row[0], row[1]
+        if len(row) > 2 and not row[2]: continue
+        cnt += 1
         a = o1[i, :, max(dy, 0):c + min(dy, 0), max(dx, 0):c + min(dx, 0)]
         b = o2[i, :, max(-dy, 0):c + min(-dy, 0), max(-dx, 0):c + min(-dx, 0)]
         tot = tot + (a - b).abs().mean()
-    return tot / len(shifts)
+    return tot / max(cnt, 1)
 
 # ---------------- eval ----------------
 def ycbcr_y(t):  # RGB in [0,1] -> BT.601 luma in [16,235]
