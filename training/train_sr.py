@@ -14,7 +14,7 @@ import lpips
 RUN = os.environ.get('RUN', 'general-v3-ft1'); BATCHES = os.environ.get('BATCHES', 'b001').split(',')
 HOURS = float(os.environ.get('HOURS', '11.3')); CKPT_MIN = float(os.environ.get('CKPT_MIN', '10'))
 EVAL_EVERY = int(os.environ.get('EVAL_EVERY', '2000')); BS = int(os.environ.get('BS', '24')); LQ = int(os.environ.get('LQ_PATCH', '64'))
-LR = float(os.environ.get('LR', '5e-5')); W_GAN = float(os.environ.get('W_GAN', '0.1')); W_PERC = float(os.environ.get('W_PERC', '1.0'))
+LR = float(os.environ.get('LR', '5e-5')); W_GAN = float(os.environ.get('W_GAN', '0.1')); W_PERC = float(os.environ.get('W_PERC', '1.0')); W_TEMP = float(os.environ.get('W_TEMP', '1.0'))
 BASE_URL = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth'
 BASE_D_URL = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.3/RealESRGAN_x4plus_netD.pth'
 T0 = time.time(); DEADLINE = T0 + HOURS * 3600; DEV = 'cuda'; P = f'runs/{RUN}/'
@@ -105,21 +105,44 @@ def build_cache(items):
     gtm.flush(); lqm.flush(); del gtm, lqm
     json.dump(index, open(idx_p, 'w')); log('cache built', len(index), 'sequences', round(gt_off / 1e9, 1), 'GB'); return index
 
+def _aug_shift(dx, dy, hf, vf, k):
+    """How a content shift (frame2[y,x] = frame1[y+dy, x+dx]) changes under the same flips and np.rot90 k times."""
+    if hf: dx = -dx
+    if vf: dy = -dy
+    for _ in range(k): dx, dy = dy, -dx
+    return dx, dy
+
 class PairDataset(torch.utils.data.Dataset):
+    """Two consecutive frames of a pan: LQ patches at the same LQ position, their GT patches, and the GT-pixel shift."""
     def __init__(s, index): s.index = index; s.gt = s.lq = None
     def __len__(s): return 10 ** 9
     def __getitem__(s, _):
         if s.gt is None: s.gt = np.load(f'{WORK}/gt.npy', mmap_mode='r'); s.lq = np.load(f'{WORK}/lq.npy', mmap_mode='r')
-        e = random.choice(s.index); t = random.randrange(e['n']); L = e['l']; ox, oy = e['offs'][t]
-        lq = s.lq[e['lq'] + t * L * L * 3: e['lq'] + (t + 1) * L * L * 3].reshape(L, L, 3)
+        e = random.choice(s.index); t = random.randrange(e['n'] - 1); L = e['l']
         g = s.gt[e['gt']: e['gt'] + e['w'] * e['h'] * 3].reshape(e['h'], e['w'], 3)
-        y = random.randrange(0, L - LQ + 1); x = random.randrange(0, L - LQ + 1)
-        l = lq[y:y + LQ, x:x + LQ]; gy, gx = oy + y * 4, ox + x * 4; hq = g[gy:gy + LQ * 4, gx:gx + LQ * 4]
-        if random.random() < 0.5: l, hq = l[:, ::-1], hq[:, ::-1]
-        if random.random() < 0.5: l, hq = l[::-1], hq[::-1]
-        k = random.randrange(4); l, hq = np.rot90(l, k), np.rot90(hq, k)
-        tt = lambda a: torch.from_numpy(np.ascontiguousarray(a[..., ::-1]).transpose(2, 0, 1)).float() / 255
-        return tt(l), tt(hq)
+        y = random.randrange(0, L - LQ + 1); x = random.randrange(0, L - LQ + 1); ls, hs = [], []
+        for f in (t, t + 1):
+            ox, oy = e['offs'][f]
+            ls.append(s.lq[e['lq'] + f * L * L * 3: e['lq'] + (f + 1) * L * L * 3].reshape(L, L, 3)[y:y + LQ, x:x + LQ])
+            hs.append(g[oy + y * 4: oy + y * 4 + LQ * 4, ox + x * 4: ox + x * 4 + LQ * 4])
+        (x1, y1), (x2, y2) = e['offs'][t], e['offs'][t + 1]; dx, dy = x2 - x1, y2 - y1
+        hf, vf, k = random.random() < 0.5, random.random() < 0.5, random.randrange(4)
+        def aug(a):
+            if hf: a = a[:, ::-1]
+            if vf: a = a[::-1]
+            return np.rot90(a, k)
+        dx, dy = _aug_shift(dx, dy, hf, vf, k)
+        tt = lambda a: torch.from_numpy(np.ascontiguousarray(aug(a)[..., ::-1]).transpose(2, 0, 1)).float() / 255
+        return tt(ls[0]), tt(hs[0]), tt(ls[1]), tt(hs[1]), torch.tensor([dx, dy])
+
+def temporal_loss(o1, o2, shifts):
+    """Mean |o1 - o2| over the overlap after aligning by the known pan shift; the reference is perfectly static."""
+    c = o1.shape[-1]; tot = 0
+    for i, (dx, dy) in enumerate(shifts.tolist()):
+        a = o1[i, :, max(dy, 0):c + min(dy, 0), max(dx, 0):c + min(dx, 0)]
+        b = o2[i, :, max(-dy, 0):c + min(-dy, 0), max(-dx, 0):c + min(-dx, 0)]
+        tot = tot + (a - b).abs().mean()
+    return tot / len(shifts)
 
 # ---------------- eval ----------------
 def ycbcr_y(t):  # RGB in [0,1] -> BT.601 luma in [16,235]
@@ -201,15 +224,17 @@ def worker(rank, world, index, test):
         log('checkpoint', step)
     stop = torch.zeros(1, device=dev)
     while True:
-        lq, hq = next(dl); lq, hq = lq.to(dev, non_blocking=True), hq.to(dev, non_blocking=True)
+        lq, hq, lq2, hq2, shifts = next(dl); lq, hq, lq2, hq2 = (v.to(dev, non_blocking=True) for v in (lq, hq, lq2, hq2))
         for p in D.parameters(): p.requires_grad = False
         with torch.autocast('cuda', dtype=torch.float16):
-            sr = Gp(lq); l_pix = F.l1_loss(sr, hq); l_perc = vgg(sr.contiguous(memory_format=torch.channels_last), hq.contiguous(memory_format=torch.channels_last))
+            both = Gp(torch.cat([lq, lq2])); sr, sr2 = both.chunk(2)
+            l_temp = temporal_loss(sr.float(), sr2.float(), shifts) if W_TEMP > 0 else torch.zeros((), device=dev)
+            l_pix = (F.l1_loss(sr, hq) + F.l1_loss(sr2, hq2)) / 2; l_perc = vgg(sr.contiguous(memory_format=torch.channels_last), hq.contiguous(memory_format=torch.channels_last))
             if W_GAN > 0:
                 fake = D(sr); l_gan = F.binary_cross_entropy_with_logits(fake.float(), torch.ones_like(fake, dtype=torch.float32))
             else:
                 l_gan = torch.zeros((), device=dev)
-        lossG = l_pix + W_PERC * l_perc.float() + W_GAN * l_gan
+        lossG = l_pix + W_PERC * l_perc.float() + W_GAN * l_gan + W_TEMP * l_temp
         oG.zero_grad(set_to_none=True); scaler.scale(lossG).backward(); scaler.step(oG)
         if W_GAN > 0:
             for p in D.parameters(): p.requires_grad = True
@@ -225,7 +250,7 @@ def worker(rank, world, index, test):
             for pe, p in zip(Gema.parameters(), G.parameters()): pe.lerp_(p, 1 - 0.999)
         if rank == 0:
             if time.time() - t_log > 300:
-                log(f'step {step} pix {l_pix.item():.4f} perc {l_perc.item():.4f} gan {l_gan.item():.3f} {(step - s0) / (time.time() - t_start):.2f} it/s'); t_log = time.time()
+                log(f'step {step} pix {l_pix.item():.4f} perc {l_perc.item():.4f} gan {l_gan.item():.3f} temp {l_temp.item() * 255:.2f} {(step - s0) / (time.time() - t_start):.2f} it/s'); t_log = time.time()
             if step % EVAL_EVERY == 0:
                 m = evaluate(Gema, test, lp); m['step'] = step; log('eval', json.dumps(m['mean']))
                 r2.put(P + f'evals/{step:07d}.json', json.dumps(m).encode())
@@ -234,7 +259,9 @@ def worker(rank, world, index, test):
                     save_samples(Gema, test, f'best_{step:07d}'); log('NEW BEST', step)
             if time.time() - last_ck > CKPT_MIN * 60:
                 checkpoint(); last_ck = time.time()
-            stop[0] = 1.0 if time.time() > DEADLINE else 0.0
+            if step % 500 == 0 and r2.exists(P + 'STOP'): log('stop requested'); r2.delete(P + 'STOP'); DEADLINE_HIT = True
+            else: DEADLINE_HIT = time.time() > DEADLINE
+            stop[0] = 1.0 if DEADLINE_HIT else 0.0
         if step % 50 == 0:
             dist.broadcast(stop, 0)
             if stop.item() > 0: break
