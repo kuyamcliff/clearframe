@@ -47,3 +47,17 @@ def test_incomplete_cache_is_rebuilt(tmp_path):
     r2 = R2(); make(r2, 'b1', '0'); items = dc.discover(r2, ['b1'], str(tmp_path)); fp, _ = dc.fingerprint(r2, ['b1'])
     os.makedirs(f'{tmp_path}/cache-{fp}'); open(f'{tmp_path}/cache-{fp}/index.json', 'w').write('[]')  # no COMPLETE marker
     idx, st = dc.build(r2, items, str(tmp_path), fp, log=lambda *a: None); assert not st['reused'] and len(idx) == 1
+
+def test_packed_roundtrip_and_corruption(tmp_path, monkeypatch):
+    r2 = R2(); make(r2, 'b1', '0'); make(r2, 'b1', '1', color=(5, 6, 7))
+    r2.exists = lambda k: k in r2.o; r2.get = lambda k: r2.o[k]
+    monkeypatch.setattr(dc, 'PART_BYTES', 1000)  # force several parts
+    items = dc.discover(r2, ['b1'], str(tmp_path / 'a')); fp, _ = dc.fingerprint(r2, ['b1'])
+    idx, _ = dc.build(r2, items, str(tmp_path / 'a'), fp, log=lambda *a: None); dc.upload_packed(r2, fp, str(tmp_path / 'a'), log=lambda *a: None)
+    idx2, st = dc.fetch_packed(r2, fp, str(tmp_path / 'b'), log=lambda *a: None)
+    assert idx2 == idx and st['packed']
+    for n in ('gt.npy', 'lq.npy'):
+        assert open(tmp_path / f'a/cache-{fp}/{n}', 'rb').read() == open(tmp_path / f'b/cache-{fp}/{n}', 'rb').read()
+    part = json.loads(r2.o[f'caches/{fp}/manifest.json'])['files']['gt.npy']['parts'][1]['key']; r2.o[part] = b'x' + r2.o[part][1:]
+    with pytest.raises(IOError): dc.fetch_packed(r2, fp, str(tmp_path / 'c'), log=lambda *a: None)
+    assert dc.fetch_packed(r2, 'nope', str(tmp_path / 'd'), log=lambda *a: None) is None

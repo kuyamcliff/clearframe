@@ -37,7 +37,8 @@ def main():
     t0 = time.time(); items = dc.discover(r2, cfg['batches'], work); fp, nobj = dc.fingerprint(r2, cfg['batches']); summ = dc.summary(items); mark('discover_s', t0)
     log('data', fp, json.dumps(summ))
     if cfg.get('need_video') and not any(k.endswith('/video') and '/train/' in k for k in summ['samples']): raise SystemExit('no training video loaded')
-    index, cstats = dc.build(r2, items, work, fp, log=log); timers.update({f'cache_{k}': v for k, v in cstats.items()})
+    got = dc.fetch_packed(r2, fp, work, log=log)
+    index, cstats = got if got else dc.build(r2, items, work, fp, log=log); timers.update({f'cache_{k}': v for k, v in cstats.items()})
     run_config = {'config': cfg, 'git_sha': os.environ.get('GIT_SHA', 'unknown'), 'data_fingerprint': fp, 'data_objects': nobj, 'data_summary': summ,
                   'preflight': pre, 'evaluator': ev.EVALUATOR_VERSION, 'torch': torch.__version__, 'world': torch.cuda.device_count()}
     if resume:

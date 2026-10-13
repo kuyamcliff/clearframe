@@ -89,3 +89,44 @@ def build(r2, items, work, fp, log=print):
     stats = {'reused': False, 'objects': len(need), 'download_gb': round(nbytes / 1e9, 2), 'download_s': round(t_dl), 'build_s': round(time.time() - t0 - t_dl),
              'cache_gb': round((gt_off + lq_off) / 1e9, 2), 'sequences': len(index)}
     log('cache built', json.dumps(stats)); return index, stats
+
+
+PART_BYTES = 1 << 30  # ~1 GiB per uploaded part
+
+def _parts(path):
+    size = os.path.getsize(path); return [(i, o, min(PART_BYTES, size - o)) for i, o in enumerate(range(0, size, PART_BYTES))]
+
+def upload_packed(r2, fp, work, log=print):
+    """Upload a built cache as hashed parts plus a manifest (written last, so a partial upload is never used)."""
+    final = f'{work}/cache-{fp}'; pre = f'caches/{fp}/'; manifest = {'fingerprint': fp, 'schema': CACHE_SCHEMA, 'files': {}}
+    from concurrent.futures import ThreadPoolExecutor
+    for name in ('gt.npy', 'lq.npy'):
+        path = f'{final}/{name}'
+        def up(part):
+            i, off, n = part
+            with open(path, 'rb') as f: f.seek(off); data = f.read(n)
+            key = f'{pre}{name}.part{i:04d}'; r2.put(key, data); return {'key': key, 'bytes': n, 'sha256': hashlib.sha256(data).hexdigest()}
+        with ThreadPoolExecutor(4) as ex: manifest['files'][name] = {'bytes': os.path.getsize(path), 'parts': list(ex.map(up, _parts(path)))}
+    r2.put(pre + 'index.json', open(f'{final}/index.json', 'rb').read())
+    r2.put(pre + 'manifest.json', json.dumps(manifest).encode()); log('packed cache uploaded', fp, sum(f['bytes'] for f in manifest['files'].values()) / 1e9, 'GB')
+
+def fetch_packed(r2, fp, work, log=print):
+    """Download a packed cache if one exists for this fingerprint; verify every part. Returns (index, stats) or None."""
+    pre = f'caches/{fp}/'; final = f'{work}/cache-{fp}'
+    if os.path.exists(final + '/COMPLETE'): return json.load(open(final + '/index.json')), {'reused': True}
+    try: manifest = json.loads(r2.get(pre + 'manifest.json'))
+    except Exception: return None
+    t0 = time.time(); tmp = final + '.tmp'; shutil.rmtree(tmp, ignore_errors=True); os.makedirs(tmp)
+    from concurrent.futures import ThreadPoolExecutor
+    for name, f in manifest['files'].items():
+        path = f'{tmp}/{name}'
+        with open(path, 'wb') as fh: fh.truncate(f['bytes'])
+        def dl(args):
+            i, p = args; data = r2.get(p['key'])
+            if hashlib.sha256(data).hexdigest() != p['sha256'] or len(data) != p['bytes']: raise IOError(f"packed cache part {p['key']} failed verification")
+            with open(path, 'r+b') as fh: fh.seek(i * PART_BYTES); fh.write(data)
+        with ThreadPoolExecutor(8) as ex: list(ex.map(dl, enumerate(f['parts'])))
+    open(tmp + '/index.json', 'wb').write(r2.get(pre + 'index.json')); open(tmp + '/COMPLETE', 'w').write(fp)
+    shutil.rmtree(final, ignore_errors=True); os.rename(tmp, final)
+    st = {'reused': False, 'packed': True, 'download_gb': round(sum(f['bytes'] for f in manifest['files'].values()) / 1e9, 2), 'download_s': round(time.time() - t0)}
+    log('packed cache fetched', json.dumps(st)); return json.load(open(final + '/index.json')), st
