@@ -54,6 +54,9 @@ pub struct App {
     settings: RwLock<Settings>,
     tools: RwLock<Option<FfmpegTools>>,
     tools_error: RwLock<Option<String>>,
+    /// FFmpeg is still being detected in the background (see [`App::open_background_tools`]).
+    tools_pending: parking_lot::Mutex<bool>,
+    tools_ready: parking_lot::Condvar,
     pub models: Arc<ModelManager>,
     hardware: RwLock<Option<HardwareInfo>>,
     pub events: EventSink,
@@ -70,6 +73,24 @@ pub struct App {
 impl App {
     /// Open (or create) the application state.
     pub fn open(root: Option<&Path>, worker: WorkerCommand, bundled_tool_dirs: Vec<PathBuf>, events: EventSink) -> Result<Arc<Self>> {
+        let app = Self::open_inner(root, worker, bundled_tool_dirs, events)?;
+        app.refresh_tools();
+        Ok(app)
+    }
+
+    /// Like [`App::open`], but detects FFmpeg on a background thread so a window can show at once
+    /// (detection runs several FFmpeg commands, which can take seconds on a slow or busy machine).
+    /// Until it finishes, [`App::tools`] waits for it and [`App::tools_pending`] is true;
+    /// [`AppEvent::ToolsChanged`] is sent when it is done.
+    pub fn open_background_tools(root: Option<&Path>, worker: WorkerCommand, bundled_tool_dirs: Vec<PathBuf>, events: EventSink) -> Result<Arc<Self>> {
+        let app = Self::open_inner(root, worker, bundled_tool_dirs, events)?;
+        *app.tools_pending.lock() = true;
+        let a = app.clone();
+        std::thread::Builder::new().name("ffmpeg-detect".into()).spawn(move || a.refresh_tools())?;
+        Ok(app)
+    }
+
+    fn open_inner(root: Option<&Path>, worker: WorkerCommand, bundled_tool_dirs: Vec<PathBuf>, events: EventSink) -> Result<Arc<Self>> {
         let paths = AppPaths::resolve(root);
         std::fs::create_dir_all(&paths.data_dir)?;
         // Finish or roll back a storage move interrupted by a crash.
@@ -85,6 +106,8 @@ impl App {
             settings: RwLock::new(settings),
             tools: RwLock::new(None),
             tools_error: RwLock::new(None),
+            tools_pending: parking_lot::Mutex::new(false),
+            tools_ready: parking_lot::Condvar::new(),
             models,
             hardware: RwLock::new(None),
             events: events.clone(),
@@ -95,7 +118,6 @@ impl App {
             storage_cancel: Default::default(),
             monitor: resources::SystemMonitor::default(),
         });
-        app.refresh_tools();
         presets::seed_builtins(&app.db)?;
         let recovered = db.recover_interrupted().map_err(|e| anyhow!("{e}"))?;
         if !recovered.is_empty() {
@@ -144,9 +166,28 @@ impl App {
                 *self.tools_error.write() = Some(e.to_string());
             }
         }
+        let mut pending = self.tools_pending.lock();
+        if *pending {
+            *pending = false;
+            self.tools_ready.notify_all();
+            drop(pending);
+            (self.events)(AppEvent::ToolsChanged);
+        }
+    }
+
+    /// FFmpeg detection started by [`App::open_background_tools`] has not finished yet.
+    pub fn tools_pending(&self) -> bool {
+        *self.tools_pending.lock()
     }
 
     pub fn tools(&self) -> Result<FfmpegTools> {
+        let mut pending = self.tools_pending.lock();
+        while *pending {
+            if self.tools_ready.wait_for(&mut pending, std::time::Duration::from_secs(120)).timed_out() {
+                return Err(anyhow!("FFmpeg detection is taking too long"));
+            }
+        }
+        drop(pending);
         self.tools.read().clone().ok_or_else(|| anyhow!(self.tools_error.read().clone().unwrap_or_else(|| "FFmpeg was not found".into())))
     }
 

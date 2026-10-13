@@ -263,6 +263,11 @@ export function handleEvent(e: AppEvent) {
     case "notice":
       toast(e.level === "error" ? "error" : e.level === "warning" ? "warning" : "info", e.message);
       break;
+    case "tools_changed":
+      // FFmpeg detection finished after launch: pick up its version and the available codecs.
+      api.appInfo().then((app) => set({ app })).catch(() => {});
+      api.codecs().then((codecs) => set({ codecs })).catch(() => {});
+      break;
   }
 }
 

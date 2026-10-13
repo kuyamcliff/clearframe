@@ -50,6 +50,8 @@ struct AppInfo {
     platform: String,
     ffmpeg: Option<serde_json::Value>,
     ffmpeg_error: Option<String>,
+    /// FFmpeg is still being detected; a `tools_changed` event follows.
+    ffmpeg_checking: bool,
     queue_paused: bool,
     compiled_backends: Vec<String>,
 }
@@ -64,6 +66,7 @@ fn app_info(app: S<'_>) -> AppInfo {
         platform: clearframe_models::manager::platform_id().into(),
         ffmpeg: t.map(|t| serde_json::json!({ "version": t.version, "path": t.ffmpeg, "source": t.source, "license": t.license_hint, "vidstab": t.has_filter("vidstabdetect"), "zscale": t.has_filter("zscale") })),
         ffmpeg_error: err,
+        ffmpeg_checking: app.tools_pending(),
         queue_paused: app.queue.is_paused(),
         compiled_backends: {
             use clearframe_inference::device::{compiled, BackendKind};
@@ -104,10 +107,15 @@ async fn system_sample(app: S<'_>) -> R<clearframe_app::resources::SystemSample>
 }
 
 #[tauri::command]
-fn codecs(app: S<'_>) -> R<serde_json::Value> {
-    let t = app.tools().map_err(e)?;
-    let list: Vec<_> = clearframe_media::encode::CODECS.iter().map(|c| serde_json::json!({ "profile": c, "available": t.has_video_encoder(c.encoder) })).collect();
-    Ok(serde_json::json!(list))
+async fn codecs(app: S<'_>) -> R<serde_json::Value> {
+    // Off the main thread: it waits for FFmpeg detection right after launch.
+    let a = app.inner().clone();
+    blocking(move || {
+        let t = a.tools()?;
+        let list: Vec<_> = clearframe_media::encode::CODECS.iter().map(|c| serde_json::json!({ "profile": c, "available": t.has_video_encoder(c.encoder) })).collect();
+        Ok(serde_json::json!(list))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -489,9 +497,13 @@ async fn update_catalog(app: S<'_>) -> R<String> {
 }
 
 #[tauri::command]
-fn refresh_tools(app: S<'_>) -> R<()> {
-    app.refresh_tools();
-    app.tools().map(|_| ()).map_err(e)
+async fn refresh_tools(app: S<'_>) -> R<()> {
+    let a = app.inner().clone();
+    blocking(move || {
+        a.refresh_tools();
+        a.tools().map(|_| ())
+    })
+    .await
 }
 
 #[tauri::command]
