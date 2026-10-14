@@ -40,3 +40,17 @@ def test_pareto_slots():
     w, _ = train_sr.decide_promotions(*cand(0.30, 2.0, psnr=26.5), base, {}, g); assert w == []
     # blurrier but steadier (LPIPS worse than original): not temporal, not balanced
     w, _ = train_sr.decide_promotions(*cand(0.45, 2.0), base, {}, g); assert w == []
+
+
+def test_video_share_of_samples():
+    import random
+    import sr_common as sc
+    index = [{'video': False, 'id': i} for i in range(92)] + [{'video': True, 'id': 100 + i} for i in range(8)]
+    random.seed(0)
+    uniform = sc.PairDataset(index, '/nonexistent', 64)
+    assert abs(sum(uniform.pick()['video'] for _ in range(20000)) / 20000 - 0.08) < 0.01
+    shared = sc.PairDataset(index, '/nonexistent', 64, video_frac=0.4)
+    assert abs(sum(shared.pick()['video'] for _ in range(20000)) / 20000 - 0.4) < 0.015
+    # Without any video in the index the share is ignored.
+    photos = sc.PairDataset(index[:92], '/nonexistent', 64, video_frac=0.4)
+    assert not any(photos.pick()['video'] for _ in range(100))

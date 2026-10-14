@@ -53,11 +53,18 @@ def _aug_shift(dx, dy, hf, vf, k):
 
 class PairDataset(torch.utils.data.Dataset):
     """Two consecutive frames of a pan: LQ patches at the same LQ position, their GT patches, and the GT-pixel shift."""
-    def __init__(s, index, cache, lq_patch): s.index = index; s.cache = cache; s.LQ = lq_patch; s.gt = s.lq = None
+    def __init__(s, index, cache, lq_patch, video_frac=None):
+        s.index = index; s.cache = cache; s.LQ = lq_patch; s.gt = s.lq = None
+        # video_frac: share of samples drawn from real-video sequences (None = uniform over all sequences, where
+        # video is only as common as its share of the index).
+        s.video_frac = video_frac; s.videos = [e for e in index if e.get('video')]; s.photos = [e for e in index if not e.get('video')]
     def __len__(s): return 10 ** 9
+    def pick(s):
+        if s.video_frac is None or not s.videos or not s.photos: return random.choice(s.index)
+        return random.choice(s.videos if random.random() < s.video_frac else s.photos)
     def __getitem__(s, _):
         if s.gt is None: s.gt = np.load(f'{s.cache}/gt.npy', mmap_mode='r'); s.lq = np.load(f'{s.cache}/lq.npy', mmap_mode='r')
-        e = random.choice(s.index); t = random.randrange(e['n'] - 1); L = e['l']
+        e = s.pick(); t = random.randrange(e['n'] - 1); L = e['l']
         sz = e['w'] * e['h'] * 3; video = e.get('video', False)
         LQ = s.LQ; y = random.randrange(0, L - LQ + 1); x = random.randrange(0, L - LQ + 1); ls, hs = [], []
         for f in (t, t + 1):

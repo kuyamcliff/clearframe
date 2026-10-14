@@ -9,8 +9,8 @@
   "need_video": true,
   "init_g": "originals/realesr-general-x4v3.pth",
   "init_d_url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.3/RealESRGAN_x4plus_netD.pth",
-  "train_seconds": 34200,
-  "max_wall_seconds": 38700,
+  "train_seconds": 30600,
+  "max_wall_seconds": 34200,
   "final_reserve_seconds": 900,
   "ckpt_minutes": 10,
   "quick_eval_every": 2000,
@@ -34,5 +34,14 @@
   },
   "channels_last_gd": true,
   "d_every": 2,
-  "w_temp_video": 0
+  "w_temp_video": 0,
+  "video_frac": 0.4,
+  "w_pix": 1.5,
+  "changes": [
+    {
+      "at_step": 8687,
+      "what": "video_frac 0.4 (was uniform, ~8% video), w_pix 1.5 (was 1.0); train_seconds 30600 for the remaining weekly GPU budget",
+      "why": "full eval @8000: video PSNR 24.92 vs original 25.34 (-0.42 dB; light level -0.74 dB) and falling at every quick eval, while photo LPIPS improved 0.4978 -> 0.4590; the model was learning photo-style sharpening from a 92% photo mix"
+    }
+  ]
 }

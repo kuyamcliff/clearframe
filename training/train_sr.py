@@ -110,7 +110,7 @@ def worker(rank, world, cfg, P, work, fp, index, test_items, ck, run_config, tim
         """Profile mode only: synchronise the GPU and charge the elapsed time to a section."""
         if not prof_n or step < prof_warm: return t_prev
         torch.cuda.synchronize(); now = time.perf_counter(); prof[name] = prof.get(name, 0.0) + now - t_prev; return now
-    dl = iter(torch.utils.data.DataLoader(sc.PairDataset(index, f'{work}/cache-{fp}', cfg['lq_patch']), batch_size=cfg['batch_size'] // world,
+    dl = iter(torch.utils.data.DataLoader(sc.PairDataset(index, f'{work}/cache-{fp}', cfg['lq_patch'], cfg.get('video_frac')), batch_size=cfg['batch_size'] // world,
                                           num_workers=cfg['num_workers'], persistent_workers=True, prefetch_factor=cfg['prefetch_factor'], pin_memory=True))
     acc = {'train_s': 0.0, 'data_wait_s': 0.0, 'eval_s': 0.0, 'ckpt_s': 0.0, 'pairs': 0}
     t_start = time.time(); last_ck = time.time(); t_log = time.time(); s0 = step
@@ -178,7 +178,7 @@ def worker(rank, world, cfg, P, work, fp, index, test_items, ck, run_config, tim
                 f_fw = flow_net(h2, h3); f_bw = flow_net(h3, h2)
                 l_tv = mtm.video_temporal_loss(sr[vid].float(), sr2[vid].float(), h2, h3, f_fw, f_bw) * len(vid) / lq.shape[0]
             tp = tick('video_flow_temporal', tp)
-        lossG = l_pix + cfg['w_perc'] * l_perc.float() + cfg['w_gan'] * l_gan + cfg['w_temp'] * l_temp + w_tv * l_tv
+        lossG = float(cfg.get('w_pix', 1.0)) * l_pix + cfg['w_perc'] * l_perc.float() + cfg['w_gan'] * l_gan + cfg['w_temp'] * l_temp + w_tv * l_tv
         tp = tick('d_forward_for_g', tp)
         oG.zero_grad(set_to_none=True); scaler.scale(lossG).backward(); tp = tick('g_backward_allreduce', tp); scaler.step(oG); tp = tick('g_optimizer', tp)
         if cfg['w_gan'] > 0 and step % int(cfg.get('d_every') or 1) == 0:
