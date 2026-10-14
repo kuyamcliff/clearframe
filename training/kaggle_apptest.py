@@ -28,15 +28,26 @@ def sh(name, cmd, timeout=3600, cwd=None):
 # 1. GPU, driver and Vulkan
 sh('nvidia_smi', 'nvidia-smi')
 sh('apt', 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libvulkan1 vulkan-tools ffmpeg >/dev/null; echo done', 1200)
-rc, libs = sh('nvidia_libs', 'ldconfig -p | grep -i -E "nvidia|vulkan" ; ls -la /usr/share/vulkan/icd.d /etc/vulkan/icd.d 2>&1')
-icd = [p for p in ('/usr/share/vulkan/icd.d/nvidia_icd.json', '/etc/vulkan/icd.d/nvidia_icd.json') if os.path.exists(p)]
-if not icd and 'libGLX_nvidia.so.0' in libs:
-    # The driver's Vulkan implementation lives in libGLX_nvidia; containers often ship the library without its ICD file.
-    os.makedirs('/etc/vulkan/icd.d', exist_ok=True)
-    json.dump({'file_format_version': '1.0.0', 'ICD': {'library_path': 'libGLX_nvidia.so.0', 'api_version': '1.3.0'}}, open('/etc/vulkan/icd.d/nvidia_icd.json', 'w'))
-    summary['icd'] = 'written for libGLX_nvidia.so.0'
-else:
-    summary['icd'] = icd or 'no NVIDIA Vulkan library in the container'
+rc, libs = sh('nvidia_libs', 'ldconfig -p | grep -i -E "nvidia|vulkan|libcuda"; ls -la /usr/share/vulkan/icd.d /etc/vulkan/icd.d 2>&1')
+ver = subprocess.run('nvidia-smi --query-gpu=driver_version --format=csv,noheader', shell=True, capture_output=True, text=True).stdout.split()[0]
+summary['driver'] = ver
+if 'libGLX_nvidia' not in libs:
+    # Containers started with only the compute/utility driver capabilities get CUDA but not the driver's graphics part,
+    # which holds its Vulkan implementation. Add the user-space graphics libraries of the exact same driver version
+    # from NVIDIA's own package (the kernel module is already loaded and is not touched).
+    sh('x11_libs', 'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libx11-6 libxext6 >/dev/null; echo done', 600)
+    url = None
+    for u in (f'https://us.download.nvidia.com/tesla/{ver}/NVIDIA-Linux-x86_64-{ver}.run', f'https://us.download.nvidia.com/XFree86/Linux-x86_64/{ver}/NVIDIA-Linux-x86_64-{ver}.run'):
+        if sh('driver_probe', f'curl -sSfIL -o /dev/null -w "%{{http_code}}" "{u}"')[0] == 0: url = u; break
+    summary['driver_package'] = url
+    if url:
+        sh('driver_download', f'curl -sSfL -o /tmp/nv.run "{url}" && sh /tmp/nv.run --extract-only --target /opt/nv >/dev/null && ls /opt/nv | head -80', 1200)
+        L = '/usr/lib/x86_64-linux-gnu'
+        sh('driver_install', f'cd /opt/nv && for f in libGLX_nvidia.so.{ver} libnvidia-*.so.{ver}; do [ -e {L}/$f ] || cp -n $f {L}/; done; '
+                             f'ln -sf {L}/libGLX_nvidia.so.{ver} {L}/libGLX_nvidia.so.0; ldconfig; '
+                             f'mkdir -p /etc/vulkan/icd.d && sed "s#__NV_VK_ICD__#libGLX_nvidia.so.0#" nvidia_icd.json.template > /etc/vulkan/icd.d/nvidia_icd.json 2>/dev/null '
+                             f'|| cp nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json; cat /etc/vulkan/icd.d/nvidia_icd.json; ls {L} | grep -c nvidia')
+summary['icd'] = [p for p in ('/usr/share/vulkan/icd.d/nvidia_icd.json', '/etc/vulkan/icd.d/nvidia_icd.json') if os.path.exists(p)]
 sh('vulkaninfo', 'vulkaninfo --summary 2>&1 | head -60')
 
 # 2. Build the app from the exact commit
