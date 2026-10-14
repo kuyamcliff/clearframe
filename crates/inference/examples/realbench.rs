@@ -66,7 +66,10 @@ fn main() {
         let t = Instant::now();
         let _ = cpu.process(&frame(320, 180, 0.0), &p).unwrap();
         let cpu_s = t.elapsed().as_secs_f64();
-        println!("{}", serde_json::json!({"model": name, "arch": format!("{arch:?}"), "check": "cpu_vs_gpu", "size": "160x90", "max_abs_diff": d, "cpu_s_320x180": cpu_s, "gpu_tile": g.tile}));
+        println!(
+            "{}",
+            serde_json::json!({"model": name, "arch": format!("{arch:?}"), "check": "cpu_vs_gpu", "size": "160x90", "max_abs_diff": d, "cpu_s_320x180": cpu_s, "gpu_tile": g.tile})
+        );
         for (sw, sh) in sizes {
             let img = frame(sw, sh, 0.0);
             let _ = g.process(&img, &p).unwrap();
