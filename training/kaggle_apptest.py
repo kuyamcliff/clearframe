@@ -35,7 +35,7 @@ if 'libGLX_nvidia' not in libs:
     # Containers started with only the compute/utility driver capabilities get CUDA but not the driver's graphics part,
     # which holds its Vulkan implementation. Add the user-space graphics libraries of the exact same driver version
     # from NVIDIA's own package (the kernel module is already loaded and is not touched).
-    sh('x11_libs', 'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libx11-6 libxext6 >/dev/null; echo done', 600)
+    sh('x11_libs', 'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libx11-6 libxext6 libglvnd0 libegl1 >/dev/null; echo done', 600)
     url = None
     for u in (f'https://us.download.nvidia.com/tesla/{ver}/NVIDIA-Linux-x86_64-{ver}.run', f'https://us.download.nvidia.com/XFree86/Linux-x86_64/{ver}/NVIDIA-Linux-x86_64-{ver}.run'):
         if sh('driver_probe', f'curl -sSfIL -o /dev/null -w "%{{http_code}}" "{u}"')[0] == 0: url = u; break
@@ -46,7 +46,11 @@ if 'libGLX_nvidia' not in libs:
         sh('driver_install', f'cd /opt/nv && for f in libGLX_nvidia.so.{ver} libnvidia-*.so.{ver}; do [ -e {L}/$f ] || cp -n $f {L}/; done; '
                              f'ln -sf {L}/libGLX_nvidia.so.{ver} {L}/libGLX_nvidia.so.0; ldconfig; '
                              f'mkdir -p /etc/vulkan/icd.d && sed "s#__NV_VK_ICD__#libGLX_nvidia.so.0#" nvidia_icd.json.template > /etc/vulkan/icd.d/nvidia_icd.json 2>/dev/null '
-                             f'|| cp nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json; cat /etc/vulkan/icd.d/nvidia_icd.json; ls {L} | grep -c nvidia')
+                             f'|| cp nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json; cat /etc/vulkan/icd.d/nvidia_icd.json; ls {L} | grep -c nvidia; '
+                             # The Vulkan driver finds the GPUs through NVIDIA's EGL library, registered with glvnd by this file;
+                             # without it glvnd only offers Mesa's EGL and vkCreateInstance fails.
+                             f'mkdir -p /usr/share/glvnd/egl_vendor.d && cp 10_nvidia.json /usr/share/glvnd/egl_vendor.d/; '
+                             f'[ -e /dev/nvidia-modeset ] || mknod -m 666 /dev/nvidia-modeset c 195 254 || true')
 summary['icd'] = [p for p in ('/usr/share/vulkan/icd.d/nvidia_icd.json', '/etc/vulkan/icd.d/nvidia_icd.json') if os.path.exists(p)]
 sh('vulkaninfo', 'vulkaninfo --summary 2>&1 | head -60')
 
