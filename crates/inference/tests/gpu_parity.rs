@@ -230,3 +230,223 @@ fn tiling_on_gpu_matches_whole_frame() {
     let max = whole.data.iter().zip(&tiled.data).map(|(x, y)| (x - y).abs()).fold(0f32, f32::max);
     assert!(max < 1e-4, "tile seams differ by {max}");
 }
+
+#[test]
+fn concurrent_forwards_on_one_gpu_match_sequential() {
+    // Pipeline stages and frames in flight run forward passes from several threads on the shared GPU
+    // context. Pooled buffers are reused between passes, so the results must not depend on interleaving.
+    let Some(g) = gpu() else { return };
+    let mut r = Rng(11);
+    let mut w = W::default();
+    w.conv(&mut r, "body.0", 16, 3, 3, true);
+    w.t(&mut r, "body.1.weight", &[16], 0.25);
+    w.conv(&mut r, "body.2", 16, 16, 3, true);
+    w.t(&mut r, "body.3.weight", &[16], 0.25);
+    w.conv(&mut r, "body.4", 12, 16, 3, true);
+    let weights = w.build();
+    let mut m = ImageModel::load(&weights, Precision::Fp32).unwrap();
+    m.use_gpu(g).unwrap();
+    // Small tiles: many short passes per frame, so the threads interleave often.
+    m.tile = 16;
+    m.tile_pad = 4;
+    let imgs: Vec<RgbImage> = (0..8).map(|i| image(&mut r, 61 + 7 * i, 43 + 5 * i)).collect();
+    let p = ImageParams::default();
+    let expect: Vec<RgbImage> = imgs.iter().map(|img| m.process(img, &p).unwrap()).collect();
+    let m = &m;
+    std::thread::scope(|s| {
+        for (img, want) in imgs.iter().zip(&expect) {
+            let p = &p;
+            s.spawn(move || {
+                for _ in 0..25 {
+                    let got = m.process(img, p).unwrap();
+                    let max = got.data.iter().zip(&want.data).map(|(x, y)| (x - y).abs()).fold(0f32, f32::max);
+                    assert!(max == 0.0, "concurrent result differs by {max}");
+                }
+            });
+        }
+    });
+}
+
+/// RIFE: same structure as v4.26 (4-channel encoder, five IFBlocks passing 4 flow + 1 mask + 8 feature channels),
+/// narrower layers. Weights are kept small so the predicted flow stays in a realistic range.
+#[test]
+fn rife_on_gpu_matches_cpu() {
+    let Some(g) = gpu() else { return };
+    let mut r = Rng(7);
+    let mut w = W::default();
+    w.conv(&mut r, "encode.cnn0", 8, 3, 3, true);
+    w.conv(&mut r, "encode.cnn1", 8, 8, 3, true);
+    w.conv(&mut r, "encode.cnn2", 8, 8, 3, true);
+    w.t(&mut r, "encode.cnn3.weight", &[8, 4, 4, 4], 0.2);
+    w.t(&mut r, "encode.cnn3.bias", &[4], 0.05);
+    for b in 0..5 {
+        let cin = if b == 0 { 15 } else { 28 };
+        let p = format!("block{b}");
+        w.conv(&mut r, &format!("{p}.conv0.0.0"), 8, cin, 3, true);
+        w.conv(&mut r, &format!("{p}.conv0.1.0"), 16, 8, 3, true);
+        for i in 0..2 {
+            w.conv(&mut r, &format!("{p}.convblock.{i}.conv"), 16, 16, 3, true);
+            w.t(&mut r, &format!("{p}.convblock.{i}.beta"), &[1, 16, 1, 1], 0.5);
+        }
+        w.t(&mut r, &format!("{p}.lastconv.0.weight"), &[16, 52, 4, 4], 0.08);
+        w.t(&mut r, &format!("{p}.lastconv.0.bias"), &[52], 0.05);
+    }
+    let weights = w.build();
+    let cpu = clearframe_inference::InterpModel::load(&weights, Precision::Fp32).unwrap();
+    let mut on_gpu = clearframe_inference::InterpModel::load(&weights, Precision::Fp32).unwrap();
+    on_gpu.use_gpu(g).unwrap();
+    assert!(on_gpu.on_gpu());
+    // Odd size: exercises the replicate padding to the 64-pixel alignment and the crop back.
+    let (a, b) = (image(&mut r, 93, 70), image(&mut r, 93, 70));
+    for (t, scale) in [(0.5f32, 1.0f64), (0.25, 1.0), (0.5, 0.5)] {
+        let x = cpu.interpolate(&a, &b, t, scale).unwrap();
+        let y = on_gpu.interpolate(&a, &b, t, scale).unwrap();
+        assert_eq!((x.width, x.height), (y.width, y.height));
+        let max = x.data.iter().zip(&y.data).map(|(p, q)| (p - q).abs()).fold(0f32, f32::max);
+        let spread = x.data.iter().map(|v| (v - x.data[0]).abs()).fold(0f32, f32::max);
+        eprintln!("RIFE t={t} scale={scale}: max diff {max:.2e} (output spread {spread:.2})");
+        assert!(spread > 0.05, "output is flat; the test would prove nothing");
+        assert!(max <= 2e-3, "GPU RIFE differs from CPU by {max}");
+    }
+}
+
+/// GFPGAN v1.4 layout (512px, 7 down / 7 up blocks, StyleGAN2 decoder with SFT), narrow channels.
+#[test]
+fn gfpgan_on_gpu_matches_cpu() {
+    let Some(g) = gpu() else { return };
+    let mut r = Rng(11);
+    let mut w = W::default();
+    let (c, nsf) = (8usize, 8usize);
+    w.conv(&mut r, "conv_body_first", c, 3, 1, true);
+    for i in 0..7 {
+        for p in ["conv_body_down", "conv_body_up"] {
+            w.conv(&mut r, &format!("{p}.{i}.conv1"), c, c, 3, true);
+            w.conv(&mut r, &format!("{p}.{i}.conv2"), c, c, 3, true);
+            w.conv(&mut r, &format!("{p}.{i}.skip"), c, c, 1, false);
+        }
+        for p in ["condition_scale", "condition_shift"] {
+            w.conv(&mut r, &format!("{p}.{i}.0"), c, c, 3, true);
+            w.conv(&mut r, &format!("{p}.{i}.2"), c / 2, c, 3, true);
+        }
+    }
+    w.conv(&mut r, "final_conv", c, c, 3, true);
+    w.t(&mut r, "final_linear.weight", &[16 * nsf, c * 16], 0.1);
+    w.t(&mut r, "final_linear.bias", &[16 * nsf], 0.05);
+    w.t(&mut r, "stylegan_decoder.constant_input.weight", &[1, c, 4, 4], 0.5);
+    let modconv = |w: &mut W, r: &mut Rng, p: &str, out: usize, k: usize| {
+        w.t(r, &format!("{p}.modulated_conv.weight"), &[1, out, c, k, k], 1.0 / ((c * k * k) as f32).sqrt());
+        w.t(r, &format!("{p}.modulated_conv.modulation.weight"), &[c, nsf], 0.3);
+        w.t(r, &format!("{p}.modulated_conv.modulation.bias"), &[c], 0.3);
+    };
+    modconv(&mut w, &mut r, "stylegan_decoder.style_conv1", c, 3);
+    w.t(&mut r, "stylegan_decoder.style_conv1.weight", &[1], 0.1);
+    w.t(&mut r, "stylegan_decoder.style_conv1.bias", &[1, c, 1, 1], 0.05);
+    modconv(&mut w, &mut r, "stylegan_decoder.to_rgb1", 3, 1);
+    w.t(&mut r, "stylegan_decoder.to_rgb1.bias", &[1, 3, 1, 1], 0.05);
+    w.t(&mut r, "stylegan_decoder.noises.noise0", &[1, 1, 4, 4], 1.0);
+    for j in 0..14 {
+        let res = 8usize << (j / 2);
+        let p = format!("stylegan_decoder.style_convs.{j}");
+        modconv(&mut w, &mut r, &p, c, 3);
+        w.t(&mut r, &format!("{p}.weight"), &[1], 0.1);
+        w.t(&mut r, &format!("{p}.bias"), &[1, c, 1, 1], 0.05);
+        w.t(&mut r, &format!("stylegan_decoder.noises.noise{}", j + 1), &[1, 1, res, res], 1.0);
+    }
+    for k in 0..7 {
+        let p = format!("stylegan_decoder.to_rgbs.{k}");
+        modconv(&mut w, &mut r, &p, 3, 1);
+        w.t(&mut r, &format!("{p}.bias"), &[1, 3, 1, 1], 0.05);
+    }
+    let weights = w.build();
+    let cpu = clearframe_inference::arch::gfpgan::Gfpgan::load(&weights).unwrap();
+    let gnet = clearframe_inference::gpu::nets::GGfpgan::new(&g, &cpu).unwrap();
+    let face = image(&mut r, 512, 512).to_tensor(&Device::Cpu, clearframe_inference::DType::F32).unwrap();
+    let a = cpu.forward(&face).unwrap().flatten_all().unwrap().to_vec1::<f32>().unwrap();
+    let planar = clearframe_inference::gpu::nets::Planar::from_tensor(&face).unwrap();
+    let b = gnet.forward(&g, &planar).unwrap().data;
+    let max = a.iter().zip(&b).map(|(x, y)| (x - y).abs()).fold(0f32, f32::max);
+    let spread = a.iter().map(|v| (v - a[0]).abs()).fold(0f32, f32::max);
+    let mean = a.iter().zip(&b).map(|(x, y)| (x - y).abs()).sum::<f32>() / a.len() as f32;
+    let big = a.iter().zip(&b).filter(|(x, y)| (*x - *y).abs() > 1e-3).count();
+    let (amin, amax) = a.iter().fold((f32::MAX, f32::MIN), |m, v| (m.0.min(*v), m.1.max(*v)));
+    eprintln!("GFPGAN: {} values, max diff {max:.2e}, mean diff {mean:.2e}, {big} values off by >1e-3, CPU range {amin:.3}..{amax:.3}", a.len());
+    assert!(spread > 0.05, "output is flat; the test would prove nothing");
+    assert!(max <= 2e-3, "GPU GFPGAN differs from CPU by {max}");
+}
+
+/// RetinaFace ResNet-50 layout (stem, 3/4/6/3 bottlenecks, FPN, SSH, heads) with narrow channels and random BN stats.
+#[test]
+fn retinaface_on_gpu_matches_cpu() {
+    let Some(g) = gpu() else { return };
+    let mut r = Rng(13);
+    let mut w = W::default();
+    let bn = |w: &mut W, r: &mut Rng, p: &str, c: usize| {
+        w.t(r, &format!("{p}.weight"), &[c], 0.3);
+        w.0.last_mut().unwrap().2.iter_mut().for_each(|v| *v += 1.0);
+        w.t(r, &format!("{p}.bias"), &[c], 0.1);
+        w.t(r, &format!("{p}.running_mean"), &[c], 0.1);
+        w.t(r, &format!("{p}.running_var"), &[c], 0.2);
+        w.0.last_mut().unwrap().2.iter_mut().for_each(|v| *v = v.abs() + 0.5);
+    };
+    w.conv(&mut r, "body.conv1", 8, 3, 7, false);
+    bn(&mut w, &mut r, "body.bn1", 8);
+    let (mid, out) = (4usize, 16usize);
+    let mut cin = 8;
+    let mut level_out = Vec::new();
+    for (li, n) in [3usize, 4, 6, 3].iter().enumerate() {
+        for bi in 0..*n {
+            let p = format!("body.layer{}.{bi}", li + 1);
+            w.conv(&mut r, &format!("{p}.conv1"), mid, cin, 1, false);
+            bn(&mut w, &mut r, &format!("{p}.bn1"), mid);
+            w.conv(&mut r, &format!("{p}.conv2"), mid, mid, 3, false);
+            bn(&mut w, &mut r, &format!("{p}.bn2"), mid);
+            w.conv(&mut r, &format!("{p}.conv3"), out, mid, 1, false);
+            bn(&mut w, &mut r, &format!("{p}.bn3"), out);
+            if bi == 0 {
+                w.conv(&mut r, &format!("{p}.downsample.0"), out, cin, 1, false);
+                bn(&mut w, &mut r, &format!("{p}.downsample.1"), out);
+            }
+            cin = out;
+        }
+        level_out.push(out);
+    }
+    let c = 8usize;
+    for (i, &lo) in level_out[1..].iter().enumerate() {
+        w.conv(&mut r, &format!("fpn.output{}.0", i + 1), c, lo, 1, false);
+        bn(&mut w, &mut r, &format!("fpn.output{}.1", i + 1), c);
+    }
+    for m in ["fpn.merge1", "fpn.merge2"] {
+        w.conv(&mut r, &format!("{m}.0"), c, c, 3, false);
+        bn(&mut w, &mut r, &format!("{m}.1"), c);
+    }
+    for s in ["ssh1", "ssh2", "ssh3"] {
+        for (name, o, i) in [("conv3X3", c / 2, c), ("conv5X5_1", c / 4, c), ("conv5X5_2", c / 4, c / 4), ("conv7X7_2", c / 4, c / 4), ("conv7x7_3", c / 4, c / 4)] {
+            w.conv(&mut r, &format!("{s}.{name}.0"), o, i, 3, false);
+            bn(&mut w, &mut r, &format!("{s}.{name}.1"), o);
+        }
+    }
+    for i in 0..3 {
+        w.conv(&mut r, &format!("ClassHead.{i}.conv1x1"), 4, c, 1, true);
+        w.conv(&mut r, &format!("BboxHead.{i}.conv1x1"), 8, c, 1, true);
+        w.conv(&mut r, &format!("LandmarkHead.{i}.conv1x1"), 20, c, 1, true);
+    }
+    let weights = w.build();
+    use clearframe_inference::arch::retinaface as rf;
+    let cpu = rf::RetinaFace::load(&weights).unwrap();
+    let gnet = clearframe_inference::gpu::nets::GRetinaFace::new(&g, &cpu).unwrap();
+    let img = image(&mut r, 160, 96).to_tensor(&Device::Cpu, clearframe_inference::DType::F32).unwrap();
+    let x = rf::preprocess(&img).unwrap();
+    let (a_loc, a_conf, a_lm) = cpu.forward(&x).unwrap();
+    let o = gnet.forward(&g, &clearframe_inference::gpu::nets::Planar::from_tensor(&x).unwrap()).unwrap();
+    let (b_loc, b_conf, b_lm) = rf::heads_to_outputs(&o[0..3], &o[3..6], &o[6..9]).unwrap();
+    for (name, a, b) in [("loc", a_loc, b_loc), ("conf", a_conf, b_conf), ("landmarks", a_lm, b_lm)] {
+        assert_eq!(a.dims(), b.dims(), "{name} shape");
+        let (a, b) = (a.flatten_all().unwrap().to_vec1::<f32>().unwrap(), b.flatten_all().unwrap().to_vec1::<f32>().unwrap());
+        let max = a.iter().zip(&b).map(|(x, y)| (x - y).abs()).fold(0f32, f32::max);
+        let peak = a.iter().fold(0f32, |m, v| m.max(v.abs()));
+        let spread = a.iter().map(|v| (v - a[0]).abs()).fold(0f32, f32::max);
+        eprintln!("RetinaFace {name}: {} values, max diff {max:.2e}, |output| up to {peak:.2}, spread {spread:.2}", a.len());
+        assert!(spread > 1e-3, "{name} output is flat; the test would prove nothing");
+        assert!(max <= 1e-3 * peak.max(1.0), "GPU RetinaFace {name} differs from CPU by {max}");
+    }
+}

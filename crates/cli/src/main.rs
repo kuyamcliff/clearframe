@@ -342,7 +342,8 @@ fn run(cli: Cli) -> Result<bool> {
             } else {
                 println!("{} {} — {} ({} threads), {} MB RAM ({} MB available)", hw.os, hw.arch, hw.cpu_brand, hw.logical_cores, hw.ram_total_mb, hw.ram_available_mb);
                 for g in &hw.gpus {
-                    println!("GPU: {} {} {:?} MB ({})", g.vendor, g.name, g.memory_total_mb, g.source);
+                    let mem = g.memory_total_mb.map(|m| format!("{m} MB")).unwrap_or_else(|| "unknown memory".into());
+                    println!("GPU: {} {}, {mem} ({})", g.vendor, g.name, g.source);
                 }
                 for b in &hw.backends {
                     println!("backend {}: compiled={} available={} ({})", b.kind.label(), b.compiled, b.available, b.detail);

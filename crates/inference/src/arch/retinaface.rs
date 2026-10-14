@@ -6,9 +6,9 @@ use crate::ops::{resize_nearest, softmax_last, Conv2d};
 use crate::weights::Weights;
 
 /// Conv + folded BN + optional leaky ReLU.
-struct Cbr {
-    conv: Conv2d,
-    act: Option<f64>,
+pub(crate) struct Cbr {
+    pub(crate) conv: Conv2d,
+    pub(crate) act: Option<f64>,
 }
 
 impl Cbr {
@@ -31,11 +31,11 @@ impl Cbr {
     }
 }
 
-struct Bottleneck {
-    c1: Cbr,
-    c2: Cbr,
-    c3: Cbr,
-    down: Option<Cbr>,
+pub(crate) struct Bottleneck {
+    pub(crate) c1: Cbr,
+    pub(crate) c2: Cbr,
+    pub(crate) c3: Cbr,
+    pub(crate) down: Option<Cbr>,
 }
 
 impl Bottleneck {
@@ -49,7 +49,7 @@ impl Bottleneck {
     }
 }
 
-enum Backbone {
+pub(crate) enum Backbone {
     ResNet50 { stem: Cbr, layers: Vec<Vec<Bottleneck>> },
     MobileNet { stages: Vec<Vec<Cbr>> },
 }
@@ -93,12 +93,12 @@ fn max_pool_3x3_s2(x: &Tensor) -> Result<Tensor> {
     x.max_pool2d_with_stride(3, 2)
 }
 
-struct Ssh {
-    c3: Cbr,
-    c5_1: Cbr,
-    c5_2: Cbr,
-    c7_2: Cbr,
-    c7_3: Cbr,
+pub(crate) struct Ssh {
+    pub(crate) c3: Cbr,
+    pub(crate) c5_1: Cbr,
+    pub(crate) c5_2: Cbr,
+    pub(crate) c7_2: Cbr,
+    pub(crate) c7_3: Cbr,
 }
 
 impl Ssh {
@@ -121,14 +121,14 @@ impl Ssh {
 }
 
 pub struct RetinaFace {
-    backbone: Backbone,
-    fpn_out: [Cbr; 3],
-    merge1: Cbr,
-    merge2: Cbr,
-    ssh: [Ssh; 3],
-    class_head: [Conv2d; 3],
-    bbox_head: [Conv2d; 3],
-    landmark_head: [Conv2d; 3],
+    pub(crate) backbone: Backbone,
+    pub(crate) fpn_out: [Cbr; 3],
+    pub(crate) merge1: Cbr,
+    pub(crate) merge2: Cbr,
+    pub(crate) ssh: [Ssh; 3],
+    pub(crate) class_head: [Conv2d; 3],
+    pub(crate) bbox_head: [Conv2d; 3],
+    pub(crate) landmark_head: [Conv2d; 3],
 }
 
 /// A detected face in input-image pixel coordinates.
@@ -208,61 +208,71 @@ impl RetinaFace {
         let (_, _, h1, w1) = o1.dims4()?;
         let o1 = self.merge1.forward(&(o1 + resize_nearest(&o2, h1, w1)?)?)?;
         let fs = [self.ssh[0].forward(&o1)?, self.ssh[1].forward(&o2)?, self.ssh[2].forward(&o3)?];
-        let flat = |heads: &[Conv2d; 3], k: usize| -> Result<Tensor> {
-            let parts = fs
-                .iter()
-                .zip(heads.iter())
-                .map(|(f, h)| {
-                    let y = h.forward(f)?.permute((0, 2, 3, 1))?.contiguous()?;
-                    let n = y.elem_count() / k;
-                    y.reshape((n, k))
-                })
-                .collect::<Result<Vec<_>>>()?;
-            Tensor::cat(&parts, 0)
-        };
-        let loc = flat(&self.bbox_head, 4)?;
-        let conf = softmax_last(&flat(&self.class_head, 2)?)?;
-        let landm = flat(&self.landmark_head, 10)?;
-        Ok((loc, conf, landm))
+        let run = |heads: &[Conv2d; 3]| -> Result<Vec<Tensor>> { fs.iter().zip(heads.iter()).map(|(f, h)| h.forward(f)).collect() };
+        heads_to_outputs(&run(&self.class_head)?, &run(&self.bbox_head)?, &run(&self.landmark_head)?)
     }
 
     /// Detect faces in an RGB image tensor (1,3,H,W) with values in 0..1.
     pub fn detect(&self, rgb: &Tensor, conf_threshold: f32, nms_threshold: f32) -> Result<Vec<Detection>> {
         let (_, _, h, w) = rgb.dims4()?;
-        let dev = rgb.device();
-        // RGB 0..1 -> BGR 0..255 minus mean (104, 117, 123)
-        let bgr = Tensor::cat(&[rgb.narrow(1, 2, 1)?, rgb.narrow(1, 1, 1)?, rgb.narrow(1, 0, 1)?], 1)?;
-        let mean = Tensor::new(&[104f32, 117., 123.], dev)?.to_dtype(rgb.dtype())?.reshape((1, 3, 1, 1))?;
-        let x = (bgr * 255.0)?.broadcast_sub(&mean)?;
-        let (loc, conf, landm) = self.forward(&x)?;
-        let loc = loc.to_vec2::<f32>()?;
-        let conf = conf.to_vec2::<f32>()?;
-        let landm = landm.to_vec2::<f32>()?;
-        let priors = prior_boxes(h, w);
-        let mut dets = Vec::new();
-        for (i, p) in priors.iter().enumerate() {
-            let score = conf[i][1];
-            if score <= conf_threshold {
-                continue;
-            }
-            let l = &loc[i];
-            let cx = p[0] + l[0] * 0.1 * p[2];
-            let cy = p[1] + l[1] * 0.1 * p[3];
-            let bw = p[2] * (l[2] * 0.2).exp();
-            let bh = p[3] * (l[3] * 0.2).exp();
-            let x0 = cx - bw / 2.0;
-            let y0 = cy - bh / 2.0;
-            let bbox = [x0 * w as f32, y0 * h as f32, (x0 + bw) * w as f32, (y0 + bh) * h as f32];
-            let mut lm = [[0f32; 2]; 5];
-            for (k, item) in lm.iter_mut().enumerate() {
-                item[0] = (p[0] + landm[i][2 * k] * 0.1 * p[2]) * w as f32;
-                item[1] = (p[1] + landm[i][2 * k + 1] * 0.1 * p[3]) * h as f32;
-            }
-            dets.push(Detection { bbox, score, landmarks: lm });
-        }
-        dets.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-        Ok(nms(dets, nms_threshold))
+        let (loc, conf, landm) = self.forward(&preprocess(rgb)?)?;
+        decode(&loc, &conf, &landm, h, w, conf_threshold, nms_threshold)
     }
+}
+
+/// RGB 0..1 (1,3,H,W) -> the network input: BGR 0..255 minus the mean (104, 117, 123).
+pub fn preprocess(rgb: &Tensor) -> Result<Tensor> {
+    let dev = rgb.device();
+    let bgr = Tensor::cat(&[rgb.narrow(1, 2, 1)?, rgb.narrow(1, 1, 1)?, rgb.narrow(1, 0, 1)?], 1)?;
+    let mean = Tensor::new(&[104f32, 117., 123.], dev)?.to_dtype(rgb.dtype())?.reshape((1, 3, 1, 1))?;
+    (bgr * 255.0)?.broadcast_sub(&mean)
+}
+
+/// Head outputs per pyramid level (each (1, k·anchors, H, W)) -> (loc [N,4], conf [N,2] softmaxed, landmarks [N,10]).
+pub fn heads_to_outputs(class: &[Tensor], bbox: &[Tensor], landmark: &[Tensor]) -> Result<(Tensor, Tensor, Tensor)> {
+    let flat = |outs: &[Tensor], k: usize| -> Result<Tensor> {
+        let parts = outs
+            .iter()
+            .map(|y| {
+                let y = y.permute((0, 2, 3, 1))?.contiguous()?;
+                let n = y.elem_count() / k;
+                y.reshape((n, k))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Tensor::cat(&parts, 0)
+    };
+    Ok((flat(bbox, 4)?, softmax_last(&flat(class, 2)?)?, flat(landmark, 10)?))
+}
+
+/// Decode raw outputs into detections in image pixels, then non-maximum suppression.
+pub fn decode(loc: &Tensor, conf: &Tensor, landm: &Tensor, h: usize, w: usize, conf_threshold: f32, nms_threshold: f32) -> Result<Vec<Detection>> {
+    let loc = loc.to_vec2::<f32>()?;
+    let conf = conf.to_vec2::<f32>()?;
+    let landm = landm.to_vec2::<f32>()?;
+    let priors = prior_boxes(h, w);
+    let mut dets = Vec::new();
+    for (i, p) in priors.iter().enumerate() {
+        let score = conf[i][1];
+        if score <= conf_threshold {
+            continue;
+        }
+        let l = &loc[i];
+        let cx = p[0] + l[0] * 0.1 * p[2];
+        let cy = p[1] + l[1] * 0.1 * p[3];
+        let bw = p[2] * (l[2] * 0.2).exp();
+        let bh = p[3] * (l[3] * 0.2).exp();
+        let x0 = cx - bw / 2.0;
+        let y0 = cy - bh / 2.0;
+        let bbox = [x0 * w as f32, y0 * h as f32, (x0 + bw) * w as f32, (y0 + bh) * h as f32];
+        let mut lm = [[0f32; 2]; 5];
+        for (k, item) in lm.iter_mut().enumerate() {
+            item[0] = (p[0] + landm[i][2 * k] * 0.1 * p[2]) * w as f32;
+            item[1] = (p[1] + landm[i][2 * k + 1] * 0.1 * p[3]) * h as f32;
+        }
+        dets.push(Detection { bbox, score, landmarks: lm });
+    }
+    dets.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(nms(dets, nms_threshold))
 }
 
 /// RetinaFace prior boxes (cx, cy, w, h), normalised.

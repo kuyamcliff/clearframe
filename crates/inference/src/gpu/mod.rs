@@ -1,7 +1,7 @@
 //! Cross-vendor GPU inference on wgpu (Vulkan, DirectX 12 and Metal).
 //!
-//! The image-to-image networks (Real-ESRGAN compact and RRDB, FFDNet, DRUNet and
-//! NAFNet) have GPU implementations in [`nets`]; every other model runs on the CPU.
+//! Every network the app uses (Real-ESRGAN compact and RRDB, FFDNet, DRUNet, NAFNet,
+//! RIFE, GFPGAN and RetinaFace) has a GPU implementation in [`nets`].
 //! Tensors are planar NCHW `f32` buffers with a batch of one. A forward pass is
 //! recorded into one compute pass and submitted once, and intermediate buffers
 //! come from a pool so the deep networks don't allocate per layer.
@@ -9,7 +9,8 @@
 pub mod nets;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::thread::ThreadId;
 
 use wgpu::util::DeviceExt;
 
@@ -96,8 +97,33 @@ pub struct Gpu {
     queue: wgpu::Queue,
     pipelines: HashMap<&'static str, wgpu::ComputePipeline>,
     pool: Mutex<HashMap<u64, Vec<wgpu::Buffer>>>,
+    /// Which thread is recording and running a forward pass (see [`Gpu::turn`]), and how deeply.
+    turn: Mutex<(Option<ThreadId>, u32)>,
+    turn_free: Condvar,
     /// Largest storage buffer binding, in bytes.
     pub max_binding: u64,
+}
+
+/// One thread's exclusive use of a [`Gpu`] while it records, submits and waits for a forward pass.
+///
+/// Pooled buffers go back to the pool as soon as their tensor is dropped, while commands that use them
+/// may still be unsubmitted. Within one thread that is safe (later commands are ordered after earlier
+/// ones), but another thread could take such a buffer and fill it with `queue.write_buffer`, which lands
+/// before the next submission of either thread. Taking turns keeps forward passes from several threads
+/// (pipeline stages, frames in flight) apart; their CPU work still overlaps. Re-entrant per thread.
+pub struct GpuTurn {
+    gpu: Arc<Gpu>,
+}
+
+impl Drop for GpuTurn {
+    fn drop(&mut self) {
+        let mut t = self.gpu.turn.lock().unwrap();
+        t.1 -= 1;
+        if t.1 == 0 {
+            t.0 = None;
+            self.gpu.turn_free.notify_one();
+        }
+    }
 }
 
 static CONTEXTS: OnceLock<Mutex<HashMap<usize, Arc<Gpu>>>> = OnceLock::new();
@@ -146,7 +172,7 @@ impl Gpu {
             });
             pipelines.insert(*name, p);
         }
-        Ok(Self { info, device, queue, pipelines, pool: Mutex::new(HashMap::new()), max_binding })
+        Ok(Self { info, device, queue, pipelines, pool: Mutex::new(HashMap::new()), turn: Mutex::new((None, 0)), turn_free: Condvar::new(), max_binding })
     }
 
     /// Upload a read-only parameter array (weights, biases, slopes).
@@ -181,6 +207,19 @@ impl Gpu {
 
     fn give(&self, b: wgpu::Buffer) {
         self.pool.lock().unwrap().entry(b.size()).or_default().push(b);
+    }
+
+    /// Wait until no other thread is running a forward pass on this GPU, then hold it until the
+    /// returned guard is dropped.
+    pub fn turn(self: &Arc<Self>) -> GpuTurn {
+        let me = std::thread::current().id();
+        let mut t = self.turn.lock().unwrap();
+        while t.0.is_some_and(|o| o != me) {
+            t = self.turn_free.wait(t).unwrap();
+        }
+        t.0 = Some(me);
+        t.1 += 1;
+        GpuTurn { gpu: self.clone() }
     }
 
     /// Free every pooled buffer.
@@ -317,6 +356,10 @@ pub struct Recorder {
     dummy: wgpu::Buffer,
     // Popped in reverse order in `finish_read`.
     scopes: Vec<(wgpu::ErrorScopeGuard, &'static str)>,
+    /// Whether any kernel has been recorded (uploads after that must be ordered copies, see `upload`).
+    recorded: bool,
+    /// Held until the recorder is finished or dropped (declared last so it is released last).
+    _turn: GpuTurn,
 }
 
 #[repr(C)]
@@ -338,13 +381,14 @@ impl Params {
 
 impl Recorder {
     pub fn new(gpu: &Arc<Gpu>) -> Self {
+        let turn = gpu.turn();
         let scopes = vec![
             (gpu.device.push_error_scope(wgpu::ErrorFilter::Validation), "GPU validation error"),
             (gpu.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory), "GPU out of memory"),
         ];
         let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("clipfx-forward") });
         let pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None, timestamp_writes: None }).forget_lifetime();
-        Self { gpu: gpu.clone(), encoder, pass: Some(pass), dummy: gpu.constant(&[0.0]), scopes }
+        Self { gpu: gpu.clone(), encoder, pass: Some(pass), dummy: gpu.constant(&[0.0]), scopes, recorded: false, _turn: turn }
     }
 
     pub fn gpu(&self) -> &Arc<Gpu> {
@@ -359,6 +403,7 @@ impl Recorder {
             entries.push(wgpu::BindGroupEntry { binding: i as u32 + 1, resource: b.as_entire_binding() });
         }
         let bg = self.gpu.device.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout: &pipe.get_bind_group_layout(0), entries: &entries });
+        self.recorded = true;
         let pass = self.pass.as_mut().unwrap();
         pass.set_pipeline(pipe);
         pass.set_bind_group(0, &bg, &[]);
@@ -368,7 +413,20 @@ impl Recorder {
     /// Upload planar data as a new tensor.
     pub fn upload(&mut self, c: u32, h: u32, w: u32, data: &[f32]) -> Result<GTensor, String> {
         let t = GTensor::new(&self.gpu, c, h, w)?;
-        self.gpu.queue.write_buffer(t.buf(), 0, bytemuck::cast_slice(data));
+        if !self.recorded {
+            self.gpu.queue.write_buffer(t.buf(), 0, bytemuck::cast_slice(data));
+            return Ok(t);
+        }
+        // `queue.write_buffer` lands before this recorder's commands run. The pooled buffer may still be written by an
+        // already-recorded kernel (a dropped intermediate), which would then overwrite the upload, so copy in order.
+        let staging = self.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("upload"),
+            contents: bytemuck::cast_slice(data),
+            usage: wgpu::BufferUsages::COPY_SRC,
+        });
+        drop(self.pass.take());
+        self.encoder.copy_buffer_to_buffer(&staging, 0, t.buf(), 0, std::mem::size_of_val(data) as u64);
+        self.pass = Some(self.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None, timestamp_writes: None }).forget_lifetime());
         Ok(t)
     }
 
@@ -535,6 +593,205 @@ impl Recorder {
         p.b = [x.t.c, x.off, x.t.h, x.t.w];
         let (xb, wb, ob) = (x.t.buf().clone(), weight.clone(), out.buf().clone());
         self.dispatch("conv_t2x2", p, &[&xb, &wb, &ob], (out.w.div_ceil(16), out.h.div_ceil(16), cout));
+        Ok(out)
+    }
+
+    /// General transposed convolution (RIFE up-sampling). `weight` is [cin][cout][k][k], `bias` is [cout].
+    #[allow(clippy::too_many_arguments)]
+    pub fn conv_transpose(&mut self, x: View<'_>, weight: &wgpu::Buffer, bias: &wgpu::Buffer, cout: u32, k: u32, stride: u32, pad: u32) -> Result<GTensor, String> {
+        let (oh, ow) = ((x.t.h - 1) * stride + k - 2 * pad, (x.t.w - 1) * stride + k - 2 * pad);
+        let out = GTensor::new(&self.gpu, cout, oh, ow)?;
+        let mut p = Params::zero();
+        p.a = [cout, oh, ow, x.len];
+        p.b = [x.t.c, x.off, x.t.h, x.t.w];
+        p.c = [k, stride, pad, 0];
+        let (xb, wb, bb, ob) = (x.t.buf().clone(), weight.clone(), bias.clone(), out.buf().clone());
+        self.dispatch("conv_t", p, &[&xb, &wb, &bb, &ob], (ow.div_ceil(16), oh.div_ceil(16), cout));
+        Ok(out)
+    }
+
+    /// Bilinear resize by `factor` (`align_corners=False`, output `floor(size * factor)`), times `mul`.
+    pub fn resize_bilinear_factor(&mut self, x: View<'_>, factor: f64, mul: f32) -> Result<GTensor, String> {
+        let (oh, ow) = (((x.t.h as f64) * factor).floor() as u32, ((x.t.w as f64) * factor).floor() as u32);
+        let out = GTensor::new(&self.gpu, x.len, oh, ow)?;
+        let mut p = Params::zero();
+        p.a = [x.len, oh, ow, 0];
+        p.b = [x.t.c, x.off, x.t.h, x.t.w];
+        p.f = [(1.0 / factor) as f32, (1.0 / factor) as f32, mul, 0.0];
+        let (xb, ob) = (x.t.buf().clone(), out.buf().clone());
+        self.dispatch("resize_bl", p, &[&xb, &ob], (ow.div_ceil(16), oh.div_ceil(16), x.len));
+        Ok(out)
+    }
+
+    /// Backward warp: `out(y, x) = img(y + flow_y, x + flow_x)`, bilinear, coordinates clamped to the frame.
+    pub fn warp(&mut self, img: View<'_>, flow: View<'_>) -> Result<GTensor, String> {
+        assert_eq!(flow.len, 2);
+        assert!(img.t.h == flow.t.h && img.t.w == flow.t.w, "warp size");
+        let out = GTensor::new(&self.gpu, img.len, img.t.h, img.t.w)?;
+        let mut p = Params::zero();
+        p.a = [img.len, img.t.h, img.t.w, 0];
+        p.b = [img.t.c, img.off, flow.t.c, flow.off];
+        let (ib, fb, ob) = (img.t.buf().clone(), flow.t.buf().clone(), out.buf().clone());
+        self.dispatch("warp", p, &[&ib, &fb, &ob], (img.t.w.div_ceil(16), img.t.h.div_ceil(16), img.len));
+        Ok(out)
+    }
+
+    /// `leaky(a[c] * s[c] + base[c])` (RIFE's residual blocks).
+    pub fn scale_add_leaky(&mut self, a: View<'_>, s: &wgpu::Buffer, base: View<'_>, slope: f32) -> Result<GTensor, String> {
+        assert_eq!(a.len, base.len);
+        let out = GTensor::new(&self.gpu, a.len, a.t.h, a.t.w)?;
+        let mut p = Params::zero();
+        p.a = [a.len, a.t.h, a.t.w, 0];
+        p.b = [a.t.c, a.off, base.t.c, base.off];
+        p.f = [slope, 0.0, 0.0, 0.0];
+        let (ab, sb, bb, ob) = (a.t.buf().clone(), s.clone(), base.t.buf().clone(), out.buf().clone());
+        self.dispatch("scale_add_leaky", p, &[&ab, &sb, &bb, &ob], (a.t.w.div_ceil(16), a.t.h.div_ceil(16), a.len));
+        Ok(out)
+    }
+
+    /// `clamp(a * sigmoid(m) + b * (1 - sigmoid(m)), 0, 1)` with a one-channel mask view.
+    pub fn sigmoid_blend(&mut self, a: View<'_>, b: View<'_>, m: View<'_>) -> Result<GTensor, String> {
+        assert_eq!(a.len, b.len);
+        assert_eq!(m.len, 1);
+        let out = GTensor::new(&self.gpu, a.len, a.t.h, a.t.w)?;
+        let mut p = Params::zero();
+        p.a = [a.len, a.t.h, a.t.w, 0];
+        p.b = [a.t.c, a.off, b.t.c, b.off];
+        p.c = [m.t.c, m.off, 0, 0];
+        let (ab, bb, mb, ob) = (a.t.buf().clone(), b.t.buf().clone(), m.t.buf().clone(), out.buf().clone());
+        self.dispatch("sigmoid_blend", p, &[&ab, &bb, &mb, &ob], (a.t.w.div_ceil(16), a.t.h.div_ceil(16), a.len));
+        Ok(out)
+    }
+
+    /// StyleGAN output stage: `act(x[c] * d[c] * gain + noise[pix] * nw + bias[c]) + skip[c]`.
+    /// `noise` is a one-channel (H, W) buffer; `act` is the leaky slope (None = linear).
+    #[allow(clippy::too_many_arguments)]
+    pub fn style_out(
+        &mut self,
+        x: View<'_>,
+        d: &wgpu::Buffer,
+        gain: f32,
+        noise: Option<(&wgpu::Buffer, f32)>,
+        bias: &wgpu::Buffer,
+        act: Option<f32>,
+        skip: Option<View<'_>>,
+    ) -> Result<GTensor, String> {
+        let out = GTensor::new(&self.gpu, x.len, x.t.h, x.t.w)?;
+        let mut p = Params::zero();
+        p.a = [x.len, x.t.h, x.t.w, noise.is_some() as u32];
+        p.b = [x.t.c, x.off, skip.map(|s| s.t.c).unwrap_or(0), skip.map(|s| s.off).unwrap_or(0)];
+        p.c = [act.is_some() as u32, skip.is_some() as u32, 0, 0];
+        p.f = [gain, noise.map(|n| n.1).unwrap_or(0.0), act.unwrap_or(1.0), 0.0];
+        let nb = noise.map(|n| n.0.clone()).unwrap_or_else(|| self.dummy.clone());
+        let sb = skip.map(|s| s.t.buf().clone()).unwrap_or_else(|| self.dummy.clone());
+        let (xb, db, bb, ob) = (x.t.buf().clone(), d.clone(), bias.clone(), out.buf().clone());
+        self.dispatch("style_out", p, &[&xb, &db, &nb, &bb, &sb, &ob], (x.t.w.div_ceil(16), x.t.h.div_ceil(16), x.len));
+        Ok(out)
+    }
+
+    /// GFPGAN spatial feature transform: keep the first half of `x`'s channels, and replace the second half
+    /// with `x * scale + shift` (scale/shift are full-resolution tensors with half the channels).
+    pub fn sft(&mut self, x: View<'_>, scale: View<'_>, shift: View<'_>) -> Result<GTensor, String> {
+        let half = x.len / 2;
+        assert!(scale.len == half && shift.len == half);
+        let out = GTensor::new(&self.gpu, x.len, x.t.h, x.t.w)?;
+        let mut p = Params::zero();
+        p.a = [x.len, x.t.h, x.t.w, half];
+        p.b = [x.t.c, x.off, scale.t.c, scale.off];
+        p.c = [shift.t.c, shift.off, 0, 0];
+        let (xb, sb, hb, ob) = (x.t.buf().clone(), scale.t.buf().clone(), shift.t.buf().clone(), out.buf().clone());
+        self.dispatch("sft", p, &[&xb, &sb, &hb, &ob], (x.t.w.div_ceil(16), x.t.h.div_ceil(16), x.len));
+        Ok(out)
+    }
+
+    /// 3×3 / stride 2 / padding 1 max pool with zero padding (inputs are post-ReLU, so zero equals -inf padding).
+    pub fn max_pool3s2(&mut self, x: View<'_>) -> Result<GTensor, String> {
+        let (oh, ow) = ((x.t.h - 1) / 2 + 1, (x.t.w - 1) / 2 + 1);
+        let out = GTensor::new(&self.gpu, x.len, oh, ow)?;
+        let mut p = Params::zero();
+        p.a = [x.len, oh, ow, 0];
+        p.b = [x.t.c, x.off, x.t.h, x.t.w];
+        let (xb, ob) = (x.t.buf().clone(), out.buf().clone());
+        self.dispatch("max_pool3s2", p, &[&xb, &ob], (ow.div_ceil(16), oh.div_ceil(16), x.len));
+        Ok(out)
+    }
+
+    /// Nearest-neighbour resize to (oh, ow) with source index `i * in / out` (matches ops::resize_nearest).
+    pub fn resize_nearest(&mut self, x: View<'_>, oh: u32, ow: u32) -> Result<GTensor, String> {
+        let out = GTensor::new(&self.gpu, x.len, oh, ow)?;
+        let mut p = Params::zero();
+        p.a = [x.len, oh, ow, 0];
+        p.b = [x.t.c, x.off, x.t.h, x.t.w];
+        let (xb, ob) = (x.t.buf().clone(), out.buf().clone());
+        self.dispatch("resize_nearest", p, &[&xb, &ob], (ow.div_ceil(16), oh.div_ceil(16), x.len));
+        Ok(out)
+    }
+
+    /// `act(a + b)` (or `act(a)` without `b`); `act` is None, ReLU or leaky.
+    pub fn add_act(&mut self, a: View<'_>, b: Option<View<'_>>, act: GAct<'_>) -> Result<GTensor, String> {
+        if let Some(b) = b {
+            assert_eq!(a.len, b.len);
+        }
+        let out = GTensor::new(&self.gpu, a.len, a.t.h, a.t.w)?;
+        let (id, slope) = match act {
+            GAct::None => (0, 0.0),
+            GAct::Relu => (1, 0.0),
+            GAct::Leaky(s) => (2, s),
+            GAct::Prelu(_) => return Err("add_act does not support PReLU".into()),
+        };
+        let mut p = Params::zero();
+        p.a = [a.len, a.t.h, a.t.w, b.is_some() as u32];
+        p.b = [a.t.c, a.off, b.map(|v| v.t.c).unwrap_or(0), b.map(|v| v.off).unwrap_or(0)];
+        p.c = [id, 0, 0, 0];
+        p.f = [slope, 0.0, 0.0, 0.0];
+        let bb = b.map(|v| v.t.buf().clone()).unwrap_or_else(|| self.dummy.clone());
+        let (ab, ob) = (a.t.buf().clone(), out.buf().clone());
+        self.dispatch("add_act", p, &[&ab, &bb, &ob], (a.t.w.div_ceil(16), a.t.h.div_ceil(16), a.len));
+        Ok(out)
+    }
+
+    /// Finish recording, run everything and read back several tensors (planar data, in order).
+    pub fn finish_read_many(mut self, ts: &[&GTensor]) -> Result<Vec<Vec<f32>>, String> {
+        drop(self.pass.take());
+        let stagings: Vec<(wgpu::Buffer, u64)> = ts
+            .iter()
+            .map(|t| {
+                let bytes = t.c as u64 * t.hw() as u64 * 4;
+                let st = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("readback"),
+                    size: bytes,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                self.encoder.copy_buffer_to_buffer(t.buf(), 0, &st, 0, bytes);
+                (st, bytes)
+            })
+            .collect();
+        let idx = self.gpu.queue.submit([self.encoder.finish()]);
+        for (scope, what) in self.scopes.drain(..).rev() {
+            if let Some(e) = pollster::block_on(scope.pop()) {
+                return Err(format!("{what}: {e}"));
+            }
+        }
+        let mut rxs = Vec::new();
+        for (st, _) in &stagings {
+            let (tx, rx) = std::sync::mpsc::channel();
+            st.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+                let _ = tx.send(r);
+            });
+            rxs.push(rx);
+        }
+        self.gpu.device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: None }).map_err(|e| format!("GPU did not finish: {e}"))?;
+        let mut out = Vec::new();
+        for ((st, _), rx) in stagings.iter().zip(rxs) {
+            rx.recv().map_err(|_| "GPU readback was cancelled".to_string())?.map_err(|e| format!("GPU readback failed: {e}"))?;
+            let data = {
+                let view = st.slice(..).get_mapped_range().map_err(|e| format!("GPU readback failed: {e:?}"))?;
+                bytemuck::cast_slice::<u8, f32>(&view).to_vec()
+            };
+            st.unmap();
+            out.push(data);
+        }
         Ok(out)
     }
 
@@ -849,6 +1106,220 @@ fn main(@builtin(global_invocation_id) g: vec3<u32>) {
     acc += inp[((off + ic) * IH + iy) * IW + ix] * wt[(ic * cout + oc) * 4u + t];
   }
   outp[(oc * OH + y) * OW + x] = acc;
+}
+"#,
+    ),
+    (
+        "conv_t",
+        r#"
+@group(0) @binding(1) var<storage, read> inp: array<f32>;
+@group(0) @binding(2) var<storage, read> wt: array<f32>;
+@group(0) @binding(3) var<storage, read> bias: array<f32>;
+@group(0) @binding(4) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let cout = p.a.x; let OH = p.a.y; let OW = p.a.z; let cin = p.a.w;
+  let off = p.b.y; let H = i32(p.b.z); let W = i32(p.b.w);
+  let k = i32(p.c.x); let s = i32(p.c.y); let pad = i32(p.c.z);
+  if (g.x >= OW || g.y >= OH || g.z >= cout) { return; }
+  let ox = i32(g.x); let oy = i32(g.y); let oc = g.z;
+  var acc = bias[oc];
+  for (var ky = 0; ky < k; ky++) {
+    let ty = oy + pad - ky;
+    if (ty < 0 || ty % s != 0) { continue; }
+    let iy = ty / s;
+    if (iy >= H) { continue; }
+    for (var kx = 0; kx < k; kx++) {
+      let tx = ox + pad - kx;
+      if (tx < 0 || tx % s != 0) { continue; }
+      let ix = tx / s;
+      if (ix >= W) { continue; }
+      let pix = u32(iy * W + ix); let tap = u32(ky * k + kx);
+      for (var ic = 0u; ic < cin; ic++) {
+        acc += inp[(off + ic) * u32(H * W) + pix] * wt[((ic * cout + oc) * u32(k * k)) + tap];
+      }
+    }
+  }
+  outp[(oc * OH + g.y) * OW + g.x] = acc;
+}
+"#,
+    ),
+    (
+        "resize_bl",
+        r#"
+@group(0) @binding(1) var<storage, read> inp: array<f32>;
+@group(0) @binding(2) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let OH = p.a.y; let OW = p.a.z;
+  let off = p.b.y; let H = p.b.z; let W = p.b.w;
+  if (g.x >= OW || g.y >= OH || g.z >= C) { return; }
+  let sy = max((f32(g.y) + 0.5) * p.f.x - 0.5, 0.0);
+  let sx = max((f32(g.x) + 0.5) * p.f.y - 0.5, 0.0);
+  let y0 = min(u32(floor(sy)), H - 1u); let y1 = min(y0 + 1u, H - 1u);
+  let x0 = min(u32(floor(sx)), W - 1u); let x1 = min(x0 + 1u, W - 1u);
+  var wy = sy - f32(y0); if (y1 == y0) { wy = 0.0; }
+  var wx = sx - f32(x0); if (x1 == x0) { wx = 0.0; }
+  let base = (off + g.z) * H * W;
+  let a = inp[base + y0 * W + x0] * (1.0 - wy) + inp[base + y1 * W + x0] * wy;
+  let b = inp[base + y0 * W + x1] * (1.0 - wy) + inp[base + y1 * W + x1] * wy;
+  outp[(g.z * OH + g.y) * OW + g.x] = (a * (1.0 - wx) + b * wx) * p.f.z;
+}
+"#,
+    ),
+    (
+        "warp",
+        r#"
+@group(0) @binding(1) var<storage, read> img: array<f32>;
+@group(0) @binding(2) var<storage, read> flow: array<f32>;
+@group(0) @binding(3) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let H = p.a.y; let W = p.a.z; let ioff = p.b.y; let foff = p.b.w;
+  if (g.x >= W || g.y >= H || g.z >= C) { return; }
+  let hw = H * W; let pix = g.y * W + g.x;
+  let sx = clamp(f32(g.x) + flow[foff * hw + pix], 0.0, f32(W - 1u));
+  let sy = clamp(f32(g.y) + flow[(foff + 1u) * hw + pix], 0.0, f32(H - 1u));
+  let x0 = floor(sx); let y0 = floor(sy); let wx = sx - x0; let wy = sy - y0;
+  let x1 = min(x0 + 1.0, f32(W - 1u)); let y1 = min(y0 + 1.0, f32(H - 1u));
+  let base = (ioff + g.z) * hw;
+  let v00 = img[base + u32(y0) * W + u32(x0)]; let v01 = img[base + u32(y0) * W + u32(x1)];
+  let v10 = img[base + u32(y1) * W + u32(x0)]; let v11 = img[base + u32(y1) * W + u32(x1)];
+  let top = v00 * (1.0 - wx) + v01 * wx; let bot = v10 * (1.0 - wx) + v11 * wx;
+  outp[g.z * hw + pix] = top * (1.0 - wy) + bot * wy;
+}
+"#,
+    ),
+    (
+        "scale_add_leaky",
+        r#"
+@group(0) @binding(1) var<storage, read> a: array<f32>;
+@group(0) @binding(2) var<storage, read> s: array<f32>;
+@group(0) @binding(3) var<storage, read> base: array<f32>;
+@group(0) @binding(4) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let H = p.a.y; let W = p.a.z;
+  if (g.x >= W || g.y >= H || g.z >= C) { return; }
+  let hw = H * W; let pix = g.y * W + g.x;
+  let v = a[(p.b.y + g.z) * hw + pix] * s[g.z] + base[(p.b.w + g.z) * hw + pix];
+  outp[g.z * hw + pix] = max(v, v * p.f.x);
+}
+"#,
+    ),
+    (
+        "sigmoid_blend",
+        r#"
+@group(0) @binding(1) var<storage, read> a: array<f32>;
+@group(0) @binding(2) var<storage, read> b: array<f32>;
+@group(0) @binding(3) var<storage, read> m: array<f32>;
+@group(0) @binding(4) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let H = p.a.y; let W = p.a.z;
+  if (g.x >= W || g.y >= H || g.z >= C) { return; }
+  let hw = H * W; let pix = g.y * W + g.x;
+  let w = 1.0 / (1.0 + exp(-m[p.c.y * hw + pix]));
+  let v = a[(p.b.y + g.z) * hw + pix] * w + b[(p.b.w + g.z) * hw + pix] * (1.0 - w);
+  outp[g.z * hw + pix] = clamp(v, 0.0, 1.0);
+}
+"#,
+    ),
+    (
+        "style_out",
+        r#"
+@group(0) @binding(1) var<storage, read> x: array<f32>;
+@group(0) @binding(2) var<storage, read> d: array<f32>;
+@group(0) @binding(3) var<storage, read> noise: array<f32>;
+@group(0) @binding(4) var<storage, read> bias: array<f32>;
+@group(0) @binding(5) var<storage, read> skip: array<f32>;
+@group(0) @binding(6) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let H = p.a.y; let W = p.a.z;
+  if (g.x >= W || g.y >= H || g.z >= C) { return; }
+  let hw = H * W; let pix = g.y * W + g.x;
+  var v = x[(p.b.y + g.z) * hw + pix] * d[g.z] * p.f.x + bias[g.z];
+  if (p.a.w == 1u) { v += noise[pix] * p.f.y; }
+  if (p.c.x == 1u) { v = max(v, v * p.f.z); }
+  if (p.c.y == 1u) { v += skip[(p.b.w + g.z) * hw + pix]; }
+  outp[g.z * hw + pix] = v;
+}
+"#,
+    ),
+    (
+        "sft",
+        r#"
+@group(0) @binding(1) var<storage, read> x: array<f32>;
+@group(0) @binding(2) var<storage, read> sc: array<f32>;
+@group(0) @binding(3) var<storage, read> sh: array<f32>;
+@group(0) @binding(4) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let H = p.a.y; let W = p.a.z; let half = p.a.w;
+  if (g.x >= W || g.y >= H || g.z >= C) { return; }
+  let hw = H * W; let pix = g.y * W + g.x;
+  let v = x[(p.b.y + g.z) * hw + pix];
+  if (g.z < half) { outp[g.z * hw + pix] = v; return; }
+  let j = g.z - half;
+  outp[g.z * hw + pix] = v * sc[(p.b.w + j) * hw + pix] + sh[(p.c.y + j) * hw + pix];
+}
+"#,
+    ),
+    (
+        "max_pool3s2",
+        r#"
+@group(0) @binding(1) var<storage, read> inp: array<f32>;
+@group(0) @binding(2) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let OH = p.a.y; let OW = p.a.z; let off = p.b.y; let H = i32(p.b.z); let W = i32(p.b.w);
+  if (g.x >= OW || g.y >= OH || g.z >= C) { return; }
+  var m = 0.0; // zero padding; inputs are post-ReLU
+  let base = (off + g.z) * u32(H * W);
+  for (var dy = -1; dy <= 1; dy++) {
+    let y = i32(g.y) * 2 + dy;
+    if (y < 0 || y >= H) { continue; }
+    for (var dx = -1; dx <= 1; dx++) {
+      let x = i32(g.x) * 2 + dx;
+      if (x < 0 || x >= W) { continue; }
+      m = max(m, inp[base + u32(y * W + x)]);
+    }
+  }
+  outp[(g.z * OH + g.y) * OW + g.x] = m;
+}
+"#,
+    ),
+    (
+        "resize_nearest",
+        r#"
+@group(0) @binding(1) var<storage, read> inp: array<f32>;
+@group(0) @binding(2) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let OH = p.a.y; let OW = p.a.z; let off = p.b.y; let H = p.b.z; let W = p.b.w;
+  if (g.x >= OW || g.y >= OH || g.z >= C) { return; }
+  let sy = min((g.y * H) / OH, H - 1u); let sx = min((g.x * W) / OW, W - 1u);
+  outp[(g.z * OH + g.y) * OW + g.x] = inp[(off + g.z) * H * W + sy * W + sx];
+}
+"#,
+    ),
+    (
+        "add_act",
+        r#"
+@group(0) @binding(1) var<storage, read> a: array<f32>;
+@group(0) @binding(2) var<storage, read> b: array<f32>;
+@group(0) @binding(3) var<storage, read_write> outp: array<f32>;
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let C = p.a.x; let H = p.a.y; let W = p.a.z;
+  if (g.x >= W || g.y >= H || g.z >= C) { return; }
+  let hw = H * W; let pix = g.y * W + g.x;
+  var v = a[(p.b.y + g.z) * hw + pix];
+  if (p.a.w == 1u) { v += b[(p.b.w + g.z) * hw + pix]; }
+  if (p.c.x == 1u) { v = max(v, 0.0); }
+  if (p.c.x == 2u) { v = select(v * p.f.x, v, v >= 0.0); }
+  outp[g.z * hw + pix] = v;
 }
 "#,
     ),

@@ -5,11 +5,11 @@ use candle_core::{Result, Tensor};
 use crate::ops::{leaky_relu, pad_replicate, pixel_shuffle, resize_bilinear_factor, warp, Act, Conv2d, ConvTranspose2d};
 use crate::weights::Weights;
 
-struct Head {
-    cnn0: Conv2d,
-    cnn1: Conv2d,
-    cnn2: Conv2d,
-    cnn3: ConvTranspose2d,
+pub(crate) struct Head {
+    pub(crate) cnn0: Conv2d,
+    pub(crate) cnn1: Conv2d,
+    pub(crate) cnn2: Conv2d,
+    pub(crate) cnn3: ConvTranspose2d,
 }
 
 impl Head {
@@ -29,10 +29,10 @@ impl Head {
     }
 }
 
-struct IfBlock {
-    conv0: [Conv2d; 2],
-    blocks: Vec<(Conv2d, Tensor)>,
-    last: ConvTranspose2d,
+pub(crate) struct IfBlock {
+    pub(crate) conv0: [Conv2d; 2],
+    pub(crate) blocks: Vec<(Conv2d, Tensor)>,
+    pub(crate) last: ConvTranspose2d,
 }
 
 impl IfBlock {
@@ -70,8 +70,8 @@ impl IfBlock {
 }
 
 pub struct Rife {
-    encode: Head,
-    blocks: Vec<IfBlock>,
+    pub(crate) encode: Head,
+    pub(crate) blocks: Vec<IfBlock>,
 }
 
 impl Rife {

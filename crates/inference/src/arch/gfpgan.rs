@@ -8,12 +8,12 @@ use candle_core::{Result, Tensor};
 use crate::ops::{conv2d, leaky_relu, resize_bilinear_factor, Conv2d, Linear};
 use crate::weights::Weights;
 
-struct ModConv {
-    weight: Tensor, // (out, in, k, k)
-    modulation: Linear,
-    demodulate: bool,
-    upsample: bool,
-    padding: usize,
+pub(crate) struct ModConv {
+    pub(crate) weight: Tensor, // (out, in, k, k)
+    pub(crate) modulation: Linear,
+    pub(crate) demodulate: bool,
+    pub(crate) upsample: bool,
+    pub(crate) padding: usize,
 }
 
 impl ModConv {
@@ -36,11 +36,11 @@ impl ModConv {
     }
 }
 
-struct StyleConv {
-    conv: ModConv,
-    noise_weight: Tensor,
-    bias: Tensor,
-    noise: Tensor,
+pub(crate) struct StyleConv {
+    pub(crate) conv: ModConv,
+    pub(crate) noise_weight: Tensor,
+    pub(crate) bias: Tensor,
+    pub(crate) noise: Tensor,
 }
 
 impl StyleConv {
@@ -60,10 +60,10 @@ impl StyleConv {
     }
 }
 
-struct ToRgb {
-    conv: ModConv,
-    bias: Tensor,
-    upsample: bool,
+pub(crate) struct ToRgb {
+    pub(crate) conv: ModConv,
+    pub(crate) bias: Tensor,
+    pub(crate) upsample: bool,
 }
 
 impl ToRgb {
@@ -82,11 +82,11 @@ impl ToRgb {
     }
 }
 
-struct ResBlock {
-    conv1: Conv2d,
-    conv2: Conv2d,
-    skip: Conv2d,
-    factor: f64,
+pub(crate) struct ResBlock {
+    pub(crate) conv1: Conv2d,
+    pub(crate) conv2: Conv2d,
+    pub(crate) skip: Conv2d,
+    pub(crate) factor: f64,
 }
 
 impl ResBlock {
@@ -108,19 +108,19 @@ impl ResBlock {
 }
 
 pub struct Gfpgan {
-    conv_body_first: Conv2d,
-    down: Vec<ResBlock>,
-    final_conv: Conv2d,
-    up: Vec<ResBlock>,
-    final_linear: Linear,
-    cond_scale: Vec<(Conv2d, Conv2d)>,
-    cond_shift: Vec<(Conv2d, Conv2d)>,
-    constant: Tensor,
-    style_conv1: StyleConv,
-    to_rgb1: ToRgb,
-    style_convs: Vec<StyleConv>,
-    to_rgbs: Vec<ToRgb>,
-    num_style_feat: usize,
+    pub(crate) conv_body_first: Conv2d,
+    pub(crate) down: Vec<ResBlock>,
+    pub(crate) final_conv: Conv2d,
+    pub(crate) up: Vec<ResBlock>,
+    pub(crate) final_linear: Linear,
+    pub(crate) cond_scale: Vec<(Conv2d, Conv2d)>,
+    pub(crate) cond_shift: Vec<(Conv2d, Conv2d)>,
+    pub(crate) constant: Tensor,
+    pub(crate) style_conv1: StyleConv,
+    pub(crate) to_rgb1: ToRgb,
+    pub(crate) style_convs: Vec<StyleConv>,
+    pub(crate) to_rgbs: Vec<ToRgb>,
+    pub(crate) num_style_feat: usize,
 }
 
 impl Gfpgan {

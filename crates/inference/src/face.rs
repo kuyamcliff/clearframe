@@ -330,7 +330,7 @@ impl FaceRestorer {
             img
         };
         let t = src.to_tensor(&self.models.device, DType::F32)?;
-        let mut dets = self.models.detector.detect(&t, p.detection_threshold, 0.4)?;
+        let mut dets = self.models.detect(&t, p.detection_threshold, 0.4)?;
         let inv = 1.0 / scale;
         for d in &mut dets {
             for v in d.bbox.iter_mut() {
@@ -384,7 +384,7 @@ impl FaceRestorer {
             let m = estimate_similarity(&d.landmarks, &FACE_TEMPLATE);
             let crop = warp_crop(&source, &m, Gfpgan::SIZE);
             let t = crop.to_tensor(&self.models.device, DType::F32)?;
-            let restored = RgbImage::from_tensor(&self.models.restorer.forward(&t)?)?;
+            let restored = RgbImage::from_tensor(&self.models.restore(&t)?)?;
             let restored = if p.strength < 1.0 { crop.blend(&restored, p.strength.clamp(0.0, 1.0)) } else { restored };
             paste_face(img, &restored, &m);
             stats.faces_restored += 1;

@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -948,6 +948,25 @@ fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, compute: &Comp
     let mut window: std::collections::VecDeque<(Instant, u64)> = std::collections::VecDeque::new();
     let mut last_emit = Instant::now() - std::time::Duration::from_secs(1);
     let expected_out = total.saturating_sub(resume_out);
+    // With several stages each runs on its own thread, so a GPU stage keeps working while CPU stages
+    // and FFmpeg filters handle the neighbouring frames. The last stage hands frames to the encoder.
+    let shared_written = Arc::new(AtomicU64::new(0));
+    let shared_encode_us = Arc::new(AtomicU64::new(0));
+    let mut stages = if procs.len() > 1 {
+        let (wtx, written, encode_us) = (wtx.clone(), shared_written.clone(), shared_encode_us.clone());
+        let sink = move |f: Frame| -> std::result::Result<(), String> {
+            if f.index >= resume_enc {
+                let t = Instant::now();
+                wtx.send(f.into_raw()).map_err(|_| "the encoder stopped unexpectedly".to_string())?;
+                encode_us.fetch_add(t.elapsed().as_micros() as u64, Ordering::Relaxed);
+                written.fetch_add(1, Ordering::Relaxed);
+            }
+            Ok(())
+        };
+        Some(StageThreads::spawn(std::mem::take(&mut procs), sink))
+    } else {
+        None
+    };
 
     let result: std::result::Result<(), JobError> = (|| {
         loop {
@@ -964,7 +983,17 @@ fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, compute: &Comp
                 Ok(Err(e)) => return Err(JobError::Failed(anyhow!("decoding failed: {e}"))),
                 Err(_) => break,
             };
-            let outs = run_chain(&mut procs, 0, frames, false)?;
+            let outs = match &stages {
+                Some(st) => {
+                    if !st.send(frames) {
+                        // A stage stopped; its error is collected when the threads are joined.
+                        break;
+                    }
+                    written = shared_written.load(Ordering::Relaxed);
+                    Vec::new()
+                }
+                None => run_chain(&mut procs, 0, frames, false)?,
+            };
             for f in outs {
                 if f.index < resume_enc {
                     continue;
@@ -975,7 +1004,10 @@ fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, compute: &Comp
                 written += 1;
             }
             // Resource sample and disk-space guard (throttled to every 2 s).
-            let stage_name = procs.iter().max_by(|a, b| a.seconds.partial_cmp(&b.seconds).unwrap_or(std::cmp::Ordering::Equal)).map(|p| p.inner.name()).unwrap_or_default();
+            let stage_name = match &stages {
+                Some(st) => st.busiest(),
+                None => procs.iter().max_by(|a, b| a.seconds.partial_cmp(&b.seconds).unwrap_or(std::cmp::Ordering::Equal)).map(|p| p.inner.name()).unwrap_or_default(),
+            };
             let backend_label = ctx.backend_label.clone();
             if let Some(sample) = ctx.monitor.sample(&backend_label, &stage_name, Some(&spec.work_dir)) {
                 let min = spec.resources.min_free_disk_mb;
@@ -1017,6 +1049,17 @@ fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, compute: &Comp
                 }));
             }
         }
+        if let Some(st) = stages.take() {
+            // Let every stage finish in order, then collect the processors (for statistics) and the first error.
+            let (back, err) = st.join(false);
+            procs = back;
+            ctx.timings.encode_wait_s += shared_encode_us.load(Ordering::Relaxed) as f64 / 1e6;
+            written = shared_written.load(Ordering::Relaxed);
+            return match err {
+                Some(e) => Err(JobError::Failed(anyhow!("{e}"))),
+                None => Ok(()),
+            };
+        }
         // Flush processors in order.
         let outs = run_chain(&mut procs, 0, Vec::new(), true)?;
         for f in outs {
@@ -1028,6 +1071,11 @@ fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, compute: &Comp
         }
         Ok(())
     })();
+    if let Some(st) = stages.take() {
+        // Stopped or failed early: end the stage threads without flushing them.
+        let (back, _) = st.join(true);
+        procs = back;
+    }
     drop(wtx);
     drop(rrx);
     let _ = reader_handle.join();
@@ -1073,6 +1121,126 @@ fn count_video_packets(tools: &FfmpegTools, p: &Path) -> Option<u64> {
     }
     out.trim().trim_end_matches(',').parse().ok()
 }
+
+/// The processors of a pass, each on its own thread, connected by short queues.
+struct StageThreads {
+    input: Option<crossbeam_channel::Sender<Frame>>,
+    handles: Vec<std::thread::JoinHandle<(Timed, std::result::Result<(), String>)>>,
+    names: Vec<String>,
+    busy_us: Arc<Vec<AtomicU64>>,
+    abort: Arc<AtomicBool>,
+}
+
+impl StageThreads {
+    /// Start one thread per processor; the last one passes its frames to `sink`.
+    fn spawn<S>(procs: Vec<Timed>, sink: S) -> Self
+    where
+        S: FnMut(Frame) -> std::result::Result<(), String> + Send + 'static,
+    {
+        let n = procs.len();
+        let names = procs.iter().map(|p| p.inner.name()).collect();
+        let busy_us: Arc<Vec<AtomicU64>> = Arc::new((0..n).map(|_| AtomicU64::new(0)).collect());
+        let abort = Arc::new(AtomicBool::new(false));
+        let (input, mut rx) = bounded::<Frame>(2);
+        let mut sink = Some(sink);
+        let mut handles = Vec::new();
+        for (i, mut p) in procs.into_iter().enumerate() {
+            let (next, next_rx) = if i + 1 < n {
+                let (t, r) = bounded::<Frame>(2);
+                (Some(t), Some(r))
+            } else {
+                (None, None)
+            };
+            let my_rx = match next_rx {
+                Some(r) => std::mem::replace(&mut rx, r),
+                None => rx.clone(),
+            };
+            let mut sink = if i + 1 == n { sink.take() } else { None };
+            let (busy, abort) = (busy_us.clone(), abort.clone());
+            handles.push(std::thread::spawn(move || {
+                let mut emit = |outs: Vec<Frame>| -> std::result::Result<(), String> {
+                    for f in outs {
+                        match (&next, &mut sink) {
+                            (Some(tx), _) => tx.send(f).map_err(|_| DOWNSTREAM_STOPPED.to_string())?,
+                            (None, Some(s)) => s(f)?,
+                            (None, None) => {}
+                        }
+                    }
+                    Ok(())
+                };
+                let r = (|| {
+                    for f in my_rx.iter() {
+                        if abort.load(Ordering::Relaxed) {
+                            return Ok(());
+                        }
+                        let mut out = Vec::new();
+                        p.push(f, &mut out).map_err(|e| format!("{e:#}"))?;
+                        busy[i].store((p.seconds * 1e6) as u64, Ordering::Relaxed);
+                        emit(out)?;
+                    }
+                    if abort.load(Ordering::Relaxed) {
+                        return Ok(());
+                    }
+                    let mut out = Vec::new();
+                    p.finish(&mut out).map_err(|e| format!("{e:#}"))?;
+                    emit(out)
+                })();
+                if r.is_err() {
+                    abort.store(true, Ordering::Relaxed);
+                }
+                (p, r)
+            }));
+        }
+        Self { input: Some(input), handles, names, busy_us, abort }
+    }
+
+    /// Queue frames for the first stage; false when the stages have stopped.
+    fn send(&self, frames: Vec<Frame>) -> bool {
+        let Some(tx) = &self.input else { return false };
+        frames.into_iter().all(|f| !self.abort.load(Ordering::Relaxed) && tx.send(f).is_ok())
+    }
+
+    /// Name of the stage that has spent the most time so far.
+    fn busiest(&self) -> String {
+        let i = (0..self.names.len()).max_by_key(|&i| self.busy_us[i].load(Ordering::Relaxed)).unwrap_or(0);
+        self.names.get(i).cloned().unwrap_or_default()
+    }
+
+    /// Close the input and wait for every stage. With `abort` the stages stop without flushing.
+    /// Returns the processors in order and the first real error.
+    fn join(mut self, abort: bool) -> (Vec<Timed>, Option<String>) {
+        if abort {
+            self.abort.store(true, Ordering::Relaxed);
+        }
+        drop(self.input.take());
+        let mut procs = Vec::new();
+        let mut first: Option<String> = None;
+        let mut downstream = false;
+        for h in self.handles {
+            match h.join() {
+                Ok((p, r)) => {
+                    procs.push(p);
+                    match r {
+                        Err(e) if e == DOWNSTREAM_STOPPED => downstream = true,
+                        Err(e) if first.is_none() => first = Some(e),
+                        _ => {}
+                    }
+                }
+                Err(_) => {
+                    if first.is_none() {
+                        first = Some("a processing thread panicked".into());
+                    }
+                }
+            }
+        }
+        if first.is_none() && downstream && !abort {
+            first = Some("processing stopped unexpectedly".into());
+        }
+        (procs, first)
+    }
+}
+
+const DOWNSTREAM_STOPPED: &str = "a later stage stopped";
 
 /// Push frames through processors starting at `from`; when `flush`, finish each
 /// processor in order and push its remaining output downstream.
@@ -1198,4 +1366,98 @@ fn measure_zoom(ctx: &Ctx, pass: &PassPlan, pass_dir: &Path, stab: &plan::Stabil
 /// Mark the plan stage exec helper used by the UI.
 pub fn stage_is_native(e: &StageExec) -> bool {
     matches!(e, StageExec::Native { .. })
+}
+
+#[cfg(test)]
+mod stage_thread_tests {
+    use super::*;
+    use crate::processors::Processor;
+    use clearframe_inference::RgbImage;
+
+    /// Adds `add` to the first pixel; with `hold`, keeps one frame back until the next (like a temporal stage).
+    struct Step {
+        add: f32,
+        hold: bool,
+        held: Option<Frame>,
+        fail_at: Option<u64>,
+    }
+
+    impl Processor for Step {
+        fn name(&self) -> String {
+            format!("step {}", self.add)
+        }
+        fn push(&mut self, f: Frame, out: &mut Vec<Frame>) -> Result<()> {
+            if Some(f.index) == self.fail_at {
+                bail!("failed on frame {}", f.index);
+            }
+            let (idx, mut img) = f.into_img();
+            img.data[0] += self.add;
+            let f = Frame::img(idx, img);
+            if self.hold {
+                out.extend(self.held.replace(f));
+            } else {
+                out.push(f);
+            }
+            Ok(())
+        }
+        fn finish(&mut self, out: &mut Vec<Frame>) -> Result<()> {
+            out.extend(self.held.take());
+            Ok(())
+        }
+    }
+
+    fn chain(fail_at: Option<u64>) -> Vec<Timed> {
+        [(1.0, false, None), (10.0, true, fail_at), (100.0, false, None)]
+            .into_iter()
+            .map(|(add, hold, fail_at)| Timed { inner: Box::new(Step { add, hold, held: None, fail_at }), seconds: 0.0, stage_id: format!("s{add}") })
+            .collect()
+    }
+
+    fn frames(n: u64) -> Vec<Frame> {
+        (0..n).map(|i| Frame::img(i, RgbImage::new(2, 2))).collect()
+    }
+
+    #[test]
+    fn stages_on_threads_keep_order_and_flush() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let st = StageThreads::spawn(chain(None), move |f: Frame| tx.send(f).map_err(|e| e.to_string()));
+        assert!(st.send(frames(20)));
+        let (procs, err) = st.join(false);
+        assert!(err.is_none());
+        assert_eq!(procs.iter().map(|p| p.stage_id.as_str()).collect::<Vec<_>>(), ["s1", "s10", "s100"]);
+        let out: Vec<Frame> = rx.try_iter().collect();
+        // Every frame went through every stage, in order, including the one the middle stage held back.
+        assert_eq!(out.iter().map(|f| f.index).collect::<Vec<_>>(), (0..20).collect::<Vec<_>>());
+        assert!(out.into_iter().all(|f| f.into_img().1.data[0] == 111.0));
+    }
+
+    #[test]
+    fn a_failing_stage_stops_the_pipeline_with_its_error() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let st = StageThreads::spawn(chain(Some(5)), move |f: Frame| tx.send(f).map_err(|e| e.to_string()));
+        let mut sent = 0;
+        for f in frames(1000) {
+            if !st.send(vec![f]) {
+                break;
+            }
+            sent += 1;
+        }
+        assert!(sent < 1000, "the input should stop accepting frames");
+        let (procs, err) = st.join(false);
+        assert_eq!(procs.len(), 3);
+        assert_eq!(err.as_deref(), Some("failed on frame 5"));
+        // Nothing past the failure was flushed.
+        assert!(rx.try_iter().count() <= 5);
+    }
+
+    #[test]
+    fn abort_skips_flushing() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let st = StageThreads::spawn(chain(None), move |f: Frame| tx.send(f).map_err(|e| e.to_string()));
+        assert!(st.send(frames(3)));
+        let (_, err) = st.join(true);
+        assert!(err.is_none());
+        // The held-back last frame is not flushed when stopping.
+        assert!(rx.try_iter().count() < 3);
+    }
 }

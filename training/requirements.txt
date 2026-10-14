@@ -1,0 +1,6 @@
+# Kaggle's image provides torch/torchvision (CUDA) and opencv; these are the extra or version-sensitive packages.
+lpips==0.1.4
+boto3>=1.34
+numpy>=1.26
+opencv-python-headless>=4.9
+pytest>=8

@@ -1,0 +1,318 @@
+{
+ "note": "PRD E8: video temporal loss (RAFT-warped consecutive real-video frames). 2400 steps each from original General v3, same config (channels_last, d_every 2, patch 64, w_temp 30, w_gan 0.05), batches b001-v2, b002-v2, v001-v2, full suite (60 photos + 96 held-out video clips x 3 levels).",
+ "rule": "adopt w_temp_video if video temporal residual improves without LPIPS/PSNR regression",
+ "runs": {
+  "abl-E8-off": {
+   "baseline": {
+    "still/light": {
+     "psnr": 26.70858344369849,
+     "lpips": 0.3652158897990982,
+     "lpips_worst10": 0.5298137724399566,
+     "n": 60,
+     "pan_consistency": 2.4969369415375695
+    },
+    "still/medium": {
+     "psnr": 24.984929454954898,
+     "lpips": 0.529592789337039,
+     "lpips_worst10": 0.7815986573696136,
+     "n": 60,
+     "pan_consistency": 2.034400028147502
+    },
+    "still/heavy": {
+     "psnr": 23.863482152612594,
+     "lpips": 0.5985672660171986,
+     "lpips_worst10": 0.8528124690055847,
+     "n": 60,
+     "pan_consistency": 2.6070125829719473
+    },
+    "video/light": {
+     "psnr": 28.486348965485234,
+     "lpips": 0.1982988258593347,
+     "lpips_worst10": 0.3817839175462723,
+     "n": 96,
+     "temporal_residual": 2.9197263664536877,
+     "flow_coverage": 0.7833204491859457
+    },
+    "video/medium": {
+     "psnr": 24.8000890247459,
+     "lpips": 0.3644716654671356,
+     "lpips_worst10": 0.6419281363487244,
+     "n": 96,
+     "temporal_residual": 3.21780449939979,
+     "flow_coverage": 0.7833204491859457
+    },
+    "video/heavy": {
+     "psnr": 22.733310037235494,
+     "lpips": 0.4477237723088668,
+     "lpips_worst10": 0.7154911756515503,
+     "n": 96,
+     "temporal_residual": 3.823957393378805,
+     "flow_coverage": 0.7833204491859457
+    },
+    "still/mean": {
+     "psnr": 25.185665017088663,
+     "lpips": 0.49779198171777855,
+     "lpips_worst10": 0.7214082996050517,
+     "pan_consistency": 2.3794498508856727
+    },
+    "video/mean": {
+     "psnr": 25.339916009155544,
+     "lpips": 0.33683142121177906,
+     "lpips_worst10": 0.5797344098488489,
+     "temporal_residual": 3.320496086410761,
+     "flow_coverage": 0.7833204491859457
+    },
+    "_meta": {
+     "suite": "full",
+     "evaluator": "sr-eval-v1+temporal-v1",
+     "lpips": "alex v0.1, RGB in [-1,1]",
+     "seconds": 40.7,
+     "samples": {
+      "still": 60,
+      "video": 96
+     },
+     "levels": [
+      "light",
+      "medium",
+      "heavy"
+     ]
+    }
+   },
+   "final": {
+    "still/light": {
+     "psnr": 27.052401170007556,
+     "lpips": 0.3504385287563006,
+     "lpips_worst10": 0.5254088580608368,
+     "n": 60,
+     "pan_consistency": 1.8593608762494114
+    },
+    "still/medium": {
+     "psnr": 25.166604025595724,
+     "lpips": 0.47727436758577824,
+     "lpips_worst10": 0.6920285642147065,
+     "n": 60,
+     "pan_consistency": 1.8926180923735956
+    },
+    "still/heavy": {
+     "psnr": 23.91694121870056,
+     "lpips": 0.5595578283071518,
+     "lpips_worst10": 0.7949294447898865,
+     "n": 60,
+     "pan_consistency": 2.228917235508561
+    },
+    "video/light": {
+     "psnr": 28.408116933755593,
+     "lpips": 0.20532757738934984,
+     "lpips_worst10": 0.3842654377222061,
+     "n": 96,
+     "temporal_residual": 2.7381667202826065,
+     "flow_coverage": 0.7833204491859457
+    },
+    "video/medium": {
+     "psnr": 24.63937481487214,
+     "lpips": 0.35520387307042256,
+     "lpips_worst10": 0.6369257271289825,
+     "n": 96,
+     "temporal_residual": 2.975721509774303,
+     "flow_coverage": 0.7833204491859457
+    },
+    "video/heavy": {
+     "psnr": 22.789601443724674,
+     "lpips": 0.4366394226090051,
+     "lpips_worst10": 0.713677167892456,
+     "n": 96,
+     "temporal_residual": 3.449359704145536,
+     "flow_coverage": 0.7833204491859457
+    },
+    "still/mean": {
+     "psnr": 25.37864880476795,
+     "lpips": 0.4624235748830769,
+     "lpips_worst10": 0.6707889556884766,
+     "pan_consistency": 1.993632068043856
+    },
+    "video/mean": {
+     "psnr": 25.279031064117472,
+     "lpips": 0.33239029102292583,
+     "lpips_worst10": 0.5782894442478815,
+     "temporal_residual": 3.0544159780674818,
+     "flow_coverage": 0.7833204491859457
+    },
+    "_meta": {
+     "suite": "full",
+     "evaluator": "sr-eval-v1+temporal-v1",
+     "lpips": "alex v0.1, RGB in [-1,1]",
+     "seconds": 47.7,
+     "samples": {
+      "still": 60,
+      "video": 96
+     },
+     "levels": [
+      "light",
+      "medium",
+      "heavy"
+     ]
+    }
+   },
+   "upd_per_s": 1.61,
+   "train_s": 1489.1
+  },
+  "abl-E8-on": {
+   "baseline": {
+    "still/light": {
+     "psnr": 26.708583443052838,
+     "lpips": 0.3652158890540401,
+     "lpips_worst10": 0.5298137724399566,
+     "n": 60,
+     "pan_consistency": 2.496936921746965
+    },
+    "still/medium": {
+     "psnr": 24.984929453431473,
+     "lpips": 0.5295927988986174,
+     "lpips_worst10": 0.7815987646579743,
+     "n": 60,
+     "pan_consistency": 2.0344000261684414
+    },
+    "still/heavy": {
+     "psnr": 23.86348215971743,
+     "lpips": 0.5985672637820244,
+     "lpips_worst10": 0.852812522649765,
+     "n": 60,
+     "pan_consistency": 2.6070125849510077
+    },
+    "video/light": {
+     "psnr": 28.48634895426166,
+     "lpips": 0.1982988260630615,
+     "lpips_worst10": 0.3817839175462723,
+     "n": 96,
+     "temporal_residual": 2.919726381296641,
+     "flow_coverage": 0.7833204491859457
+    },
+    "video/medium": {
+     "psnr": 24.800089008761546,
+     "lpips": 0.3644716664227114,
+     "lpips_worst10": 0.641928106546402,
+     "n": 96,
+     "temporal_residual": 3.217804503883599,
+     "flow_coverage": 0.7833204491859457
+    },
+    "video/heavy": {
+     "psnr": 22.733310050991623,
+     "lpips": 0.4477237731140728,
+     "lpips_worst10": 0.7154911756515503,
+     "n": 96,
+     "temporal_residual": 3.8239573751343414,
+     "flow_coverage": 0.7833204491859457
+    },
+    "still/mean": {
+     "psnr": 25.185665018733914,
+     "lpips": 0.4977919839115607,
+     "lpips_worst10": 0.7214083532492319,
+     "pan_consistency": 2.379449844288805
+    },
+    "video/mean": {
+     "psnr": 25.339916004671608,
+     "lpips": 0.33683142186661524,
+     "lpips_worst10": 0.5797343999147415,
+     "temporal_residual": 3.320496086771527,
+     "flow_coverage": 0.7833204491859457
+    },
+    "_meta": {
+     "suite": "full",
+     "evaluator": "sr-eval-v1+temporal-v1",
+     "lpips": "alex v0.1, RGB in [-1,1]",
+     "seconds": 49.7,
+     "samples": {
+      "still": 60,
+      "video": 96
+     },
+     "levels": [
+      "light",
+      "medium",
+      "heavy"
+     ]
+    }
+   },
+   "final": {
+    "still/light": {
+     "psnr": 27.021599512697414,
+     "lpips": 0.3512420271212856,
+     "lpips_worst10": 0.5405610084533692,
+     "n": 60,
+     "pan_consistency": 1.8323083249197225
+    },
+    "still/medium": {
+     "psnr": 25.138858353272813,
+     "lpips": 0.47661727319161096,
+     "lpips_worst10": 0.686219084262848,
+     "n": 60,
+     "pan_consistency": 1.8927913390798494
+    },
+    "still/heavy": {
+     "psnr": 23.906154698028367,
+     "lpips": 0.55773025068144,
+     "lpips_worst10": 0.795860880613327,
+     "n": 60,
+     "pan_consistency": 2.221943765587639
+    },
+    "video/light": {
+     "psnr": 28.32620675457768,
+     "lpips": 0.2058528931326388,
+     "lpips_worst10": 0.3865891098976135,
+     "n": 96,
+     "temporal_residual": 2.7288980125922535,
+     "flow_coverage": 0.7833204491859457
+    },
+    "video/medium": {
+     "psnr": 24.579576206392897,
+     "lpips": 0.3565135418223993,
+     "lpips_worst10": 0.6392862796783447,
+     "n": 96,
+     "temporal_residual": 2.97823417782638,
+     "flow_coverage": 0.7833204491859457
+    },
+    "video/heavy": {
+     "psnr": 22.769573163473243,
+     "lpips": 0.4362114172933313,
+     "lpips_worst10": 0.7090088129043579,
+     "n": 96,
+     "temporal_residual": 3.4381165051399876,
+     "flow_coverage": 0.7833204491859457
+    },
+    "still/mean": {
+     "psnr": 25.355537521332867,
+     "lpips": 0.46186318366477885,
+     "lpips_worst10": 0.6742136577765147,
+     "pan_consistency": 1.9823478098624037
+    },
+    "video/mean": {
+     "psnr": 25.225118708147942,
+     "lpips": 0.3328592840827898,
+     "lpips_worst10": 0.5782947341601054,
+     "temporal_residual": 3.048416231852874,
+     "flow_coverage": 0.7833204491859457
+    },
+    "_meta": {
+     "suite": "full",
+     "evaluator": "sr-eval-v1+temporal-v1",
+     "lpips": "alex v0.1, RGB in [-1,1]",
+     "seconds": 47.9,
+     "samples": {
+      "still": 60,
+      "video": 96
+     },
+     "levels": [
+      "light",
+      "medium",
+      "heavy"
+     ]
+    }
+   },
+   "upd_per_s": 1.49,
+   "train_s": 1608.1
+  }
+ },
+ "decision": {
+  "w_temp_video": 0,
+  "why": "E8-on vs E8-off: video temporal residual 3.0484 vs 3.0544 (-0.2%, within noise); video PSNR 25.225 vs 25.279 (-0.054 dB); still PSNR 25.356 vs 25.379; LPIPS still 0.4619 vs 0.4624, video 0.3329 vs 0.3324 (mixed, noise); 7% slower (1.49 vs 1.61 upd/s). No real temporal gain, small PSNR regression: rejected. Keep the pan temporal loss (w_temp 30)."
+ }
+}

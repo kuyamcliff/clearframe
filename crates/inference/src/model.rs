@@ -266,6 +266,8 @@ pub struct InterpModel {
     net: Rife,
     device: Device,
     dtype: DType,
+    #[cfg(feature = "gpu")]
+    gpu: Option<(std::sync::Arc<crate::gpu::Gpu>, crate::gpu::nets::GRife)>,
 }
 
 impl InterpModel {
@@ -273,11 +275,60 @@ impl InterpModel {
         let device = w.device().clone();
         let dtype = precision.dtype(&device);
         let w = convert_weights(w, dtype)?;
-        Ok(Self { net: Rife::load(&w)?, device, dtype })
+        Ok(Self {
+            net: Rife::load(&w)?,
+            device,
+            dtype,
+            #[cfg(feature = "gpu")]
+            gpu: None,
+        })
+    }
+
+    /// Run RIFE on a cross-vendor GPU (Vulkan / DirectX 12 / Metal) instead of the CPU.
+    #[cfg(feature = "gpu")]
+    pub fn use_gpu(&mut self, gpu: std::sync::Arc<crate::gpu::Gpu>) -> Result<()> {
+        let net = crate::gpu::nets::GRife::new(&gpu, &self.net).map_err(candle_core::Error::msg)?;
+        self.gpu = Some((gpu, net));
+        Ok(())
+    }
+
+    /// Whether frames are synthesized on the GPU.
+    pub fn on_gpu(&self) -> bool {
+        #[cfg(feature = "gpu")]
+        return self.gpu.is_some();
+        #[cfg(not(feature = "gpu"))]
+        false
+    }
+
+    #[cfg(feature = "gpu")]
+    fn interpolate_gpu(&self, a: &RgbImage, b: &RgbImage, t: f32, scale: f64) -> Option<RgbImage> {
+        use crate::gpu::nets::Planar;
+        let (gpu, net) = self.gpu.as_ref()?;
+        let run = || -> std::result::Result<RgbImage, String> {
+            let (h, w) = (a.height, a.width);
+            let m = ((64.0 / scale).max(64.0)) as usize;
+            let (ph, pw) = ((m - h % m) % m, (m - w % m) % m);
+            let pa = Planar::from_tensor(&a.to_tensor(&Device::Cpu, DType::F32).map_err(|e| e.to_string())?)?.pad_replicate(pw, ph);
+            let pb = Planar::from_tensor(&b.to_tensor(&Device::Cpu, DType::F32).map_err(|e| e.to_string())?)?.pad_replicate(pw, ph);
+            let y = net.forward(gpu, &pa, &pb, t, scale)?.to_tensor()?;
+            let y = y.narrow(2, 0, h).and_then(|y| y.narrow(3, 0, w)).map_err(|e| e.to_string())?;
+            RgbImage::from_tensor(&y).map_err(|e| e.to_string())
+        };
+        match run() {
+            Ok(img) => Some(img),
+            Err(e) => {
+                log::warn!("RIFE on the GPU failed ({e}); using the CPU for this frame");
+                None
+            }
+        }
     }
 
     /// Synthesize a frame at `t` between `a` and `b`.
     pub fn interpolate(&self, a: &RgbImage, b: &RgbImage, t: f32, scale: f64) -> Result<RgbImage> {
+        #[cfg(feature = "gpu")]
+        if let Some(img) = self.interpolate_gpu(a, b, t, scale) {
+            return Ok(img);
+        }
         let x0 = a.to_tensor(&self.device, self.dtype)?;
         let x1 = b.to_tensor(&self.device, self.dtype)?;
         let y = self.net.interpolate(&x0, &x1, t, scale)?;
@@ -286,6 +337,9 @@ impl InterpModel {
 
     /// Synthesize several timesteps, re-using the uploaded input tensors.
     pub fn interpolate_many(&self, a: &RgbImage, b: &RgbImage, ts: &[f32], scale: f64) -> Result<Vec<RgbImage>> {
+        if self.on_gpu() {
+            return ts.iter().map(|t| self.interpolate(a, b, *t, scale)).collect();
+        }
         let x0 = a.to_tensor(&self.device, self.dtype)?;
         let x1 = b.to_tensor(&self.device, self.dtype)?;
         ts.iter().map(|t| RgbImage::from_tensor(&self.net.interpolate(&x0, &x1, *t, scale)?)).collect()
@@ -297,10 +351,79 @@ pub struct FaceModels {
     pub detector: RetinaFace,
     pub restorer: Gfpgan,
     pub device: Device,
+    #[cfg(feature = "gpu")]
+    gpu_restorer: Option<(std::sync::Arc<crate::gpu::Gpu>, crate::gpu::nets::GGfpgan)>,
+    #[cfg(feature = "gpu")]
+    gpu_detector: Option<crate::gpu::nets::GRetinaFace>,
 }
 
 impl FaceModels {
     pub fn load(detector: &Weights, restorer: &Weights) -> Result<Self> {
-        Ok(Self { detector: RetinaFace::load(detector)?, restorer: Gfpgan::load(restorer)?, device: restorer.device().clone() })
+        Ok(Self {
+            detector: RetinaFace::load(detector)?,
+            restorer: Gfpgan::load(restorer)?,
+            device: restorer.device().clone(),
+            #[cfg(feature = "gpu")]
+            gpu_restorer: None,
+            #[cfg(feature = "gpu")]
+            gpu_detector: None,
+        })
+    }
+
+    /// Restore faces on a cross-vendor GPU (Vulkan / DirectX 12 / Metal) instead of the CPU.
+    #[cfg(feature = "gpu")]
+    pub fn use_gpu(&mut self, gpu: std::sync::Arc<crate::gpu::Gpu>) -> Result<()> {
+        let det = crate::gpu::nets::GRetinaFace::new(&gpu, &self.detector).map_err(candle_core::Error::msg)?;
+        let net = crate::gpu::nets::GGfpgan::new(&gpu, &self.restorer).map_err(candle_core::Error::msg)?;
+        self.gpu_detector = Some(det);
+        self.gpu_restorer = Some((gpu, net));
+        Ok(())
+    }
+
+    /// Detect faces in an RGB image tensor (1,3,H,W) in 0..1. Uses the GPU when attached, else (or on a GPU failure)
+    /// the CPU; pre- and post-processing are shared.
+    pub fn detect(&self, rgb: &candle_core::Tensor, conf_threshold: f32, nms_threshold: f32) -> Result<Vec<crate::arch::retinaface::Detection>> {
+        #[cfg(feature = "gpu")]
+        if let (Some(det), Some((gpu, _))) = (&self.gpu_detector, &self.gpu_restorer) {
+            use crate::arch::retinaface as rf;
+            let run = || -> Result<Vec<rf::Detection>> {
+                let (_, _, h, w) = rgb.dims4()?;
+                let x = rf::preprocess(&rgb.to_dtype(DType::F32)?)?;
+                let p = crate::gpu::nets::Planar::from_tensor(&x).map_err(candle_core::Error::msg)?;
+                let o = det.forward(gpu, &p).map_err(candle_core::Error::msg)?;
+                let (loc, conf, landm) = rf::heads_to_outputs(&o[0..3], &o[3..6], &o[6..9])?;
+                rf::decode(&loc, &conf, &landm, h, w, conf_threshold, nms_threshold)
+            };
+            match run() {
+                Ok(d) => return Ok(d),
+                Err(e) => log::warn!("face detection on the GPU failed ({e}); using the CPU for this frame"),
+            }
+        }
+        self.detector.detect(rgb, conf_threshold, nms_threshold)
+    }
+
+    /// Whether faces are restored on the GPU.
+    pub fn on_gpu(&self) -> bool {
+        #[cfg(feature = "gpu")]
+        return self.gpu_restorer.is_some();
+        #[cfg(not(feature = "gpu"))]
+        false
+    }
+
+    /// Restore an aligned 512×512 face (1,3,512,512) in 0..1. Uses the GPU when attached, else (or on a GPU
+    /// failure) the CPU.
+    pub fn restore(&self, face: &candle_core::Tensor) -> Result<candle_core::Tensor> {
+        #[cfg(feature = "gpu")]
+        if let Some((gpu, net)) = &self.gpu_restorer {
+            let run = || -> std::result::Result<candle_core::Tensor, String> {
+                let p = crate::gpu::nets::Planar::from_tensor(&face.to_dtype(DType::F32).map_err(|e| e.to_string())?)?;
+                net.forward(gpu, &p)?.to_tensor()
+            };
+            match run() {
+                Ok(t) => return Ok(t),
+                Err(e) => log::warn!("face restoration on the GPU failed ({e}); using the CPU for this face"),
+            }
+        }
+        self.restorer.forward(face)
     }
 }

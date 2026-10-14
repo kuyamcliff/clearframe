@@ -3,9 +3,15 @@
 These are the limits of the current release, stated plainly.
 
 ## Performance
-- **GPU support covers the image models only.** Upscaling (Real-ESRGAN), denoising
-  (FFDNet, DRUNet) and deblurring (NAFNet) run on any GPU through Vulkan, DirectX 12 or
-  Metal. Frame interpolation (RIFE) and face recovery (GFPGAN) still run on the CPU.
+- **Every AI model runs on the GPU when one is available.** Upscaling (Real-ESRGAN), denoising
+  (FFDNet, DRUNet), deblurring (NAFNet), frame interpolation (RIFE) and face detection and
+  restoration (RetinaFace, GFPGAN) run on any GPU through Vulkan, DirectX 12 or Metal. Without a
+  usable GPU they run on the CPU.
+- **The app uses the whole computer by default** (Maximum mode): every CPU thread at normal
+  priority, the GPU, and all but about 2 GB of the memory. Each processing stage runs on its own
+  thread, and image models on a GPU work on two frames at once, so the GPU keeps computing while
+  the CPU prepares and finishes frames. Other applications may feel slower during an export;
+  choose Balanced or High in Preferences → Performance to leave room for them.
 - **GPU speed has not been measured on real graphics cards yet.** Correctness is tested
   on every graphics API in CI (Mesa lavapipe for Vulkan, Microsoft WARP for DirectX 12 and
   Apple's GPU for Metal) by comparing against the CPU path, but those test devices are
