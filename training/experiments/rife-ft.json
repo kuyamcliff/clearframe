@@ -1,0 +1,262 @@
+{
+ "note": "RIFE v4.26 fine-tuning on Blender open-film clips (v001, CC BY 3.0); held-out = last 20% of each film by time. Metric: middle-frame PSNR and LPIPS-Alex for 1- and 2-frame gaps. Promotion rule: PSNR up AND LPIPS not worse than the original.",
+ "runs": {
+  "rife-v426-ft1": {
+   "config": "LR 2e-5, WD 1e-4, Laplacian L1 only, eval every 2000",
+   "baseline": {
+    "gap1": {
+     "psnr": 32.69263027753557,
+     "lpips": 0.03678336054348205
+    },
+    "gap2": {
+     "psnr": 29.49992918368898,
+     "lpips": 0.054648133605088
+    },
+    "mean": {
+     "psnr": 31.096279730612277,
+     "lpips": 0.045715747074285024
+    }
+   },
+   "evals": [
+    {
+     "gap1": {
+      "psnr": 33.04963709673611,
+      "lpips": 0.04619506449388483
+     },
+     "gap2": {
+      "psnr": 29.090211440346717,
+      "lpips": 0.0700475733164297
+     },
+     "mean": {
+      "psnr": 31.06992426854142,
+      "lpips": 0.05812131890515727
+     },
+     "step": 2000
+    },
+    {
+     "gap1": {
+      "psnr": 32.535982990429424,
+      "lpips": 0.04751677566651503
+     },
+     "gap2": {
+      "psnr": 28.18950328339296,
+      "lpips": 0.0715747982662085
+     },
+     "mean": {
+      "psnr": 30.362743136911188,
+      "lpips": 0.05954578696636176
+     },
+     "step": 4000
+    }
+   ]
+  },
+  "rife-v426-ft2": {
+   "config": "LR 5e-6, WD 0, scene cuts skipped, Laplacian L1 only",
+   "baseline": {
+    "gap1": {
+     "psnr": 32.69263063072525,
+     "lpips": 0.036783357457765696
+    },
+    "gap2": {
+     "psnr": 29.49992862904467,
+     "lpips": 0.05464812400893457
+    },
+    "mean": {
+     "psnr": 31.09627962988496,
+     "lpips": 0.045715740733350135
+    }
+   },
+   "evals": [
+    {
+     "gap1": {
+      "psnr": 33.07499875348254,
+      "lpips": 0.044643529191060086
+     },
+     "gap2": {
+      "psnr": 29.71602455766523,
+      "lpips": 0.06366411989855161
+     },
+     "mean": {
+      "psnr": 31.395511655573888,
+      "lpips": 0.05415382454480585
+     },
+     "step": 1000
+    },
+    {
+     "gap1": {
+      "psnr": 33.212058463584334,
+      "lpips": 0.045435945964026114
+     },
+     "gap2": {
+      "psnr": 29.647542169101065,
+      "lpips": 0.06582501297209978
+     },
+     "mean": {
+      "psnr": 31.4298003163427,
+      "lpips": 0.05563047946806295
+     },
+     "step": 2000
+    },
+    {
+     "gap1": {
+      "psnr": 33.37525882511138,
+      "lpips": 0.04529366239497547
+     },
+     "gap2": {
+      "psnr": 29.600089326992887,
+      "lpips": 0.06605010049923443
+     },
+     "mean": {
+      "psnr": 31.487674076052134,
+      "lpips": 0.05567188144710495
+     },
+     "step": 3000
+    },
+    {
+     "gap1": {
+      "psnr": 33.350930688541325,
+      "lpips": 0.045223768977358664
+     },
+     "gap2": {
+      "psnr": 29.42484499606697,
+      "lpips": 0.06938533911684547
+     },
+     "mean": {
+      "psnr": 31.387887842304142,
+      "lpips": 0.057304554047102066
+     },
+     "step": 4000
+    }
+   ]
+  },
+  "rife-v426-ft3": {
+   "config": "as ft2 + VGG-LPIPS perceptual weight 1.0",
+   "baseline": {
+    "gap1": {
+     "psnr": 32.6926303560444,
+     "lpips": 0.03678336160504772
+    },
+    "gap2": {
+     "psnr": 29.499929569130362,
+     "lpips": 0.05464812737849213
+    },
+    "mean": {
+     "psnr": 31.09627996258738,
+     "lpips": 0.045715744491769926
+    }
+   },
+   "evals": [
+    {
+     "gap1": {
+      "psnr": 33.070874911837755,
+      "lpips": 0.03873883622283347
+     },
+     "gap2": {
+      "psnr": 29.474539728321062,
+      "lpips": 0.057890033078428986
+     },
+     "mean": {
+      "psnr": 31.27270732007941,
+      "lpips": 0.04831443465063123
+     },
+     "step": 1000
+    },
+    {
+     "gap1": {
+      "psnr": 33.158346740038425,
+      "lpips": 0.03877351640878513
+     },
+     "gap2": {
+      "psnr": 29.718666103113144,
+      "lpips": 0.05661910650564228
+     },
+     "mean": {
+      "psnr": 31.438506421575777,
+      "lpips": 0.0476963114572137
+     },
+     "step": 2000
+    },
+    {
+     "gap1": {
+      "psnr": 33.136588036121715,
+      "lpips": 0.03915520456733397
+     },
+     "gap2": {
+      "psnr": 29.665835909883516,
+      "lpips": 0.05704953921718824
+     },
+     "mean": {
+      "psnr": 31.401211973002617,
+      "lpips": 0.04810237189226111
+     },
+     "step": 3000
+    }
+   ]
+  },
+  "rife-v426-ft4": {
+   "config": "LR 2e-6, VGG-LPIPS perceptual weight 3.0",
+   "baseline": {
+    "gap1": {
+     "psnr": 32.6926304542645,
+     "lpips": 0.03678335885346763
+    },
+    "gap2": {
+     "psnr": 29.499929196156355,
+     "lpips": 0.05464812808638812
+    },
+    "mean": {
+     "psnr": 31.09627982521043,
+     "lpips": 0.04571574346992788
+    }
+   },
+   "evals": [
+    {
+     "gap1": {
+      "psnr": 32.89528651592033,
+      "lpips": 0.03797071999062604
+     },
+     "gap2": {
+      "psnr": 29.444940013254556,
+      "lpips": 0.056546090369143896
+     },
+     "mean": {
+      "psnr": 31.170113264587446,
+      "lpips": 0.047258405179884964
+     },
+     "step": 1000
+    },
+    {
+     "gap1": {
+      "psnr": 33.10569831652689,
+      "lpips": 0.03818370783044285
+     },
+     "gap2": {
+      "psnr": 29.637592344377186,
+      "lpips": 0.056588832154883834
+     },
+     "mean": {
+      "psnr": 31.371645330452036,
+      "lpips": 0.04738626999266334
+     },
+     "step": 2000
+    },
+    {
+     "gap1": {
+      "psnr": 33.16378974615026,
+      "lpips": 0.03803729526753764
+     },
+     "gap2": {
+      "psnr": 29.568689232056066,
+      "lpips": 0.057542153307202144
+     },
+     "mean": {
+      "psnr": 31.366239489103158,
+      "lpips": 0.04778972428736989
+     },
+     "step": 3000
+    }
+   ]
+  }
+ },
+ "decision": "Keep the original RIFE v4.26. Every attempt raised PSNR (up to +0.39 dB) but LPIPS got worse (best 0.0473 vs 0.0457), already by the first eval and even at LR 2e-6, so fine-tuning on three films trades sharpness of the middle frame for average-pixel accuracy. Next ideas: much more and more varied real-motion data, distillation against the original model as teacher, or only fine-tuning the last IFBlock."
+}
