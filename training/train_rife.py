@@ -14,7 +14,7 @@ import rife_model as R
 RUN = os.environ.get('RUN', 'rife-v426-ft1'); BATCHES = os.environ.get('BATCHES', 'v001').split(',')
 HOURS = float(os.environ.get('HOURS', '11.0')); CKPT_MIN = float(os.environ.get('CKPT_MIN', '10')); EVAL_EVERY = int(os.environ.get('EVAL_EVERY', '2000'))
 BS = int(os.environ.get('BS', '8')); PATCH = int(os.environ.get('PATCH', '256')); LR = float(os.environ.get('LR', '5e-6'))
-WD = float(os.environ.get('WD', '0')); CUT = float(os.environ.get('CUT', '0.12'))  # mean |a - b| above this = scene cut, skipped
+WD = float(os.environ.get('WD', '0')); W_PERC = float(os.environ.get('W_PERC', '1.0')); CUT = float(os.environ.get('CUT', '0.12'))  # mean |a - b| above this = scene cut, skipped
 P = f'runs/{RUN}/'; DEADLINE = time.time() + HOURS * 3600; DEV = 'cuda'
 WORK = '/kaggle/tmp' if os.path.isdir('/kaggle/tmp') else '/tmp/clipfx-rife'; os.makedirs(WORK, exist_ok=True)
 def log(*a): print(time.strftime('%H:%M:%S'), *a, flush=True)
@@ -85,6 +85,9 @@ def better(m, best): return m['mean']['psnr'] > best['mean']['psnr'] + 0.01 and 
 def main():
     torch.backends.cudnn.benchmark = True; split = fetch()
     net = R.IFNet(R.load_base()).to(DEV); lp = lpips.LPIPS(net='alex', verbose=False).to(DEV).eval()
+    # Pixel losses alone make the middle frame an average of the plausible ones (PSNR up, sharpness and LPIPS down).
+    # A perceptual term on VGG features keeps it sharp; the held-out score uses the separate AlexNet LPIPS.
+    perc = lpips.LPIPS(net='vgg', verbose=False).to(DEV).eval().requires_grad_(False) if W_PERC > 0 else None
     opt = torch.optim.AdamW(net.parameters(), LR, weight_decay=WD); step = 0; state = {'baseline': None, 'best': None}
     if r2.exists(P + 'ckpt_latest.pt'):
         r2.get_file(P + 'ckpt_latest.pt', f'{WORK}/ck.pt'); ck = torch.load(f'{WORK}/ck.pt', map_location='cpu', weights_only=False)
@@ -102,6 +105,7 @@ def main():
         a, m, b = (v.to(DEV, non_blocking=True) for v in next(dl))
         with torch.autocast('cuda', dtype=torch.float16): o = net(a, b)
         loss = lap_loss(o.float(), m)
+        if perc is not None: loss = loss + W_PERC * perc(o.float() * 2 - 1, m * 2 - 1).mean()
         opt.zero_grad(set_to_none=True); loss.backward(); torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0); opt.step(); step += 1
         if time.time() - t_log > 300: log(f'step {step} loss {loss.item():.4f}'); t_log = time.time()
         if step % EVAL_EVERY == 0:
