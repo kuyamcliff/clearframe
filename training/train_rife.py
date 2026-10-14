@@ -13,7 +13,8 @@ import rife_model as R
 
 RUN = os.environ.get('RUN', 'rife-v426-ft1'); BATCHES = os.environ.get('BATCHES', 'v001').split(',')
 HOURS = float(os.environ.get('HOURS', '11.0')); CKPT_MIN = float(os.environ.get('CKPT_MIN', '10')); EVAL_EVERY = int(os.environ.get('EVAL_EVERY', '2000'))
-BS = int(os.environ.get('BS', '8')); PATCH = int(os.environ.get('PATCH', '256')); LR = float(os.environ.get('LR', '2e-5'))
+BS = int(os.environ.get('BS', '8')); PATCH = int(os.environ.get('PATCH', '256')); LR = float(os.environ.get('LR', '5e-6'))
+WD = float(os.environ.get('WD', '0')); CUT = float(os.environ.get('CUT', '0.12'))  # mean |a - b| above this = scene cut, skipped
 P = f'runs/{RUN}/'; DEADLINE = time.time() + HOURS * 3600; DEV = 'cuda'
 WORK = '/kaggle/tmp' if os.path.isdir('/kaggle/tmp') else '/tmp/clipfx-rife'; os.makedirs(WORK, exist_ok=True)
 def log(*a): print(time.strftime('%H:%M:%S'), *a, flush=True)
@@ -44,8 +45,11 @@ class Triplets(torch.utils.data.Dataset):
     def __init__(s, dirs): s.dirs = dirs
     def __len__(s): return 10 ** 9
     def __getitem__(s, _):
-        d = random.choice(s.dirs); gap = random.choice([1, 1, 2]); t = random.randrange(0, 6 - 2 * gap)
-        a, m, b = (cv2.imread(f'{d}/gt_{t + k * gap}.jpg') for k in range(3))
+        for _ in range(20):
+            d = random.choice(s.dirs); gap = random.choice([1, 1, 2]); t = random.randrange(0, 6 - 2 * gap)
+            a, m, b = (cv2.imread(f'{d}/gt_{t + k * gap}.jpg') for k in range(3))
+            # A cut between the two inputs has no true middle frame; training on it teaches ghosting.
+            if np.abs(cv2.resize(a, (64, 64)).astype(np.float32) - cv2.resize(b, (64, 64)).astype(np.float32)).mean() / 255 <= CUT: break
         h, w = a.shape[:2]; y = random.randrange(0, h - PATCH + 1); x = random.randrange(0, w - PATCH + 1)
         a, m, b = (im[y:y + PATCH, x:x + PATCH] for im in (a, m, b))
         if random.random() < 0.5: a, b = b, a  # time reversal
@@ -81,7 +85,7 @@ def better(m, best): return m['mean']['psnr'] > best['mean']['psnr'] + 0.01 and 
 def main():
     torch.backends.cudnn.benchmark = True; split = fetch()
     net = R.IFNet(R.load_base()).to(DEV); lp = lpips.LPIPS(net='alex', verbose=False).to(DEV).eval()
-    opt = torch.optim.AdamW(net.parameters(), LR, weight_decay=1e-4); step = 0; state = {'baseline': None, 'best': None}
+    opt = torch.optim.AdamW(net.parameters(), LR, weight_decay=WD); step = 0; state = {'baseline': None, 'best': None}
     if r2.exists(P + 'ckpt_latest.pt'):
         r2.get_file(P + 'ckpt_latest.pt', f'{WORK}/ck.pt'); ck = torch.load(f'{WORK}/ck.pt', map_location='cpu', weights_only=False)
         net.load_state_dict(ck['net']); opt.load_state_dict(ck['opt']); step = ck['step']; state = ck['state']; log('resumed at', step)
