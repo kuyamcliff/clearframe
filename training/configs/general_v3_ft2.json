@@ -9,8 +9,8 @@
   "need_video": true,
   "init_g": "originals/realesr-general-x4v3.pth",
   "init_d_url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.3/RealESRGAN_x4plus_netD.pth",
-  "train_seconds": 30600,
-  "max_wall_seconds": 34200,
+  "train_seconds": 27000,
+  "max_wall_seconds": 30600,
   "final_reserve_seconds": 900,
   "ckpt_minutes": 10,
   "quick_eval_every": 2000,
@@ -19,7 +19,7 @@
   "lq_patch": 64,
   "lr": 5e-05,
   "w_perc": 1.0,
-  "w_gan": 0.05,
+  "w_gan": 0.025,
   "w_temp": 30.0,
   "ema_decay": 0.999,
   "num_workers": 2,
@@ -42,6 +42,11 @@
       "at_step": 8687,
       "what": "video_frac 0.4 (was uniform, ~8% video), w_pix 1.5 (was 1.0); train_seconds 30600 for the remaining weekly GPU budget",
       "why": "full eval @8000: video PSNR 24.92 vs original 25.34 (-0.42 dB; light level -0.74 dB) and falling at every quick eval, while photo LPIPS improved 0.4978 -> 0.4590; the model was learning photo-style sharpening from a 92% photo mix"
+    },
+    {
+      "at_step": 16078,
+      "what": "w_gan 0.025 (was 0.05); train_seconds 27000 for the remaining weekly GPU budget",
+      "why": "full eval @16000 after the video-share fix: video PSNR 25.12 vs original 25.34 (-0.22 dB, gate 0.2) and flat across quick evals @12k/@14k; video LPIPS 0.3441 vs 0.3368 (worse, light level most); photos PSNR +0.24 dB, pan -22%, video flicker -10%. The GAN term adds texture that costs fidelity on lightly degraded real video."
     }
   ]
 }
