@@ -142,6 +142,17 @@ jobs:
         run: |
           export PATH="$PWD/apps/desktop/src-tauri/ffmpeg:$PATH"
           tools/e2e-presets.sh target/release/clipfx.exe "$RUNNER_TEMP/cfx" gpu:0 0.25
+      # The GPU "fails" after a few submissions (as after a driver reset): exports must reopen the
+      # GPU or finish on the CPU instead of failing.
+      - name: GPU failure mid-export recovers
+        shell: bash
+        env:
+          CLIPFX_GPU_FAIL_AFTER: "3"
+          E2E_PRESETS: "anime-2x faces smooth-60 deblur"
+        run: |
+          export PATH="$PWD/apps/desktop/src-tauri/ffmpeg:$PATH"
+          tools/e2e-presets.sh target/release/clipfx.exe "$RUNNER_TEMP/cfx" gpu:0 0.25
+          grep -q "finished on the CPU" "$RUNNER_TEMP/cfx/e2e-gpu-0/anime-2x.log"
       - name: Every preset on the CPU
         shell: bash
         run: |

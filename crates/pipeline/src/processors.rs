@@ -101,6 +101,8 @@ pub struct ImageProc {
     vram_budget_mb: u64,
     /// The GPU was reopened once after a failure; a second failure moves the stage to the CPU.
     gpu_reopened: bool,
+    /// What happened after a GPU failure, for the job's warnings.
+    gpu_note: Option<String>,
     /// Frames worked on at once. On a GPU two keep it busy: one frame's forward pass runs while the
     /// other's tiles are prepared, read back and blended on the CPU.
     in_flight: usize,
@@ -119,6 +121,7 @@ impl ImageProc {
             oom_retries: 0,
             vram_budget_mb: res.vram_budget_mb,
             gpu_reopened: false,
+            gpu_note: None,
             in_flight,
             pending: Vec::new(),
         }
@@ -168,6 +171,7 @@ impl ImageProc {
                     Ok(()) => {
                         // Smaller tiles than before: less work per piece, less memory.
                         self.model.tile = self.model.tile.min((tile / 2).max(256));
+                        self.gpu_note = Some(format!("{}: the graphics driver reset once; the GPU was reopened and processing continued.", self.label));
                         return;
                     }
                     Err(e) => log::warn!("{}: could not reopen the GPU ({e})", self.label),
@@ -175,6 +179,7 @@ impl ImageProc {
             }
         }
         log::warn!("{}: {err}; continuing on the CPU", self.label);
+        self.gpu_note = Some(format!("{}: the GPU stopped responding, so this step finished on the CPU (slower). Updating the graphics driver may help.", self.label));
         self.model.use_cpu();
     }
 
@@ -248,7 +253,7 @@ impl Processor for ImageProc {
         self.run_pending(out)
     }
     fn stats(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({ "tile": self.model.tile, "oom_retries": self.oom_retries, "frames_in_flight": self.in_flight }))
+        Some(serde_json::json!({ "tile": self.model.tile, "oom_retries": self.oom_retries, "frames_in_flight": self.in_flight, "warning": self.gpu_note }))
     }
 }
 

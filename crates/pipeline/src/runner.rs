@@ -1085,6 +1085,11 @@ fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, compute: &Comp
     for p in &procs {
         *ctx.timings.stages_s.entry(p.stage_id.clone()).or_insert(0.0) += p.seconds;
         if let Some(s) = p.inner.stats() {
+            if let Some(w) = s.get("warning").and_then(|w| w.as_str()) {
+                if !ctx.warnings.iter().any(|x| x == w) {
+                    ctx.warn(w.to_string());
+                }
+            }
             ctx.stage_stats.insert(p.stage_id.clone(), s);
         }
     }

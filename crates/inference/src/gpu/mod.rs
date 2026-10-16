@@ -25,6 +25,17 @@ pub const TARGET_SUBMIT_SECS: f64 = 0.15;
 /// Longest wait for one submission before the GPU is considered hung.
 const SUBMIT_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Test hook: with CLIPFX_GPU_FAIL_AFTER=N, every submission after the first N in this process
+/// fails as if the driver had reset, to exercise recovery and the CPU fallback end to end.
+fn injected_failure() -> bool {
+    static AFTER: OnceLock<Option<u64>> = OnceLock::new();
+    static COUNT: AtomicU64 = AtomicU64::new(0);
+    match *AFTER.get_or_init(|| std::env::var("CLIPFX_GPU_FAIL_AFTER").ok().and_then(|v| v.parse().ok())) {
+        Some(n) => COUNT.fetch_add(1, Ordering::SeqCst) >= n,
+        None => false,
+    }
+}
+
 use wgpu::util::DeviceExt;
 
 /// What a GPU adapter is, for the settings UI and diagnostics.
@@ -476,6 +487,14 @@ impl Params {
     }
 }
 
+impl Drop for Recorder {
+    fn drop(&mut self) {
+        // A recorder abandoned on an error path still has scopes open; close them in order.
+        drop(self.pass.take());
+        let _ = self.pop_scopes();
+    }
+}
+
 impl Recorder {
     pub fn new(gpu: &Arc<Gpu>) -> Self {
         let turn = gpu.turn();
@@ -492,6 +511,18 @@ impl Recorder {
         ]
     }
 
+    /// Pop every open error scope, newest first (wgpu panics on any other order), and return the
+    /// first error found.
+    fn pop_scopes(&mut self) -> Option<String> {
+        let mut first = None;
+        while let Some((scope, what)) = self.scopes.pop() {
+            if let Some(e) = pollster::block_on(scope.pop()) {
+                first.get_or_insert_with(|| format!("{what}: {e}"));
+            }
+        }
+        first
+    }
+
     /// Submit what has been recorded so far, wait for it, and continue in a new command buffer.
     /// Keeps each piece of GPU work short and measures the GPU's speed.
     fn flush(&mut self) {
@@ -503,12 +534,13 @@ impl Recorder {
         let enc = std::mem::replace(&mut self.encoder, next);
         let started = Instant::now();
         let idx = self.gpu.queue.submit([enc.finish()]);
-        for (scope, what) in self.scopes.drain(..).rev() {
-            if let Some(e) = pollster::block_on(scope.pop()) {
-                self.failed.get_or_insert_with(|| format!("{what}: {e}"));
-            }
+        if let Some(e) = self.pop_scopes() {
+            self.failed.get_or_insert(e);
         }
         self.scopes = Self::push_scopes(&self.gpu);
+        if self.failed.is_none() && injected_failure() {
+            self.failed = Some(self.gpu.describe_failure("device lost (injected for testing)"));
+        }
         if self.failed.is_none() {
             match self.gpu.device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: Some(SUBMIT_TIMEOUT) }) {
                 Ok(_) => self.gpu.record_speed(self.pending, started.elapsed().as_secs_f64()),
@@ -930,11 +962,10 @@ impl Recorder {
                 (st, bytes)
             })
             .collect();
-        let idx = self.gpu.queue.submit([self.encoder.finish()]);
-        for (scope, what) in self.scopes.drain(..).rev() {
-            if let Some(e) = pollster::block_on(scope.pop()) {
-                return Err(format!("{what}: {e}"));
-            }
+        let enc = std::mem::replace(&mut self.encoder, self.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None }));
+        let idx = self.gpu.queue.submit([enc.finish()]);
+        if let Some(e) = self.pop_scopes() {
+            return Err(e);
         }
         let mut rxs = Vec::new();
         for (st, _) in &stagings {
@@ -943,6 +974,9 @@ impl Recorder {
                 let _ = tx.send(r);
             });
             rxs.push(rx);
+        }
+        if injected_failure() {
+            return Err(self.gpu.describe_failure("device lost (injected for testing)"));
         }
         let started = Instant::now();
         self.gpu.device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: Some(SUBMIT_TIMEOUT) }).map_err(|e| self.gpu.describe_failure(&e.to_string()))?;
@@ -974,18 +1008,20 @@ impl Recorder {
             mapped_at_creation: false,
         });
         self.encoder.copy_buffer_to_buffer(t.buf(), 0, &staging, 0, bytes);
-        let idx = self.gpu.queue.submit([self.encoder.finish()]);
-        for (scope, what) in self.scopes.drain(..).rev() {
-            if let Some(e) = pollster::block_on(scope.pop()) {
-                // "out of memory" in the message lets the caller retry with smaller tiles.
-                return Err(format!("{what}: {e}"));
-            }
+        let enc = std::mem::replace(&mut self.encoder, self.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None }));
+        let idx = self.gpu.queue.submit([enc.finish()]);
+        // "out of memory" in the message lets the caller retry with smaller tiles.
+        if let Some(e) = self.pop_scopes() {
+            return Err(e);
         }
         let slice = staging.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
         });
+        if injected_failure() {
+            return Err(self.gpu.describe_failure("device lost (injected for testing)"));
+        }
         let started = Instant::now();
         self.gpu.device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: Some(SUBMIT_TIMEOUT) }).map_err(|e| self.gpu.describe_failure(&e.to_string()))?;
         self.gpu.record_speed(self.pending, started.elapsed().as_secs_f64());
