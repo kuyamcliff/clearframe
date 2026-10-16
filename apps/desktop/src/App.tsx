@@ -81,7 +81,7 @@ function TopBar({ presets, setPresets }: { presets: boolean; setPresets: (v: boo
       </nav>
       <div className="crumbs">
         <span>Projects</span><ChevronRight size={12} />
-        <span className="cur ellipsis" style={{ maxWidth: 260 }}>{projectName ?? (sourcePath ? basename(sourcePath) : "Default")}{dirty && projectName ? " •" : ""}</span>
+        <span className="cur ellipsis" title={projectName ?? sourcePath ?? undefined}>{projectName ?? (sourcePath ? basename(sourcePath) : "Default")}{dirty && projectName ? " •" : ""}</span>
         {app?.demo && <span className="tag warn" title="Running in a browser without the processing engine">Demo</span>}
         {app && !app.ffmpeg && !app.ffmpeg_checking && <span className="tag err" title={app.ffmpeg_error ?? ""}>FFmpeg missing</span>}
       </div>

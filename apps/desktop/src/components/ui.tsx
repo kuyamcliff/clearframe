@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
 
@@ -130,7 +131,9 @@ export function Menu({ at, items, onClose }: { at: { x: number; y: number }; ite
     const r = ref.current?.getBoundingClientRect();
     if (r) setPos({ x: Math.min(at.x, window.innerWidth - r.width - 8), y: Math.min(at.y, window.innerHeight - r.height - 8) });
   }, [at]);
-  return (
+  // Rendered at the top of the document so no ancestor (scrolling list, animated panel,
+  // stacking context) can clip, cover or move it.
+  return createPortal(
     <div className="menu" ref={ref} role="menu" style={{ left: pos.x, top: pos.y }} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
       {items.map((it, i) => (
         <span key={i}>
@@ -138,7 +141,8 @@ export function Menu({ at, items, onClose }: { at: { x: number; y: number }; ite
           <button role="menuitem" className={it.danger ? "danger" : ""} disabled={it.disabled} onClick={() => { onClose(); it.onClick(); }}>{it.label}</button>
         </span>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -168,7 +172,8 @@ export function Dialog({ title, onClose, children, footer, size, closeDisabled, 
     window.addEventListener("keydown", onKey, true);
     return () => { window.removeEventListener("keydown", onKey, true); prev?.focus?.(); };
   }, [onClose, closeDisabled]);
-  return (
+  // At the top of the document, above popovers and panels that may have opened it.
+  return createPortal(
     <div className="backdrop" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => { e.stopPropagation(); if (e.target === e.currentTarget && !closeDisabled) onClose(); }}>
       <div ref={ref} className={`dialog${size ? " " + size : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="dialog-h">
@@ -179,7 +184,8 @@ export function Dialog({ title, onClose, children, footer, size, closeDisabled, 
         <div className={`dialog-b${flush ? " flush" : ""}`}>{children}</div>
         {footer && <div className="dialog-f">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
