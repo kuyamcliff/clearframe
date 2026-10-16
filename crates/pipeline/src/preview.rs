@@ -123,6 +123,15 @@ pub fn render_still(tools: &FfmpegTools, info: &MediaInfo, req: &StillRequest, l
         }
         None => req,
     };
+    let auto_dn = crate::runner::resolve_auto_denoise(tools, &req.source, info, &req.pipeline, &req.models);
+    let dn_req;
+    let req = match auto_dn.as_ref() {
+        Some((pipeline, _)) => {
+            dn_req = StillRequest { pipeline: pipeline.clone(), ..req.clone() };
+            &dn_req
+        }
+        None => req,
+    };
     let plan = plan::plan(info, Some(range), &req.pipeline, &req.output, lookup, &opts).map_err(|e| anyhow!(e))?;
     if let Some(e) = plan.errors().next() {
         bail!("{}", e.message);
@@ -190,6 +199,9 @@ pub fn render_still(tools: &FfmpegTools, info: &MediaInfo, req: &StillRequest, l
         None => (processed, original),
     };
     let mut notes: Vec<String> = plan.stages.iter().flat_map(|s| s.notes.clone()).collect();
+    if let Some((_, n)) = auto_dn {
+        notes.push(n);
+    }
     if needs_pair {
         notes.push("Showing a synthesised frame between the selected frame and the next one.".into());
     }

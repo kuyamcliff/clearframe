@@ -68,9 +68,10 @@ describe("StageForm", () => {
     const stage = { id: "enhance", enabled: true, type: "enhance" as const, settings: D.enhance.settings };
     const onChange = vi.fn();
     render(<StageForm stage={stage} onChange={onChange} />);
-    // The default is the live-action model, with its denoise control at the shared default.
+    // The default is the live-action model, with denoise on Auto (set from the video's noise).
     expect(screen.getByRole("button", { name: /^Install General v3 ·/ })).toBeInTheDocument();
-    expect(screen.getByLabelText("Reduce noise value")).toHaveValue(String(Math.round(D.general_denoise_default * 100)));
+    expect(screen.getByRole("checkbox", { name: "Auto" })).toBeChecked();
+    expect(screen.queryByLabelText("Reduce noise value")).toBeNull();
     await userEvent.click(screen.getByRole("radio", { name: /AnimeVideo v3/ }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ model_id: "xinntao.realesr-animevideo-v3", denoise: null }));
     expect(useStore.getState().models.every((m) => !m.in_progress)).toBe(true);

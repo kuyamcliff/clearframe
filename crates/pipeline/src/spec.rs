@@ -135,17 +135,17 @@ pub struct EnhanceSettings {
     /// 0..1 blend between a plain (bicubic) resize and the model output.
     pub strength: f32,
     /// Real-ESRGAN General v3 only: 0 = keep noise/texture .. 1 = strong denoise.
-    /// `None` means [`DEFAULT_GENERAL_DENOISE`].
+    /// `None` = Auto: set from the source's measured noise level when the job starts.
     pub denoise: Option<f32>,
     /// Tile size in input pixels (0 = automatic).
     pub tile_size: u32,
     pub tile_pad: u32,
 }
 
-/// General v3 denoise when a step sets none. Measured on YouTube-style 240p-720p footage
-/// against the 1080p original: low values keep skin, hair and fabric texture; high values
-/// smooth them into a waxy look.
-pub const DEFAULT_GENERAL_DENOISE: f32 = 0.2;
+/// General v3 denoise when a step is on Auto (no value) but the source's noise could not be
+/// measured (see [`crate::noise`]), and the starting value when Auto is switched off. Low
+/// values keep skin, hair and fabric texture; high values smooth them into a waxy look.
+pub const DEFAULT_GENERAL_DENOISE: f32 = 0.1;
 
 impl Default for EnhanceSettings {
     fn default() -> Self {

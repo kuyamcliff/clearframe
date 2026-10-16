@@ -1,6 +1,7 @@
 //! ClipFX Enhance processing pipeline.
 pub mod grain;
 pub mod interp;
+pub mod noise;
 pub mod plan;
 pub mod presets;
 pub mod preview;

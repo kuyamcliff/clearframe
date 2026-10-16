@@ -467,6 +467,36 @@ pub fn adapt(info: &MediaInfo, pipeline: &Pipeline, output: &OutputSettings, int
     Some((p.unwrap_or_else(|| pipeline.clone()), o.unwrap_or_else(|| output.clone())))
 }
 
+/// Fills in "Auto" denoise (no value set) on Real-ESRGAN General v3 steps from the source's
+/// measured noise level (over the whole video, so previews and the export agree). Returns the
+/// updated pipeline and a note, or `None` when no step needs it. A failed measurement leaves
+/// the steps unset (they then use the default).
+pub fn resolve_auto_denoise(
+    tools: &FfmpegTools,
+    source: &std::path::Path,
+    info: &MediaInfo,
+    pipeline: &Pipeline,
+    models: &BTreeMap<String, ResolvedModel>,
+) -> Option<(Pipeline, String)> {
+    let wants = |s: &Stage| matches!(&s.op, Operation::Enhance(e) if e.denoise.is_none() && models.get(&e.model_id).is_some_and(|m| m.files.contains_key("wdn")));
+    if !pipeline.enabled().any(wants) {
+        return None;
+    }
+    let t = Instant::now();
+    let sigma = crate::noise::estimate(tools, source, info, None)?;
+    let dn = crate::noise::general_denoise_for(sigma);
+    log::info!("noise level {sigma:.2} -> General v3 denoise {:.0}% ({} ms)", dn * 100.0, t.elapsed().as_millis());
+    let mut p = pipeline.clone();
+    for s in p.stages.iter_mut().filter(|s| s.enabled) {
+        if wants(s) {
+            if let Operation::Enhance(e) = &mut s.op {
+                e.denoise = Some(dn);
+            }
+        }
+    }
+    Some((p, format!("Reduce noise is set automatically to {:.0}% for this video (measured noise level {sigma:.1}).", dn * 100.0)))
+}
+
 fn adapt_to_source(info: &MediaInfo, spec: &JobSpec) -> Option<JobSpec> {
     let interlaced = info.video().map(|v| v.is_interlaced_flagged()).unwrap_or(false);
     adapt(info, &spec.pipeline, &spec.output, interlaced).map(|(pipeline, output)| JobSpec { pipeline, output, ..spec.clone() })
@@ -477,13 +507,26 @@ pub fn run_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, st
     // Adapt the job to the source the same way the export check does (so stage numbers match):
     // deinterlace interlaced video, keep HDR results in a 10-bit format.
     let auto_spec;
-    let spec = match probe(tools, &spec.source).ok().and_then(|i| adapt_to_source(&i, spec)) {
+    let probed = probe(tools, &spec.source).ok();
+    let mut adapted = probed.as_ref().and_then(|i| adapt_to_source(i, spec));
+    let mut auto_note = None;
+    if let Some(i) = &probed {
+        let cur = adapted.as_ref().unwrap_or(spec);
+        if let Some((pipeline, note)) = resolve_auto_denoise(tools, &cur.source, i, &cur.pipeline, &cur.models) {
+            adapted = Some(JobSpec { pipeline, ..cur.clone() });
+            auto_note = Some(note);
+        }
+    }
+    let spec = match adapted {
         Some(s) => {
             auto_spec = s;
             &auto_spec
         }
         None => spec,
     };
+    if let Some(n) = auto_note {
+        events(Event::Log { level: "info".into(), message: n });
+    }
     let started_at = chrono::Utc::now().to_rfc3339();
     let started = Instant::now();
     events(Event::State { state: JobState::Preparing, detail: "Reading source".into() });
