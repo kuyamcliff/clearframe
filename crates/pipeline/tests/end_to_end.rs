@@ -496,12 +496,12 @@ fn thread_limit_and_cpu_device_are_applied() {
 /// Mean R, G, B (0..255) of the first frame, via FFmpeg.
 fn mean_rgb(p: &std::path::Path) -> [f64; 3] {
     let out = std::process::Command::new("ffmpeg").args(["-v", "error", "-i"]).arg(p).args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]).output().unwrap();
-    let px = out.stdout.chunks_exact(3);
+    let (px, _) = out.stdout.as_chunks::<3>();
     let n = px.len() as f64;
     let mut m = [0.0; 3];
     for c in px {
-        for i in 0..3 {
-            m[i] += c[i] as f64;
+        for (acc, v) in m.iter_mut().zip(c) {
+            *acc += *v as f64;
         }
     }
     m.map(|v| v / n)
