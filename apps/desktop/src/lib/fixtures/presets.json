@@ -159,13 +159,20 @@
             "brightness": 0.0,
             "contrast": 1.0,
             "desaturate": 0.0,
+            "exposure": 0.0,
             "gamma": 1.0,
             "hdr_transfer": "pq",
+            "highlights": 0.0,
+            "hue": 0.0,
             "mode": "hdr_to_sdr",
             "peak_nits": 1000.0,
             "saturation": 1.0,
             "sdr_white_nits": 203.0,
-            "tone_mapper": "hable"
+            "shadows": 0.0,
+            "temperature": 0.0,
+            "tint": 0.0,
+            "tone_mapper": "hable",
+            "vibrance": 0.0
           },
           "type": "color"
         }

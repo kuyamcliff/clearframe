@@ -382,3 +382,58 @@ table.q .pc { width: 170px; }
 .update-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); flex: none; }
 .update-progress { width: 140px; height: 4px; border-radius: 2px; background: var(--hover); overflow: hidden; }
 .update-progress i { display: block; height: 100%; background: var(--accent); transition: width .2s; }
+
+/* ---------- motion ----------
+   Short, eased transitions on everything interactive, a press response on buttons, and
+   entrances for overlays. Off when the user prefers reduced motion (data-motion="reduced",
+   set from Preferences or the system setting). */
+:root { --ease: cubic-bezier(0.2, 0.8, 0.2, 1); --ease-out: cubic-bezier(0.16, 1, 0.3, 1); --t-fast: 110ms; --t: 170ms; }
+.btn, .tb, .tab, .seg button, .mrow, .side-tabs button, .menu button, .recent button, .plist .item, .sec-h, .thumb,
+.split-dialog nav button, .side-foot .actions button, .input, .chk input, .link, .mtable td, .star {
+  transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+    box-shadow var(--t) var(--ease), opacity var(--t) var(--ease), transform var(--t-fast) var(--ease);
+}
+.btn:active:not(:disabled), .tb:active:not(:disabled), .seg button:active, .mrow:active, .thumb:active, .menu button:active:not(:disabled),
+.plist .item:active, .side-foot .actions button:active:not(:disabled), .recent button:active, .split-dialog nav button:active {
+  transform: scale(0.965);
+  transition-duration: 60ms;
+}
+.btn.primary { box-shadow: 0 0 0 0 transparent; }
+.btn.primary:hover:not(:disabled) { box-shadow: 0 2px 10px -2px var(--accent-soft), 0 0 0 1px rgba(255, 255, 255, 0.06) inset; }
+.btn.primary:active:not(:disabled) { background: var(--accent); }
+.seg button[aria-pressed="true"] { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
+.switch { transition: background-color var(--t) var(--ease); }
+.switch::after { transition: transform var(--t) var(--ease-out), background var(--t) var(--ease), width var(--t-fast) var(--ease); }
+.switch:active:not(:disabled)::after { width: 13px; }
+.switch[aria-checked="true"]:active:not(:disabled)::after { transform: translateX(11px); }
+.sec-h .chev { transition: transform var(--t) var(--ease-out); }
+.sec-b { animation: reveal var(--t) var(--ease-out); }
+.range input[type="range"]::-webkit-slider-thumb { transition: transform var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), box-shadow var(--t) var(--ease); }
+.range input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
+.range input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.25); border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.range input[type="range"]:focus-visible { outline: none; }
+.range input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--accent); }
+.backdrop { animation: fade var(--t) var(--ease); }
+.dialog { animation: pop-in 200ms var(--ease-out); }
+.pop, .menu { animation: drop-in var(--t) var(--ease-out); transform-origin: top center; }
+.sheet { animation: sheet-in 220ms var(--ease-out); }
+.update-bar { animation: bar-in 260ms var(--ease-out); }
+.status { animation: fade var(--t) var(--ease); }
+.view img, .view video { animation: fade 160ms var(--ease); }
+.progress > div { transition: width 0.3s var(--ease); }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes drop-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes sheet-in { from { transform: translateY(24px); opacity: 0.4; } to { transform: none; opacity: 1; } }
+@keyframes bar-in { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translateX(-50%); } }
+@keyframes reveal { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) *, :root:not([data-motion="full"]) *::before, :root:not([data-motion="full"]) *::after { animation: none !important; transition: none !important; }
+}
+
+/* Sub-headings inside a section (e.g. Light / Color) with an optional action. */
+.subhead { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; color: var(--text-3); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em; }
+.subhead:first-child { margin-top: 0; }
+.link { border: 0; background: transparent; padding: 2px 4px; border-radius: 4px; color: var(--accent-2); cursor: pointer; font-size: 11px; text-transform: none; letter-spacing: 0; }
+.link:hover:not(:disabled) { background: var(--accent-soft); }
+.link:disabled { color: var(--text-3); cursor: default; }

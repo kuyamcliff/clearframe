@@ -492,3 +492,53 @@ fn thread_limit_and_cpu_device_are_applied() {
     spec.job_id = "threads2".into();
     assert!(matches!(run(&t, &spec), Err(JobError::Invalid(_))));
 }
+
+/// Mean R, G, B (0..255) of the first frame, via FFmpeg.
+fn mean_rgb(p: &std::path::Path) -> [f64; 3] {
+    let out = std::process::Command::new("ffmpeg").args(["-v", "error", "-i"]).arg(p).args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]).output().unwrap();
+    let px = out.stdout.chunks_exact(3);
+    let n = px.len() as f64;
+    let mut m = [0.0; 3];
+    for c in px {
+        for i in 0..3 {
+            m[i] += c[i] as f64;
+        }
+    }
+    m.map(|v| v / n)
+}
+
+#[test]
+fn color_and_light_sliders_change_the_image() {
+    let t = need_ffmpeg!();
+    let d = tempfile::tempdir().unwrap();
+    // A dim, low-contrast pattern so brightening and colour shifts are not clipped.
+    let src = clip(d.path(), "src.mp4", "lutrgb=r=40+val*0.3:g=40+val*0.3:b=40+val*0.3", 1.0);
+    let base = mean_rgb(&src);
+    let grade = |name: &str, c: ColorSettings| {
+        let p = Pipeline { stages: vec![Stage::new(Operation::Color(c))] };
+        let r = run(&t, &job(d.path(), &src, p, lossless(), name)).unwrap();
+        mean_rgb(&r.output)
+    };
+    let luma = |m: [f64; 3]| 0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2];
+    let brighter = grade("exposure", ColorSettings { exposure: 1.0, ..Default::default() });
+    assert!(luma(brighter) > luma(base) + 10.0, "exposure +1: {base:?} -> {brighter:?}");
+    let warm = grade("warm", ColorSettings { temperature: 1.0, ..Default::default() });
+    assert!(warm[0] - warm[2] > base[0] - base[2] + 5.0, "warmer: {base:?} -> {warm:?}");
+    let lifted = grade("shadows", ColorSettings { shadows: 1.0, ..Default::default() });
+    assert!(luma(lifted) > luma(base) + 3.0, "shadows +1: {base:?} -> {lifted:?}");
+    let grey = grade("grey", ColorSettings { saturation: 0.0, vibrance: 0.5, hue: 30.0, tint: 0.3, highlights: -0.5, contrast: 1.2, ..Default::default() });
+    assert!(grey.iter().all(|v| v.is_finite()));
+}
+
+#[test]
+fn sharpen_methods_render() {
+    let t = need_ffmpeg!();
+    let d = tempfile::tempdir().unwrap();
+    let src = clip(d.path(), "src.mp4", "", 1.0);
+    for (name, method, amount) in [("adaptive", SharpenMethod::Adaptive, 0.8), ("unsharp", SharpenMethod::Unsharp, 1.5)] {
+        let p = Pipeline { stages: vec![Stage::new(Operation::Sharpen(SharpenSettings { method, amount, radius: 2.0 }))] };
+        let r = run(&t, &job(d.path(), &src, p, lossless(), name)).unwrap();
+        let q = psnr(&src, &r.output);
+        assert!(q.is_finite() && q < 60.0, "{name}: sharpening must change the image (PSNR {q})");
+    }
+}

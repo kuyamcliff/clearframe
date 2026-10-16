@@ -107,10 +107,43 @@ describe("Models dialog", () => {
 describe("Sidebar", () => {
   it("shows every adjustment section with a toggle", () => {
     render(<Sidebar />);
-    for (const t of ["Enhancement", "Denoise", "Motion deblur", "Face recovery", "Frame interpolation", "Stabilization", "Deinterlace", "Color & HDR", "Resize", "Film grain"]) {
+    for (const t of ["Enhancement", "Denoise", "Motion deblur", "Face recovery", "Frame interpolation", "Stabilization", "Deinterlace", "Color & light", "Resize", "Sharpen", "Film grain"]) {
       expect(screen.getByRole("switch", { name: t })).toBeInTheDocument();
     }
     expect(screen.getByTestId("export-as")).toBeDisabled();
+  });
+
+  it("grades colour and light with sliders that reset on double-click", () => {
+    cleanup();
+    act(() => setPipeline({ stages: [] }));
+    render(<Sidebar />);
+    fireEvent.click(screen.getByRole("switch", { name: "Color & light" }));
+    const stage = () => useStore.getState().pipeline.stages.find((s) => s.type === "color")!;
+    expect(stage()).toBeTruthy();
+    if (!screen.queryByRole("slider", { name: "Exposure" })) fireEvent.click(screen.getByText("Color & light"));
+    for (const n of ["Exposure", "Brightness", "Contrast", "Shadows", "Highlights", "Gamma", "Temperature", "Tint", "Saturation", "Vibrance", "Hue"]) {
+      expect(screen.getByRole("slider", { name: n })).toBeInTheDocument();
+    }
+    fireEvent.change(screen.getByRole("slider", { name: "Exposure" }), { target: { value: "1.5" } });
+    expect(stage().settings.exposure).toBe(1.5);
+    fireEvent.doubleClick(screen.getByRole("slider", { name: "Exposure" }));
+    expect(stage().settings.exposure).toBe(0);
+    fireEvent.change(screen.getByRole("slider", { name: "Saturation" }), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(stage().settings.saturation).toBe(1);
+  });
+
+  it("adds a sharpen stage with method and amount", () => {
+    cleanup();
+    act(() => setPipeline({ stages: [] }));
+    render(<Sidebar />);
+    fireEvent.click(screen.getByRole("switch", { name: "Sharpen" }));
+    const stage = () => useStore.getState().pipeline.stages.find((s) => s.type === "sharpen")!;
+    expect(stage().settings).toMatchObject({ method: "adaptive" });
+    if (!screen.queryByRole("slider", { name: "Sharpen amount" })) fireEvent.click(screen.getByText("Sharpen"));
+    fireEvent.click(screen.getByRole("button", { name: "Unsharp mask" }));
+    expect(stage().settings.method).toBe("unsharp");
+    expect(screen.getByRole("slider", { name: "Sharpen radius" })).toBeInTheDocument();
   });
 });
 

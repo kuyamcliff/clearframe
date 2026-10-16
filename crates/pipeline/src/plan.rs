@@ -189,11 +189,14 @@ pub struct FilterCaps {
     pub bwdif: bool,
     pub nlmeans: bool,
     pub minterpolate: bool,
+    /// Contrast-adaptive sharpening (FFmpeg 4.4+).
+    pub cas: bool,
+    pub vibrance: bool,
 }
 
 impl FilterCaps {
     pub fn all() -> Self {
-        Self { vidstab: true, zscale: true, tonemap: true, bwdif: true, nlmeans: true, minterpolate: true }
+        Self { vidstab: true, zscale: true, tonemap: true, bwdif: true, nlmeans: true, minterpolate: true, cas: true, vibrance: true }
     }
     pub fn from_tools(t: &clearframe_media::FfmpegTools) -> Self {
         Self {
@@ -203,6 +206,8 @@ impl FilterCaps {
             bwdif: t.has_filter("bwdif"),
             nlmeans: t.has_filter("nlmeans"),
             minterpolate: t.has_filter("minterpolate"),
+            cas: t.has_filter("cas"),
+            vibrance: t.has_filter("vibrance"),
         }
     }
 }
@@ -559,13 +564,12 @@ pub fn plan(
             }
             Operation::Color(c) => {
                 let mut f = Vec::new();
+                let adjust = color_adjust_filters(c, opts.caps.vibrance);
+                if c.vibrance.abs() > 1e-4 && !opts.caps.vibrance {
+                    notes.push("This FFmpeg build has no vibrance filter; vibrance is ignored.".into());
+                }
                 match c.mode {
-                    ColorMode::Adjust => {
-                        let changed = c.brightness.abs() > 1e-4 || (c.contrast - 1.0).abs() > 1e-4 || (c.saturation - 1.0).abs() > 1e-4 || (c.gamma - 1.0).abs() > 1e-4;
-                        if changed {
-                            f.push(format!("eq=brightness={:.4}:contrast={:.4}:saturation={:.4}:gamma={:.4}", c.brightness, c.contrast, c.saturation, c.gamma));
-                        }
-                    }
+                    ColorMode::Adjust => f.extend(adjust.iter().cloned()),
                     ColorMode::HdrToSdr => {
                         if !cur.is_hdr() {
                             issue(&mut issues, Severity::Error, Some(sid), "HDR to SDR needs an HDR (PQ or HLG) source; this video is SDR.".into(), None);
@@ -592,6 +596,8 @@ pub fn plan(
                         out_color.matrix = clearframe_media::color::YuvMatrix::Bt709;
                         out_color.mastering_display = None;
                         out_color.content_light = None;
+                        // Grade the SDR result.
+                        f.extend(adjust.iter().cloned());
                     }
                     ColorMode::SdrToHdr => {
                         if cur.is_hdr() {
@@ -605,6 +611,8 @@ pub fn plan(
                             HdrTransfer::Pq => ("smpte2084", "smpte2084"),
                             HdrTransfer::Hlg => ("arib-std-b67", "arib-std-b67"),
                         };
+                        // Grade the SDR source before it is mapped into HDR.
+                        f.extend(adjust.iter().cloned());
                         let pin = primaries_name(&cur.primaries);
                         f.push(format!(
                             "zscale=tin={}:pin={pin}:p={pin}:{}:t=linear:npl={:.0}",
@@ -628,6 +636,21 @@ pub fn plan(
                 } else {
                     f.push("format=rgb48le".into());
                     StageExec::Ffmpeg { filters: f }
+                }
+            }
+            Operation::Sharpen(sh) => {
+                if sh.amount <= 1e-4 {
+                    StageExec::Skip { reason: "Sharpen amount is zero.".into() }
+                } else if sh.method == SharpenMethod::Adaptive && opts.caps.cas {
+                    StageExec::Ffmpeg { filters: vec![format!("cas=strength={:.3}", sh.amount.clamp(0.0, 1.0))] }
+                } else {
+                    if sh.method == SharpenMethod::Adaptive {
+                        notes.push("This FFmpeg build has no adaptive sharpening (cas); using an unsharp mask instead.".into());
+                    }
+                    let (n, amount) = unsharp_params(sh);
+                    StageExec::Ffmpeg {
+                        filters: vec![format!("unsharp=luma_msize_x={n}:luma_msize_y={n}:luma_amount={amount:.3}:chroma_msize_x={n}:chroma_msize_y={n}:chroma_amount=0")],
+                    }
                 }
             }
             Operation::Resize(r) => {
@@ -934,6 +957,43 @@ fn stages_model_mem(sp: &StagePlan, models: &dyn ModelLookup, tile_mp: f64) -> f
         total += sp.output.megapixels() * 24.0;
     }
     total
+}
+
+/// FFmpeg filters for the colour and light sliders, in grading order: exposure and white
+/// balance, shadows and highlights, brightness/contrast/saturation/gamma, vibrance, hue.
+pub fn color_adjust_filters(c: &ColorSettings, has_vibrance: bool) -> Vec<String> {
+    let mut f = Vec::new();
+    if !c.has_adjustments() {
+        return f;
+    }
+    let e = 1e-4;
+    if c.exposure.abs() > e || c.temperature.abs() > e || c.tint.abs() > e {
+        let k = 2f32.powf(c.exposure);
+        let (r, g, b) = (k * (1.0 + 0.10 * c.temperature), k * (1.0 - 0.08 * c.tint), k * (1.0 - 0.10 * c.temperature));
+        f.push(format!("colorchannelmixer=rr={r:.4}:gg={g:.4}:bb={b:.4}"));
+    }
+    if c.shadows.abs() > e || c.highlights.abs() > e {
+        let s = 0.25 + 0.12 * c.shadows.clamp(-1.0, 1.0);
+        let h = 0.75 + 0.12 * c.highlights.clamp(-1.0, 1.0);
+        f.push(format!("curves=all='0/0 0.25/{s:.4} 0.75/{h:.4} 1/1'"));
+    }
+    if c.brightness.abs() > e || (c.contrast - 1.0).abs() > e || (c.saturation - 1.0).abs() > e || (c.gamma - 1.0).abs() > e {
+        f.push(format!("eq=brightness={:.4}:contrast={:.4}:saturation={:.4}:gamma={:.4}", c.brightness, c.contrast, c.saturation, c.gamma));
+    }
+    if c.vibrance.abs() > e && has_vibrance {
+        f.push(format!("vibrance=intensity={:.4}", c.vibrance.clamp(-1.0, 1.0) * 1.5));
+    }
+    if c.hue.abs() > e {
+        f.push(format!("hue=h={:.2}", c.hue));
+    }
+    f
+}
+
+/// Unsharp mask size (odd, 3..23) and amount for a sharpen setting.
+fn unsharp_params(sh: &SharpenSettings) -> (u32, f32) {
+    let n = ((sh.radius.clamp(0.5, 5.0) * 1.5).round() as u32 * 2 + 1).clamp(3, 23);
+    let amount = if sh.method == SharpenMethod::Adaptive { sh.amount * 2.0 } else { sh.amount };
+    (n, amount.clamp(0.0, 5.0))
 }
 
 #[cfg(test)]

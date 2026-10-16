@@ -4,7 +4,7 @@ export type Rational = { num: number; den: number };
 
 export type OperationType =
   | "deinterlace" | "denoise" | "deblur" | "enhance" | "face_restore"
-  | "interpolate" | "stabilize" | "color" | "grain" | "resize";
+  | "interpolate" | "stabilize" | "color" | "sharpen" | "grain" | "resize";
 
 export interface Stage {
   id: string;

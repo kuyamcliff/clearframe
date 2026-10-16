@@ -51,15 +51,17 @@ export function NumberInput({ value, onChange, min, max, step = 1, id, label, su
 }
 
 /** Slider with an editable value on the right. `scale` maps stored values to displayed ones. */
-export function Range({ value, onChange, min, max, step = 1, label, scale = 1, disabled }: {
-  value: number; onChange: (v: number) => void; min: number; max: number; step?: number; label: string; scale?: number; disabled?: boolean;
+/** Slider with a typed value. Double-click the slider to return to `reset` (its neutral value). */
+export function Range({ value, onChange, min, max, step = 1, label, scale = 1, disabled, reset }: {
+  value: number; onChange: (v: number) => void; min: number; max: number; step?: number; label: string; scale?: number; disabled?: boolean; reset?: number;
 }) {
   const p = `${((value - min) / (max - min || 1)) * 100}%`;
   const digits = step * scale >= 1 ? 0 : step * scale >= 0.1 ? 1 : 2;
   return (
     <div className="range">
       <input type="range" min={min} max={max} step={step} value={value} disabled={disabled} aria-label={label} style={{ "--p": p } as CSSProperties}
-        onChange={(e) => onChange(Number(e.target.value))} />
+        title={reset !== undefined ? "Double-click to reset" : undefined}
+        onChange={(e) => onChange(Number(e.target.value))} onDoubleClick={() => reset !== undefined && !disabled && onChange(reset)} />
       <NumberInput className="v" label={`${label} value`} value={+(value * scale).toFixed(digits)} min={min * scale} max={max * scale} step={step * scale} disabled={disabled}
         onChange={(v) => onChange(v / scale)} />
     </div>

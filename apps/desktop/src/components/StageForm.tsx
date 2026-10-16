@@ -9,6 +9,9 @@ import { Check, F, NumberInput, Range, Select, Seg } from "./ui";
 
 type S = Record<string, any>;
 
+const NEUTRAL_COLOR = { exposure: 0, brightness: 0, contrast: 1, saturation: 1, gamma: 1, vibrance: 0, temperature: 0, tint: 0, hue: 0, shadows: 0, highlights: 0 };
+const isNeutral = (s: S) => Object.entries(NEUTRAL_COLOR).every(([k, v]) => Math.abs((s[k] ?? v) - v) < 1e-4);
+
 /** A built-in (non-model) choice shown in the same list as models. */
 interface Builtin { value: string; name: string; tag: string }
 
@@ -230,11 +233,22 @@ export function StageForm({ stage, onChange }: { stage: Stage; onChange: (settin
     case "color":
       return (
         <>
-          <F label="Mode"><Seg label="Color mode" value={s.mode} onChange={(x) => up({ mode: x })} options={[{ value: "adjust", label: "Adjust" }, { value: "hdr_to_sdr", label: "HDR→SDR" }, { value: "sdr_to_hdr", label: "SDR→HDR" }]} /></F>
-          <F label="Brightness"><Range label="Brightness" value={s.brightness} min={-1} max={1} step={0.01} scale={100} onChange={(x) => up({ brightness: x })} /></F>
-          <F label="Contrast"><Range label="Contrast" value={s.contrast} min={0} max={3} step={0.01} onChange={(x) => up({ contrast: x })} /></F>
-          <F label="Saturation"><Range label="Saturation" value={s.saturation} min={0} max={3} step={0.01} onChange={(x) => up({ saturation: x })} /></F>
-          <F label="Gamma"><Range label="Gamma" value={s.gamma} min={0.1} max={5} step={0.01} onChange={(x) => up({ gamma: x })} /></F>
+          <F label="Mode"><Seg label="Color mode" value={s.mode} onChange={(x) => up({ mode: x })} options={[{ value: "adjust", label: "Grade" }, { value: "hdr_to_sdr", label: "HDR→SDR" }, { value: "sdr_to_hdr", label: "SDR→HDR" }]} /></F>
+          <div className="subhead"><span>Light</span>
+            <button type="button" className="link" onClick={() => up(NEUTRAL_COLOR)} disabled={isNeutral(s)}>Reset</button>
+          </div>
+          <F label="Exposure"><Range label="Exposure" value={s.exposure ?? 0} min={-3} max={3} step={0.05} reset={0} onChange={(x) => up({ exposure: x })} /></F>
+          <F label="Brightness"><Range label="Brightness" value={s.brightness} min={-1} max={1} step={0.01} scale={100} reset={0} onChange={(x) => up({ brightness: x })} /></F>
+          <F label="Contrast"><Range label="Contrast" value={s.contrast} min={0} max={3} step={0.01} reset={1} onChange={(x) => up({ contrast: x })} /></F>
+          <F label="Shadows"><Range label="Shadows" value={s.shadows ?? 0} min={-1} max={1} step={0.01} scale={100} reset={0} onChange={(x) => up({ shadows: x })} /></F>
+          <F label="Highlights"><Range label="Highlights" value={s.highlights ?? 0} min={-1} max={1} step={0.01} scale={100} reset={0} onChange={(x) => up({ highlights: x })} /></F>
+          <F label="Gamma"><Range label="Gamma" value={s.gamma} min={0.1} max={5} step={0.01} reset={1} onChange={(x) => up({ gamma: x })} /></F>
+          <div className="subhead"><span>Color</span></div>
+          <F label="Temperature"><Range label="Temperature" value={s.temperature ?? 0} min={-1} max={1} step={0.01} scale={100} reset={0} onChange={(x) => up({ temperature: x })} /></F>
+          <F label="Tint"><Range label="Tint" value={s.tint ?? 0} min={-1} max={1} step={0.01} scale={100} reset={0} onChange={(x) => up({ tint: x })} /></F>
+          <F label="Saturation"><Range label="Saturation" value={s.saturation} min={0} max={3} step={0.01} reset={1} onChange={(x) => up({ saturation: x })} /></F>
+          <F label="Vibrance"><Range label="Vibrance" value={s.vibrance ?? 0} min={-1} max={1} step={0.01} scale={100} reset={0} onChange={(x) => up({ vibrance: x })} /></F>
+          <F label="Hue"><Range label="Hue" value={s.hue ?? 0} min={-180} max={180} step={1} reset={0} onChange={(x) => up({ hue: x })} /></F>
           {s.mode === "hdr_to_sdr" && (
             <>
               <F label="Tone map" htmlFor={id("tm")}>
@@ -250,6 +264,15 @@ export function StageForm({ stage, onChange }: { stage: Stage; onChange: (settin
               <F label="Peak"><NumberInput label="Peak" value={s.peak_nits} min={400} max={10000} step={100} onChange={(x) => up({ peak_nits: x })} suffix="nits" /></F>
             </>
           )}
+        </>
+      );
+    case "sharpen":
+      return (
+        <>
+          <F label="Method"><Seg label="Sharpen method" value={s.method} onChange={(x) => up({ method: x, amount: x === "adaptive" ? Math.min(s.amount, 1) : s.amount })}
+            options={[{ value: "adaptive", label: "Adaptive", title: "Brings out fine detail without halos" }, { value: "unsharp", label: "Unsharp mask", title: "Stronger, with a radius" }]} /></F>
+          <F label="Amount"><Range label="Sharpen amount" value={s.amount} min={0} max={s.method === "adaptive" ? 1 : 3} step={0.01} scale={100} reset={0.4} onChange={(x) => up({ amount: x })} /></F>
+          {s.method === "unsharp" && <F label="Radius"><Range label="Sharpen radius" value={s.radius} min={0.5} max={5} step={0.1} reset={1.5} onChange={(x) => up({ radius: x })} /></F>}
         </>
       );
     case "resize":
