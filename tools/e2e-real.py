@@ -141,7 +141,8 @@ def main():
         secs = time.time() - t0
         problems = []
         si = info(src)
-        outs = sorted(out.glob(f"{tag}.*"))
+        # The app never overwrites: a taken name gets "_2", "_3"... so accept those too.
+        outs = sorted(out.glob(f"{tag}.*")) + sorted(out.glob(f"{tag}_*.*"))
         outs = [o for o in outs if not o.name.endswith((".json", ".log"))]
         o = outs[0] if outs else None
         oi = info(o) if o else None
