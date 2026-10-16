@@ -35,11 +35,11 @@ test("opening a video offers presets or a blank start", async ({ page }) => {
 test("export is blocked until the model is installed, then queues and completes", async ({ page }) => {
   await openVideo(page);
   await page.getByTestId("sec-enhance").getByRole("switch").click();
-  await expect(page.getByTestId("issues")).toContainText("AnimeVideo v3 is not installed");
+  await expect(page.getByTestId("issues")).toContainText("General v3 is not installed");
   await expect(page.getByTestId("export-as")).toBeDisabled();
   await expect(page.getByTestId("render")).toBeEnabled();
 
-  await page.getByRole("button", { name: /^Install AnimeVideo v3 ·/ }).click();
+  await page.getByRole("button", { name: /^Install General v3 ·/ }).click();
   await expect(page.getByTestId("issues")).toHaveCount(0, { timeout: 10_000 });
   await page.getByTestId("render").click();
   await expect(page.getByAltText("Preview")).toBeVisible();

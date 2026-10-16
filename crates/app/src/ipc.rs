@@ -20,5 +20,6 @@ pub fn operation_defaults() -> serde_json::Value {
         "resize": Operation::Resize(Default::default()),
         "output": OutputSettings::default(),
         "grain_presets": grain,
+        "general_denoise_default": DEFAULT_GENERAL_DENOISE,
     })
 }

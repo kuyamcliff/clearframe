@@ -229,7 +229,7 @@ mod tests {
         let r = Project::open(&pf, &|_| false).unwrap();
         assert!(r.source_found);
         assert!(!r.source_changed);
-        assert_eq!(r.missing_models, vec!["xinntao.realesr-animevideo-v3"]);
+        assert_eq!(r.missing_models, vec!["xinntao.realesr-general-v3"]);
         assert_eq!(r.project.source.relative_path.as_deref(), Some("media/clip.mp4"));
         // Modify source -> changed.
         std::fs::write(&src, b"different").unwrap();

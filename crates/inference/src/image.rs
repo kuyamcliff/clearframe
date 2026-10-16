@@ -118,6 +118,62 @@ impl RgbImage {
         out
     }
 
+    /// Bicubic resample (Catmull-Rom, separable), sharper than bilinear when enlarging.
+    /// Used as the plain-resize side of the strength blend.
+    pub fn resize_bicubic(&self, w: usize, h: usize) -> RgbImage {
+        fn taps(n_in: usize, n_out: usize) -> Vec<([usize; 4], [f32; 4])> {
+            let s = n_in as f32 / n_out as f32;
+            let k = |t: f32| {
+                let t = t.abs();
+                if t < 1.0 {
+                    1.5 * t * t * t - 2.5 * t * t + 1.0
+                } else if t < 2.0 {
+                    -0.5 * t * t * t + 2.5 * t * t - 4.0 * t + 2.0
+                } else {
+                    0.0
+                }
+            };
+            (0..n_out)
+                .map(|o| {
+                    let f = (o as f32 + 0.5) * s - 0.5;
+                    let i0 = f.floor();
+                    let mut idx = [0usize; 4];
+                    let mut wt = [0f32; 4];
+                    for j in 0..4 {
+                        let i = i0 as isize - 1 + j as isize;
+                        idx[j] = i.clamp(0, n_in as isize - 1) as usize;
+                        wt[j] = k(f - (i0 + j as f32 - 1.0));
+                    }
+                    let sum: f32 = wt.iter().sum();
+                    wt.iter_mut().for_each(|v| *v /= sum);
+                    (idx, wt)
+                })
+                .collect()
+        }
+        let tx = taps(self.width, w);
+        let ty = taps(self.height, h);
+        // Horizontal pass, then vertical.
+        let mut mid = RgbImage::new(w, self.height);
+        for y in 0..self.height {
+            for (x, (idx, wt)) in tx.iter().enumerate() {
+                for c in 0..3 {
+                    let v: f32 = (0..4).map(|j| self.get(idx[j], y, c) * wt[j]).sum();
+                    mid.set(x, y, c, v);
+                }
+            }
+        }
+        let mut out = RgbImage::new(w, h);
+        for (y, (idx, wt)) in ty.iter().enumerate() {
+            for x in 0..w {
+                for c in 0..3 {
+                    let v: f32 = (0..4).map(|j| mid.get(x, idx[j], c) * wt[j]).sum();
+                    out.set(x, y, c, v);
+                }
+            }
+        }
+        out
+    }
+
     /// Linear blend: `self * (1 - t) + other * t`.
     pub fn blend(&self, other: &RgbImage, t: f32) -> RgbImage {
         assert_eq!((self.width, self.height), (other.width, other.height));
@@ -149,6 +205,22 @@ impl RgbImage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bicubic_keeps_flat_areas_and_matches_bilinear_at_same_size() {
+        let mut img = RgbImage::new(4, 3);
+        img.data.iter_mut().for_each(|v| *v = 0.25);
+        let up = img.resize_bicubic(16, 12);
+        assert!(up.data.iter().all(|v| (v - 0.25).abs() < 1e-6));
+        let mut ramp = RgbImage::new(8, 2);
+        for x in 0..8 {
+            for c in 0..3 {
+                ramp.set(x, 0, c, x as f32 / 7.0);
+                ramp.set(x, 1, c, x as f32 / 7.0);
+            }
+        }
+        assert_eq!(ramp.resize_bicubic(8, 2), ramp);
+    }
 
     #[test]
     fn tensor_roundtrip() {

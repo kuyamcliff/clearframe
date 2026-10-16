@@ -126,7 +126,7 @@ export function StageForm({ stage, onChange }: { stage: Stage; onChange: (settin
           <ModelList type="enhance" value={s.model_id} onChange={(m) => up({ model_id: m, denoise: null })} />
           <F label="Strength"><Range label="Strength" value={s.strength} min={0} max={1} step={0.01} scale={100} onChange={(x) => up({ strength: x })} /></F>
           {card?.manifest?.supports_denoise_strength && (
-            <F label="Reduce noise"><Range label="Reduce noise" value={s.denoise ?? 0.5} min={0} max={1} step={0.01} scale={100} onChange={(x) => up({ denoise: x })} /></F>
+            <F label="Reduce noise"><Range label="Reduce noise" value={s.denoise ?? useStore.getState().defaults?.general_denoise_default ?? 0.2} min={0} max={1} step={0.01} scale={100} onChange={(x) => up({ denoise: x })} /></F>
           )}
           <F label="Tile size" title="0 = automatic">
             <NumberInput label="Tile size" value={s.tile_size} min={0} max={4096} step={32} onChange={(x) => up({ tile_size: Math.round(x) })} suffix={s.tile_size === 0 ? "auto" : "px"} />

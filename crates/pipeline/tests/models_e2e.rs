@@ -113,7 +113,8 @@ fn anime_upscale_quality_vs_bicubic() {
     let bic = d.path().join("bic.mkv");
     ffmpeg(&["-i", lo.to_str().unwrap(), "-vf", "scale=640:480:flags=bicubic", "-c:v", "ffv1", bic.to_str().unwrap()]);
     let (k, v) = resolved(&m, "xinntao.realesr-animevideo-v3", &[("weights", "realesr-animevideov3")]);
-    let mut spec = job(d.path(), &lo, Pipeline::single(Operation::Enhance(EnhanceSettings::default())), lossless(), "sr");
+    let anime = EnhanceSettings { model_id: "xinntao.realesr-animevideo-v3".into(), ..Default::default() };
+    let mut spec = job(d.path(), &lo, Pipeline::single(Operation::Enhance(anime)), lossless(), "sr");
     spec.models.insert(k, v);
     let r = run(&t, &spec).unwrap();
     let p_model = psnr(&hi, &r.output);

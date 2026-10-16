@@ -37,7 +37,7 @@ describe("operations", () => {
       expect(D[o.type], o.type).toBeDefined();
       expect(D[o.type].type).toBe(o.type);
     }
-    expect(Object.keys(D).filter((k) => !["output", "grain_presets"].includes(k)).sort()).toEqual(OPS.map((o) => o.type).sort());
+    expect(Object.keys(D).filter((k) => !["output", "grain_presets", "general_denoise_default"].includes(k)).sort()).toEqual(OPS.map((o) => o.type).sort());
   });
 
   it("inserts tasks at their canonical position", () => {

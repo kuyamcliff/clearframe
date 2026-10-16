@@ -131,7 +131,7 @@ impl ImageProc {
     fn render(&self, img: &RgbImage) -> Result<RgbImage> {
         let res = self.model.process(img, &self.params)?;
         Ok(if self.mix < 0.999 {
-            let base = if (res.width, res.height) != (img.width, img.height) { img.resize_bilinear(res.width, res.height) } else { img.clone() };
+            let base = if (res.width, res.height) != (img.width, img.height) { img.resize_bicubic(res.width, res.height) } else { img.clone() };
             base.blend(&res, self.mix.clamp(0.0, 1.0))
         } else {
             res
@@ -496,8 +496,9 @@ pub fn build_native(
         Operation::Enhance(e) => {
             let m = model(models, &e.model_id)?;
             let mut w = load_weights(m, "weights", device)?;
-            if let (Some(dn), Some(_)) = (e.denoise, m.files.get("wdn")) {
+            if m.files.contains_key("wdn") {
                 // Real-ESRGAN DNI: x4v3 * dn + wdn * (1 - dn)
+                let dn = e.denoise.unwrap_or(crate::spec::DEFAULT_GENERAL_DENOISE).clamp(0.0, 1.0);
                 let wdn = load_weights(m, "wdn", device)?;
                 w = w.interpolate(&wdn, dn as f64).map_err(|e| anyhow!("{e}"))?;
             }

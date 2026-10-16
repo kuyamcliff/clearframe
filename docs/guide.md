@@ -6,7 +6,7 @@ Everything that doesn't fit on the front page: the full feature list, install no
 
 | Area | What you get |
 |---|---|
-| Enhance / upscale | Real-ESRGAN family (AnimeVideo v3, General v3 with adjustable denoise, x4plus, x4plus Anime 6B, x2plus). Output can be the native scale, a scale factor, a target height (1080p/4K/8K), an exact size, or the source size. Includes a strength blend and automatic tiling sized to your memory budget. |
+| Enhance / upscale | Real-ESRGAN family (General v3 with adjustable denoise, the default for live action; AnimeVideo v3 and x4plus Anime 6B for animation; x4plus, x2plus). Keep **Reduce noise** low to keep skin, hair and fabric texture; raise it only for grainy footage. Anime models smooth real-world texture into a painted look, so use them for animation only. Output can be the native scale, a scale factor, a target height (1080p/4K/8K), an exact size, or the source size. Includes a strength blend and automatic tiling sized to your memory budget. |
 | Denoise | FFDNet and DRUNet (AI, with noise level σ), plus the hqdn3d and NL-means filters. Mix control. |
 | Deblur | NAFNet (GoPro motion blur). |
 | Face recovery | RetinaFace detection with GFPGAN 1.4 restoration, strength blending and temporal smoothing. |

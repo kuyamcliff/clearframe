@@ -183,6 +183,11 @@ fn x265_10bit(crf: f32) -> OutputSettings {
     }
 }
 
+/// AnimeVideo v3 enhancement (no denoise control) at `target`.
+fn anime(target: SizeTarget) -> EnhanceSettings {
+    EnhanceSettings { model_id: "xinntao.realesr-animevideo-v3".into(), target, denoise: None, ..Default::default() }
+}
+
 /// Built-in presets (cannot be overwritten or deleted).
 pub fn builtin_presets() -> Vec<Preset> {
     let p = |id: &str, name: &str, cat: &str, desc: &str, tags: &[&str], stages: Vec<Stage>, output: Option<OutputSettings>| Preset {
@@ -203,7 +208,7 @@ pub fn builtin_presets() -> Vec<Preset> {
             "Enhance",
             "Real-ESRGAN AnimeVideo v3 to 2160p, HEVC 10-bit.",
             &["anime", "4k"],
-            vec![stage("enhance", Operation::Enhance(EnhanceSettings { target: SizeTarget::Height { height: 2160 }, ..Default::default() }))],
+            vec![stage("enhance", Operation::Enhance(anime(SizeTarget::Height { height: 2160 })))],
             Some(x265_10bit(18.0)),
         ),
         p(
@@ -212,20 +217,19 @@ pub fn builtin_presets() -> Vec<Preset> {
             "Enhance",
             "AnimeVideo v3 at the model's native 4x, resized to 2x the source.",
             &["anime"],
-            vec![stage("enhance", Operation::Enhance(EnhanceSettings { target: SizeTarget::Scale { factor: 2.0 }, ..Default::default() }))],
+            vec![stage("enhance", Operation::Enhance(anime(SizeTarget::Scale { factor: 2.0 })))],
             None,
         ),
         p(
             "builtin.live-1080",
             "Live action to 1080p",
             "Enhance",
-            "Real-ESRGAN General v3 with light denoise, to 1080p.",
+            "Real-ESRGAN General v3, keeping fine texture, to 1080p.",
             &["live action", "1080p"],
             vec![stage(
                 "enhance",
                 Operation::Enhance(EnhanceSettings {
                     model_id: "xinntao.realesr-general-v3".into(),
-                    denoise: Some(0.5),
                     target: SizeTarget::Height { height: 1080 },
                     ..Default::default()
                 }),

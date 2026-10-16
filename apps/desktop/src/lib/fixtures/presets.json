@@ -185,7 +185,7 @@
   {
     "builtin": true,
     "category": "Enhance",
-    "description": "Real-ESRGAN General v3 with light denoise, to 1080p.",
+    "description": "Real-ESRGAN General v3, keeping fine texture, to 1080p.",
     "favorite": false,
     "id": "builtin.live-1080",
     "name": "Live action to 1080p",
@@ -196,7 +196,7 @@
           "enabled": true,
           "id": "enhance",
           "settings": {
-            "denoise": 0.5,
+            "denoise": null,
             "model_id": "xinntao.realesr-general-v3",
             "strength": 1.0,
             "target": {

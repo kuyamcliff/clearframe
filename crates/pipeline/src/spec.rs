@@ -135,15 +135,30 @@ pub struct EnhanceSettings {
     /// 0..1 blend between a plain (bicubic) resize and the model output.
     pub strength: f32,
     /// Real-ESRGAN General v3 only: 0 = keep noise/texture .. 1 = strong denoise.
+    /// `None` means [`DEFAULT_GENERAL_DENOISE`].
     pub denoise: Option<f32>,
     /// Tile size in input pixels (0 = automatic).
     pub tile_size: u32,
     pub tile_pad: u32,
 }
 
+/// General v3 denoise when a step sets none. Measured on YouTube-style 240p-720p footage
+/// against the 1080p original: low values keep skin, hair and fabric texture; high values
+/// smooth them into a waxy look.
+pub const DEFAULT_GENERAL_DENOISE: f32 = 0.2;
+
 impl Default for EnhanceSettings {
     fn default() -> Self {
-        Self { model_id: "xinntao.realesr-animevideo-v3".into(), target: SizeTarget::ModelScale, strength: 1.0, denoise: None, tile_size: 0, tile_pad: 0 }
+        // General v3 suits live action, the most common footage; the anime model smooths
+        // real-world texture into a painted look.
+        Self {
+            model_id: "xinntao.realesr-general-v3".into(),
+            target: SizeTarget::ModelScale,
+            strength: 1.0,
+            denoise: None,
+            tile_size: 0,
+            tile_pad: 0,
+        }
     }
 }
 
@@ -880,7 +895,7 @@ mod tests {
         let back: Pipeline = serde_json::from_str(&j).unwrap();
         assert_eq!(p, back);
         p.validate().unwrap();
-        assert_eq!(p.required_models(), vec!["hzwer.rife-v4.26", "xinntao.realesr-animevideo-v3"]);
+        assert_eq!(p.required_models(), vec!["hzwer.rife-v4.26", "xinntao.realesr-general-v3"]);
     }
 
     #[test]
