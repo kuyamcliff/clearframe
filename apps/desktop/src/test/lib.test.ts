@@ -113,6 +113,14 @@ describe("explainError", () => {
     expect(explainError("GPU out of memory").title).toMatch(/memory/);
     expect(explainError("Model x is missing or damaged (p). Repair it").title).toMatch(/model/i);
     expect(explainError("No space left on device").title).toMatch(/disk space/);
-    expect(explainError("something odd").title).toBe("something odd");
+    expect(explainError("something odd").title).toBe("Something odd");
+  });
+  it("turns common Windows and file problems into plain words, without paths or codes", () => {
+    expect(explainError("The process cannot access the file because it is being used by another process. (os error 32)").title).toMatch(/open in another program/);
+    expect(explainError("Access is denied. (os error 5)").title).toMatch(/did not allow access/);
+    expect(explainError("Invalid data found when processing input").title).toMatch(/could not be read/);
+    expect(explainError("error sending request: dns error: failed to lookup address").title).toMatch(/internet/);
+    const unknown = explainError("Failed: weird thing at C:\\Users\\Ann\\Videos\\x.mp4 (os error 999)");
+    expect(unknown.title).not.toMatch(/Ann|os error/);
   });
 });
