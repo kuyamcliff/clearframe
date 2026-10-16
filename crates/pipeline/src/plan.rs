@@ -238,6 +238,23 @@ pub fn snap_fps(r: Rational) -> Rational {
     Rational::new(f.round().max(1.0) as i64, 1)
 }
 
+/// Size for a "1080p"/"4K"-style target: fits inside the 16:9 frame of that height (so wide
+/// films are not made wider than the format), keeps the aspect ratio, and snaps to the exact
+/// standard size when the source is within 1% of 16:9 (854x480 -> 3840x2160, not 3844x2160).
+pub fn standard_size(src_w: u32, src_h: u32, height: u32) -> (u32, u32) {
+    let box_w = (height as f64 * 16.0 / 9.0).round() as u32 / 2 * 2;
+    let aspect = src_w as f64 / src_h.max(1) as f64;
+    if (aspect / (16.0 / 9.0) - 1.0).abs() < 0.01 {
+        return (box_w, height);
+    }
+    let w = height as f64 * aspect;
+    if w > box_w as f64 {
+        (box_w, even(box_w as f64 / aspect))
+    } else {
+        (even(w), height)
+    }
+}
+
 fn even(v: f64) -> u32 {
     let r = v.round().max(2.0) as u32;
     r + (r % 2)
@@ -470,7 +487,10 @@ pub fn plan(
                     SizeTarget::ModelScale => (mw, mh, FitMode::Stretch),
                     SizeTarget::Source => (cur.width, cur.height, FitMode::Stretch),
                     SizeTarget::Scale { factor } => (even(cur.width as f64 * *factor as f64), even(cur.height as f64 * *factor as f64), FitMode::Stretch),
-                    SizeTarget::Height { height } => (even(cur.width as f64 * *height as f64 / cur.height as f64), *height, FitMode::Stretch),
+                    SizeTarget::Height { height } => {
+                        let (w, h) = standard_size(cur.width, cur.height, *height);
+                        (w, h, FitMode::Stretch)
+                    }
                     SizeTarget::Custom { width, height, fit } => (*width, *height, *fit),
                 };
                 let (ow, oh, post) = fit_filters(mw, mh, tw, th, fit, "lanczos+accurate_rnd");
@@ -1018,6 +1038,16 @@ fn unsharp_params(sh: &SharpenSettings) -> (u32, f32) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn standard_sizes_fit_the_format() {
+        assert_eq!(standard_size(854, 480, 2160), (3840, 2160));
+        assert_eq!(standard_size(1280, 534, 2160), (3840, 1602));
+        assert_eq!(standard_size(640, 480, 1080), (1440, 1080));
+        assert_eq!(standard_size(853, 480, 1080), (1920, 1080));
+        assert_eq!(standard_size(720, 1280, 1080), (608, 1080));
+    }
+
     use super::*;
     use clearframe_media::probe::parse_probe_json;
 
