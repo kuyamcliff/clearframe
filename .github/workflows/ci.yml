@@ -158,6 +158,26 @@ jobs:
         run: |
           export PATH="$PWD/apps/desktop/src-tauri/ffmpeg:$PATH"
           tools/e2e-presets.sh target/release/clipfx.exe "$RUNNER_TEMP/cfx" cpu 0.25
+      # Real footage in the formats people bring (phone, DVD, web, editing, HDR, rotation,
+      # variable frame rate, odd sizes, several audio tracks, non-ASCII names), every model.
+      - name: Real videos in many formats, every model
+        shell: bash
+        env:
+          CORPUS_SECONDS: "0.5"
+          PYTHONUTF8: "1"
+        run: |
+          export PATH="$PWD/apps/desktop/src-tauri/ffmpeg:$PATH"
+          c="$RUNNER_TEMP/corpus"; mkdir -p "$c"
+          curl -sSfL -o "$c/src-sintel.mp4" https://download.blender.org/durian/trailer/sintel_trailer-480p.mp4
+          tools/real-corpus.sh "$c" "$c/src-sintel.mp4" "$c/src-sintel.mp4"
+          python tools/e2e-real.py target/release/clipfx.exe "$RUNNER_TEMP/cfx" "$c" "$RUNNER_TEMP/real-out" --quick --device cpu
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-video-report
+          path: |
+            ${{ runner.temp }}/real-out/report.md
+            ${{ runner.temp }}/real-out/*.log
 
   frontend:
     name: Frontend
