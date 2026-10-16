@@ -3,6 +3,7 @@
 
 mod commands;
 mod media_server;
+mod session_log;
 
 use std::sync::Arc;
 
@@ -35,6 +36,23 @@ fn main() {
     }
     // The installed executable doubles as the isolated processing worker.
     let args: Vec<String> = std::env::args().collect();
+    // One session log in Documents, started before anything else so that even a failed
+    // start is recorded. Worker processes append to the same file.
+    let role = match args.get(1).map(String::as_str) {
+        Some("--worker") => Some("worker"),
+        Some("--still") => Some("still"),
+        Some("--self-test") => Some("selftest"),
+        Some("--version") => None,
+        _ => Some("app"),
+    };
+    if let Some(role) = role {
+        clearframe_app::logging::init_session(role);
+        if role == "app" {
+            session_log::header(&args);
+        } else {
+            log::info!("{role} process started: {:?}", &args[1..]);
+        }
+    }
     match args.get(1).map(String::as_str) {
         Some("--worker") => {
             std::process::exit(clearframe_app::worker::run_worker(std::path::Path::new(args.get(2).map(String::as_str).unwrap_or(""))));
@@ -66,6 +84,7 @@ fn main() {
                 Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
             };
             println!("{report}");
+            log::info!("self-test report: {report}");
             if let Some(out) = args.get(2) {
                 let _ = std::fs::write(out, report.to_string());
             }
@@ -74,15 +93,19 @@ fn main() {
         _ => {}
     }
 
+    let started = std::time::Instant::now();
     let startup: Vec<std::path::PathBuf> = args.iter().skip(1).filter(|a| !a.starts_with('-')).map(std::path::PathBuf::from).filter(|p| p.is_file()).collect();
 
     tauri::Builder::default()
         .manage(commands::StartupFiles(std::sync::Mutex::new(startup)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .setup(|app| {
+        .setup(move |app| {
+            log::info!("window setup started after {} ms", started.elapsed().as_millis());
             let handle = app.handle().clone();
+            let events = session_log::EventLogger::default();
             let sink: clearframe_app::EventSink = Arc::new(move |e: AppEvent| {
+                events.log(&e);
                 let _ = handle.emit("cf://event", &e);
             });
             let mut dirs = bundled_dirs();
@@ -90,18 +113,29 @@ fn main() {
                 dirs.push(r.clone());
                 dirs.push(r.join("ffmpeg"));
             }
-            let state = App::open_background_tools(None, WorkerCommand::current_exe(), dirs, sink).map_err(|e| e.to_string())?;
-            clearframe_app::logging::init(&state.paths().logs_dir, "clipfx");
-            log::info!("ClipFX Enhance {} starting", env!("CARGO_PKG_VERSION"));
+            log::info!("resource dirs: {dirs:?}");
+            let state = App::open_background_tools(None, WorkerCommand::current_exe(), dirs, sink).map_err(|e| {
+                log::error!("could not open the app state: {e:#}");
+                e.to_string()
+            })?;
+            session_log::state_details(&state);
+            session_log::background_details(state.clone());
+            session_log::start_perf_sampler(app.handle().clone(), state.clone());
             if let Err(err) = media_server::start() {
                 log::warn!("media server failed to start: {err}");
             }
             commands::allow_cache_assets(app.handle(), &state);
             state.start_scheduler();
             app.manage(state);
+            log::info!("setup finished after {} ms", started.elapsed().as_millis());
             Ok(())
         })
         .on_window_event(|window, event| {
+            match event {
+                tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {}
+                tauri::WindowEvent::DragDrop(d) => log::info!("window {}: drag and drop {d:?}", window.label()),
+                other => log::info!("window {}: {other:?}", window.label()),
+            }
             if let tauri::WindowEvent::Destroyed = event {
                 // Stop running jobs at a safe point so they can resume next time.
                 if let Some(app) = window.try_state::<Arc<App>>() {
@@ -111,7 +145,12 @@ fn main() {
         })
         .invoke_handler(commands::handler())
         .run(tauri::generate_context!())
-        .expect("error while running ClipFX Enhance");
+        .unwrap_or_else(|e| {
+            log::error!("ClipFX Enhance could not run: {e:#}");
+            log::logger().flush();
+            panic!("error while running ClipFX Enhance: {e}");
+        });
+    log::info!("ClipFX Enhance closed after {:.0} s", started.elapsed().as_secs_f64());
 }
 
 fn bundled_dirs() -> Vec<std::path::PathBuf> {

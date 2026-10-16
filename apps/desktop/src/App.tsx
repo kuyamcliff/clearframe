@@ -52,6 +52,7 @@ function menus(): Record<string, MenuItem[]> {
     Help: [
       { label: "Models", onClick: () => useStore.setState({ dialog: "models" }) },
       { label: "Diagnostics", onClick: () => useStore.setState({ dialog: "prefs", settingsSection: "diagnostics" }) },
+      { label: "Show log file", onClick: () => api.logPath().then((p) => { toast("info", `Log file: ${p}`); return api.openPath(p); }).catch(errorToast) },
       { label: "About", onClick: () => useStore.setState({ dialog: "prefs", settingsSection: "about" }) },
     ],
   };

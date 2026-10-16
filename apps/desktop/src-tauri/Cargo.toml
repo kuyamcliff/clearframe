@@ -30,6 +30,7 @@ serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 log.workspace = true
+parking_lot.workspace = true
 clearframe-app.workspace = true
 clearframe-core.workspace = true
 clearframe-models.workspace = true

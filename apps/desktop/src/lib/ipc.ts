@@ -7,6 +7,7 @@ import type {
   JobRecord, ModelCard, NewJob, OpenReport, OutputSettings, Pipeline, Preset, Project, RecentFile, RelocationPlan,
   ResourcePlan, Settings, SourceInfo, StillPreview, StorageOverview, SystemSample, UpdateInfo, CacheArea,
 } from "./types";
+import { logCommand } from "./activity";
 
 type Invoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -29,10 +30,15 @@ async function backend(): Promise<Invoke> {
 
 export async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const inv = await backend();
+  const started = performance.now();
   try {
-    return await inv<T>(cmd, args);
+    const r = await inv<T>(cmd, args);
+    logCommand(cmd, args, Math.round(performance.now() - started));
+    return r;
   } catch (e) {
-    throw new Error(typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
+    const message = typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e);
+    logCommand(cmd, args, Math.round(performance.now() - started), message);
+    throw new Error(message);
   }
 }
 
@@ -202,6 +208,7 @@ export const api = {
   recentAction: (action: "remove" | "clear", path?: string) => call<void>("recent_action", { action, path: path ?? null }),
 
   diagnostics: (redact: boolean) => call<string>("diagnostics", { redact }),
+  logPath: () => call<string>("log_path"),
   writeTextFile: (path: string, contents: string) => call<void>("write_text_file", { path, contents }),
   checkUpdate: () => call<UpdateInfo>("check_update"),
   updateDownload: () => call<void>("update_download"),

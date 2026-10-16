@@ -332,8 +332,18 @@ function Advanced({ s, patch }: { s: Settings; patch: Patch }) {
 function Diagnostics() {
   const [redact, setRedact] = useState(true);
   const [text, setText] = useState<string | null>(null);
+  const [logPath, setLogPath] = useState<string | null>(null);
+  useEffect(() => { api.logPath().then(setLogPath).catch(() => setLogPath(null)); }, []);
   return (
     <div className="prefs">
+      <div className="pref-h">Activity log</div>
+      <F label="Log file">
+        <div className="row">
+          <span className="mono" style={{ wordBreak: "break-all" }}>{logPath ?? "…"}</span>
+          {logPath && <button className="btn ghost" onClick={() => api.openPath(logPath).catch(errorToast)}>Show</button>}
+        </div>
+      </F>
+      <p className="muted">Everything the app does is recorded here from the moment it opens: clicks, errors, crashes and performance. Send this file when reporting a problem. It never leaves your computer on its own.</p>
       <div className="pref-h">Report</div>
       <F label="Privacy"><Check checked={redact} onChange={setRedact} label="Hide paths and file names" /></F>
       <div className="row">

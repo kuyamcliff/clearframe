@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import { api, notify, onEvent, type CodecEntry, type HardwareReport, type OperationDefaults } from "../lib/ipc";
 import { basename } from "../lib/format";
+import { uiLog } from "../lib/activity";
 import { addStageCanonical } from "../lib/ops";
 import type {
   AppEvent, AppInfo, ClipPreview, OperationType, EngineSettings, InstallProgress, JobRecord, ModelCard, NewJob, OutputSettings, Pipeline,
@@ -149,6 +150,7 @@ const get = useStore.getState;
 
 let toastSeq = 1;
 export function toast(level: Toast["level"], message: string, action?: Toast["action"]) {
+  uiLog(level === "error" ? "error" : level === "warning" ? "warn" : "info", `message shown (${level}): ${message}`);
   const id = toastSeq++;
   set((s) => ({ toasts: [...s.toasts.slice(-4), { id, level, message, action }] }));
   window.setTimeout(() => dismissToast(id), level === "error" ? 12000 : 6000);

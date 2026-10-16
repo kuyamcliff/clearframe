@@ -128,6 +128,10 @@ pub fn run_worker(envelope_path: &Path) -> i32 {
             (ResultKind::Failed, format!("{m}{hint}"), None, 1)
         }
     };
+    match kind {
+        ResultKind::Completed | ResultKind::Paused | ResultKind::Cancelled => log::info!("worker finished: {kind:?}: {message}"),
+        _ => log::error!("worker finished: {kind:?}: {message}"),
+    }
     emit(&WorkerResult { event: "result".into(), kind, message, report });
     code
 }
@@ -174,10 +178,12 @@ pub fn run_still(request_path: &Path, out_dir: &Path) -> i32 {
     })();
     match result {
         Ok(v) => {
+            log::info!("still preview rendered in {} s", v["seconds"]);
             emit(&v);
             0
         }
         Err(m) => {
+            log::error!("still preview failed: {m}");
             emit(&serde_json::json!({"event": "result", "ok": false, "message": m}));
             1
         }
