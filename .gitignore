@@ -13,3 +13,4 @@ dist/
 /apps/desktop/playwright-report/
 /reference/
 /before-after-results/
+__pycache__/
