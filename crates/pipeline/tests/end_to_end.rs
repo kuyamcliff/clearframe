@@ -593,3 +593,42 @@ fn odd_sized_source_is_trimmed_to_even() {
         assert_eq!((v.width, v.height), (320, 240), "{name}");
     }
 }
+
+#[test]
+fn hdr_result_is_saved_in_ten_bit_automatically() {
+    let t = need_ffmpeg!();
+    let d = tempfile::tempdir().unwrap();
+    let src = d.path().join("hdr.mp4");
+    ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-t",
+        "0.5",
+        "-i",
+        "testsrc2=size=320x240:rate=24",
+        "-c:v",
+        "libx265",
+        "-pix_fmt",
+        "yuv420p10le",
+        "-x265-params",
+        "log-level=error:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc",
+        "-color_primaries",
+        "bt2020",
+        "-color_trc",
+        "smpte2084",
+        "-colorspace",
+        "bt2020nc",
+        src.to_str().unwrap(),
+    ]);
+    // Default output is 8-bit H.264, which cannot hold HDR.
+    let p = Pipeline { stages: vec![Stage::new(Operation::Grain(GrainSettings::default()))] };
+    let r = run(&t, &job(d.path(), &src, p, OutputSettings::default(), "hdr")).unwrap();
+    let v = probe(&t, &r.output).unwrap().video.unwrap();
+    assert_eq!(v.codec, "hevc");
+    assert!(v.bit_depth >= 10, "{}", v.pix_fmt);
+    assert_eq!(v.color.transfer.as_deref(), Some("smpte2084"));
+    // Tone-mapped to SDR: the chosen 8-bit H.264 is kept.
+    let p = Pipeline { stages: vec![Stage::new(Operation::Color(ColorSettings { mode: ColorMode::HdrToSdr, ..Default::default() }))] };
+    let r = run(&t, &job(d.path(), &src, p, OutputSettings::default(), "sdr")).unwrap();
+    assert_eq!(probe(&t, &r.output).unwrap().video.unwrap().codec, "h264");
+}

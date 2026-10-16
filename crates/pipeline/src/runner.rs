@@ -439,18 +439,47 @@ pub fn plan_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, d
 pub fn plan_probed(tools: &FfmpegTools, info: &MediaInfo, spec: &JobSpec, lookup: &dyn ModelLookup, detected_interlaced: Option<bool>) -> Result<ExecutionPlan> {
     let opts = PlanOptions { detected_interlaced, caps: FilterCaps::from_tools(tools) };
     let interlaced = detected_interlaced.unwrap_or_else(|| info.video().map(|v| v.is_interlaced_flagged()).unwrap_or(false));
-    let auto = spec.pipeline.with_auto_deinterlace(interlaced);
-    plan::plan(info, spec.range, auto.as_ref().unwrap_or(&spec.pipeline), &spec.output, lookup, &opts).map_err(|e| anyhow!(e))
+    let auto = adapt(info, &spec.pipeline, &spec.output, interlaced);
+    let (pipeline, output) = auto.as_ref().map(|(p, o)| (p, o)).unwrap_or((&spec.pipeline, &spec.output));
+    let mut plan = plan::plan(info, spec.range, pipeline, output, lookup, &opts).map_err(|e| anyhow!(e))?;
+    if output.video.encoder != spec.output.video.encoder || output.video.pix_fmt != spec.output.video.pix_fmt {
+        plan.issues.push(plan::Issue {
+            severity: plan::Severity::Info,
+            stage_id: None,
+            message: format!("The result is HDR, so it is saved as {} {} (8-bit cannot hold HDR).", output.video.encoder.replace("lib", "").to_uppercase(), output.video.pix_fmt),
+            action: None,
+        });
+    }
+    Ok(plan)
+}
+
+/// Pipeline and output settings adapted to the source: a Deinterlace step first for interlaced
+/// video, and a 10-bit format when an HDR source stays HDR. `None` when nothing changes.
+pub fn adapt(info: &MediaInfo, pipeline: &Pipeline, output: &OutputSettings, interlaced: bool) -> Option<(Pipeline, OutputSettings)> {
+    let p = pipeline.with_auto_deinterlace(interlaced);
+    let src_hdr = info.video().map(|v| clearframe_media::color::ColorTags::from_stream(v).is_hdr()).unwrap_or(false);
+    let to_sdr = pipeline.enabled().any(|s| matches!(&s.op, Operation::Color(c) if c.mode == ColorMode::HdrToSdr));
+    let to_hdr = pipeline.enabled().any(|s| matches!(&s.op, Operation::Color(c) if c.mode == ColorMode::SdrToHdr));
+    let o = if (src_hdr && !to_sdr) || to_hdr { output.for_hdr_result() } else { None };
+    if p.is_none() && o.is_none() {
+        return None;
+    }
+    Some((p.unwrap_or_else(|| pipeline.clone()), o.unwrap_or_else(|| output.clone())))
+}
+
+fn adapt_to_source(info: &MediaInfo, spec: &JobSpec) -> Option<JobSpec> {
+    let interlaced = info.video().map(|v| v.is_interlaced_flagged()).unwrap_or(false);
+    adapt(info, &spec.pipeline, &spec.output, interlaced).map(|(pipeline, output)| JobSpec { pipeline, output, ..spec.clone() })
 }
 
 /// Run a job to completion.
 pub fn run_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, stop: StopFlag, events: &mut dyn FnMut(Event)) -> std::result::Result<JobReport, JobError> {
-    // An interlaced source gets a Deinterlace step first when the pipeline has none (the plan
-    // made for the export check does the same, so stage numbers match).
+    // Adapt the job to the source the same way the export check does (so stage numbers match):
+    // deinterlace interlaced video, keep HDR results in a 10-bit format.
     let auto_spec;
-    let spec = match probe(tools, &spec.source).ok().and_then(|i| i.video().ok().map(|v| v.is_interlaced_flagged())).and_then(|il| spec.pipeline.with_auto_deinterlace(il)) {
-        Some(p) => {
-            auto_spec = JobSpec { pipeline: p, ..spec.clone() };
+    let spec = match probe(tools, &spec.source).ok().and_then(|i| adapt_to_source(&i, spec)) {
+        Some(s) => {
+            auto_spec = s;
             &auto_spec
         }
         None => spec,

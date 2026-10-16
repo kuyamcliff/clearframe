@@ -116,9 +116,9 @@ pub fn render_still(tools: &FfmpegTools, info: &MediaInfo, req: &StillRequest, l
     let opts = PlanOptions { detected_interlaced: None, caps: FilterCaps::from_tools(tools) };
     let range = TimeRange { start: req.time.max(0.0), end: (req.time + 1.0).min(info.duration.max(req.time + 0.04)) };
     let auto_req;
-    let req = match req.pipeline.with_auto_deinterlace(info.video().map(|v| v.is_interlaced_flagged()).unwrap_or(false)) {
-        Some(p) => {
-            auto_req = StillRequest { pipeline: p, ..req.clone() };
+    let req = match crate::runner::adapt(info, &req.pipeline, &req.output, info.video().map(|v| v.is_interlaced_flagged()).unwrap_or(false)) {
+        Some((pipeline, output)) => {
+            auto_req = StillRequest { pipeline, output, ..req.clone() };
             &auto_req
         }
         None => req,

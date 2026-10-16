@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use clearframe_inference::device::BackendKind;
 use clearframe_inference::face::FaceParams;
 use clearframe_inference::model::Precision;
-use clearframe_media::encode::VideoEncodeSettings;
+use clearframe_media::encode::{RateControl, VideoEncodeSettings};
 use clearframe_media::mux::{AudioMode, Container, SlowMotionAudio};
 use clearframe_media::Rational;
 use serde::{Deserialize, Serialize};
@@ -711,6 +711,37 @@ pub struct OutputSettings {
     pub metadata: bool,
     #[serde(default = "yes")]
     pub chapters: bool,
+}
+
+impl OutputSettings {
+    /// For an HDR source whose result stays HDR: the same settings with a 10-bit format (and HEVC
+    /// in place of H.264, which players do not accept for HDR), when the chosen format is 8-bit.
+    /// `None` when nothing needs changing.
+    pub fn for_hdr_result(&self) -> Option<OutputSettings> {
+        if clearframe_media::encode::pix_fmt_bit_depth(&self.video.pix_fmt) >= 10 {
+            return None;
+        }
+        let mut o = self.clone();
+        let enc = o.video.encoder.as_str();
+        if enc == "libx264" || enc.starts_with("h264_") {
+            o.video.encoder = "libx265".into();
+            o.video.preset = Some("medium".into());
+            o.video.profile = None;
+            if let RateControl::Quality { value } = o.video.rate {
+                // x265 CRF gives similar quality about 2 points higher than x264.
+                o.video.rate = RateControl::Quality { value: (value + 2.0).min(51.0) };
+            }
+        }
+        o.video.pix_fmt = match o.video.encoder.as_str() {
+            "prores_ks" => "yuv422p10le",
+            _ => "yuv420p10le",
+        }
+        .into();
+        if matches!(o.container, Container::Webm) && o.video.encoder == "libx265" {
+            o.container = Container::Mkv;
+        }
+        Some(o)
+    }
 }
 
 impl Default for OutputSettings {
