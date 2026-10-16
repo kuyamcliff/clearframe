@@ -1,0 +1,6 @@
+name = "clipfx-diagnostics"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+REPORT_FROM = "ClipFX Diagnostics <logs@mail.clipfx.me>"

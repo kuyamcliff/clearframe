@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use clearframe_inference::device::BackendKind;
 use clearframe_inference::face::FaceParams;
 use clearframe_inference::model::Precision;
-use clearframe_media::encode::VideoEncodeSettings;
+use clearframe_media::encode::{RateControl, VideoEncodeSettings};
 use clearframe_media::mux::{AudioMode, Container, SlowMotionAudio};
 use clearframe_media::Rational;
 use serde::{Deserialize, Serialize};
@@ -278,10 +278,24 @@ pub enum HdrTransfer {
 #[serde(default)]
 pub struct ColorSettings {
     pub mode: ColorMode,
+    /// Exposure in stops (-3..3): multiplies the image.
+    pub exposure: f32,
     pub brightness: f32,
     pub contrast: f32,
     pub saturation: f32,
     pub gamma: f32,
+    /// Boosts muted colours more than already saturated ones (-1..1).
+    pub vibrance: f32,
+    /// Cool (-1) to warm (+1) white balance.
+    pub temperature: f32,
+    /// Green (-1) to magenta (+1).
+    pub tint: f32,
+    /// Hue rotation in degrees (-180..180).
+    pub hue: f32,
+    /// Lift (+) or deepen (-) shadows (-1..1).
+    pub shadows: f32,
+    /// Raise (+) or recover (-) highlights (-1..1).
+    pub highlights: f32,
     pub tone_mapper: ToneMapper,
     /// HDR -> SDR: desaturation strength for highlights (0..1).
     pub desaturate: f32,
@@ -297,16 +311,67 @@ impl Default for ColorSettings {
     fn default() -> Self {
         Self {
             mode: ColorMode::Adjust,
+            exposure: 0.0,
             brightness: 0.0,
             contrast: 1.0,
             saturation: 1.0,
             gamma: 1.0,
+            vibrance: 0.0,
+            temperature: 0.0,
+            tint: 0.0,
+            hue: 0.0,
+            shadows: 0.0,
+            highlights: 0.0,
             tone_mapper: ToneMapper::Hable,
             desaturate: 0.0,
             hdr_transfer: HdrTransfer::Pq,
             sdr_white_nits: 203.0,
             peak_nits: 1000.0,
         }
+    }
+}
+
+impl ColorSettings {
+    /// Whether any of the colour and light sliders differ from neutral.
+    pub fn has_adjustments(&self) -> bool {
+        let e = 1e-4;
+        self.exposure.abs() > e
+            || self.brightness.abs() > e
+            || (self.contrast - 1.0).abs() > e
+            || (self.saturation - 1.0).abs() > e
+            || (self.gamma - 1.0).abs() > e
+            || self.vibrance.abs() > e
+            || self.temperature.abs() > e
+            || self.tint.abs() > e
+            || self.hue.abs() > e
+            || self.shadows.abs() > e
+            || self.highlights.abs() > e
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SharpenMethod {
+    /// Contrast-adaptive sharpening: strengthens fine detail without halos on strong edges.
+    #[default]
+    Adaptive,
+    /// Classic unsharp mask with a radius; stronger, can halo when pushed.
+    Unsharp,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SharpenSettings {
+    pub method: SharpenMethod,
+    /// 0..1 (adaptive) or 0..3 (unsharp).
+    pub amount: f32,
+    /// Unsharp radius in pixels (0.5..5).
+    pub radius: f32,
+}
+
+impl Default for SharpenSettings {
+    fn default() -> Self {
+        Self { method: SharpenMethod::Adaptive, amount: 0.4, radius: 1.5 }
     }
 }
 
@@ -408,6 +473,7 @@ pub enum Operation {
     Interpolate(InterpolateSettings),
     Stabilize(StabilizeSettings),
     Color(ColorSettings),
+    Sharpen(SharpenSettings),
     Grain(GrainSettings),
     Resize(ResizeSettings),
 }
@@ -423,6 +489,7 @@ impl Operation {
             Operation::Interpolate(_) => "interpolate",
             Operation::Stabilize(_) => "stabilize",
             Operation::Color(_) => "color",
+            Operation::Sharpen(_) => "sharpen",
             Operation::Grain(_) => "grain",
             Operation::Resize(_) => "resize",
         }
@@ -437,7 +504,8 @@ impl Operation {
             Operation::FaceRestore(_) => "Face recovery",
             Operation::Interpolate(_) => "Frame interpolation",
             Operation::Stabilize(_) => "Stabilize",
-            Operation::Color(_) => "Color & HDR",
+            Operation::Color(_) => "Color & light",
+            Operation::Sharpen(_) => "Sharpen",
             Operation::Grain(_) => "Add grain",
             Operation::Resize(_) => "Resize",
         }
@@ -517,6 +585,13 @@ impl Operation {
                 range("shakiness", s.shakiness as f64, 1.0, 10.0)
             }
             Operation::Color(c) => {
+                range("exposure", c.exposure as f64, -3.0, 3.0)?;
+                range("vibrance", c.vibrance as f64, -1.0, 1.0)?;
+                range("temperature", c.temperature as f64, -1.0, 1.0)?;
+                range("tint", c.tint as f64, -1.0, 1.0)?;
+                range("hue", c.hue as f64, -180.0, 180.0)?;
+                range("shadows", c.shadows as f64, -1.0, 1.0)?;
+                range("highlights", c.highlights as f64, -1.0, 1.0)?;
                 range("brightness", c.brightness as f64, -1.0, 1.0)?;
                 range("contrast", c.contrast as f64, 0.0, 3.0)?;
                 range("saturation", c.saturation as f64, 0.0, 3.0)?;
@@ -524,6 +599,11 @@ impl Operation {
                 range("desaturate", c.desaturate as f64, 0.0, 1.0)?;
                 range("SDR white", c.sdr_white_nits as f64, 80.0, 400.0)?;
                 range("peak luminance", c.peak_nits as f64, 400.0, 10000.0)
+            }
+            Operation::Sharpen(sh) => {
+                let max = if sh.method == SharpenMethod::Adaptive { 1.0 } else { 3.0 };
+                range("sharpen amount", sh.amount as f64, 0.0, max)?;
+                range("sharpen radius", sh.radius as f64, 0.5, 5.0)
             }
             Operation::Grain(g) => {
                 range("grain strength", g.strength as f64, 0.0, 1.0)?;
@@ -537,6 +617,9 @@ impl Operation {
         }
     }
 }
+
+/// Stage id of a Deinterlace step added automatically for an interlaced source.
+pub const AUTO_DEINTERLACE_ID: &str = "auto-deinterlace";
 
 /// A pipeline stage.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -578,6 +661,19 @@ impl Pipeline {
     pub fn enabled(&self) -> impl Iterator<Item = &Stage> {
         self.stages.iter().filter(|s| s.enabled)
     }
+
+    /// For an interlaced source, the same pipeline with a Deinterlace step added first when the
+    /// pipeline has none: AI models and most filters expect progressive frames, and comb lines
+    /// would be enlarged and baked in. `None` when nothing needs adding.
+    pub fn with_auto_deinterlace(&self, source_interlaced: bool) -> Option<Pipeline> {
+        let has = self.enabled().any(|s| matches!(s.op, Operation::Deinterlace(_)));
+        if !source_interlaced || has || self.enabled().next().is_none() {
+            return None;
+        }
+        let mut p = self.clone();
+        p.stages.insert(0, Stage { id: AUTO_DEINTERLACE_ID.into(), enabled: true, op: Operation::Deinterlace(DeinterlaceSettings::default()) });
+        Some(p)
+    }
     pub fn required_models(&self) -> Vec<String> {
         let mut v: Vec<String> = self.enabled().flat_map(|s| s.op.required_models()).collect();
         v.sort();
@@ -615,6 +711,37 @@ pub struct OutputSettings {
     pub metadata: bool,
     #[serde(default = "yes")]
     pub chapters: bool,
+}
+
+impl OutputSettings {
+    /// For an HDR source whose result stays HDR: the same settings with a 10-bit format (and HEVC
+    /// in place of H.264, which players do not accept for HDR), when the chosen format is 8-bit.
+    /// `None` when nothing needs changing.
+    pub fn for_hdr_result(&self) -> Option<OutputSettings> {
+        if clearframe_media::encode::pix_fmt_bit_depth(&self.video.pix_fmt) >= 10 {
+            return None;
+        }
+        let mut o = self.clone();
+        let enc = o.video.encoder.as_str();
+        if enc == "libx264" || enc.starts_with("h264_") {
+            o.video.encoder = "libx265".into();
+            o.video.preset = Some("medium".into());
+            o.video.profile = None;
+            if let RateControl::Quality { value } = o.video.rate {
+                // x265 CRF gives similar quality about 2 points higher than x264.
+                o.video.rate = RateControl::Quality { value: (value + 2.0).min(51.0) };
+            }
+        }
+        o.video.pix_fmt = match o.video.encoder.as_str() {
+            "prores_ks" => "yuv422p10le",
+            _ => "yuv420p10le",
+        }
+        .into();
+        if matches!(o.container, Container::Webm) && o.video.encoder == "libx265" {
+            o.container = Container::Mkv;
+        }
+        Some(o)
+    }
 }
 
 impl Default for OutputSettings {

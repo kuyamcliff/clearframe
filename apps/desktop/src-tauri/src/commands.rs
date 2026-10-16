@@ -351,6 +351,45 @@ fn open_path(path: PathBuf) -> R<()> {
     clearframe_app::storage::open_in_file_manager(&target).map_err(e)
 }
 
+// ---- session log ----
+
+#[derive(Deserialize)]
+struct UiLogEntry {
+    level: String,
+    /// Milliseconds since the page loaded, when the entry was recorded.
+    t: f64,
+    message: String,
+}
+
+/// Interface activity (clicks, commands, errors, timings) batched by the webview.
+#[tauri::command]
+fn log_ui(entries: Vec<UiLogEntry>) {
+    for x in entries {
+        let level = match x.level.as_str() {
+            "error" => log::Level::Error,
+            "warn" => log::Level::Warn,
+            "debug" => log::Level::Debug,
+            _ => log::Level::Info,
+        };
+        let mut m = x.message;
+        if m.len() > 4000 {
+            let mut end = 4000;
+            while !m.is_char_boundary(end) {
+                end -= 1;
+            }
+            m.truncate(end);
+            m.push('…');
+        }
+        log::log!(target: "ui", level, "[+{:.0} ms] {m}", x.t);
+    }
+}
+
+/// The session log file (in Documents), for "Show log file".
+#[tauri::command]
+fn log_path() -> String {
+    clearframe_app::logging::default_session_log_path().display().to_string()
+}
+
 // ---- presets & projects ----
 
 #[tauri::command]
@@ -576,5 +615,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         refresh_tools,
         allow_asset,
         startup_files,
+        log_ui,
+        log_path,
     ]
 }

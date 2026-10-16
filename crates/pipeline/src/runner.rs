@@ -163,7 +163,9 @@ pub struct Compute {
 
 /// Resolve the compute device from job resources ("auto", "cpu", "gpu:N", "cuda:N", "metal:N").
 pub fn select_compute(res: &JobResources, engine: &EngineSettings) -> std::result::Result<Compute, String> {
-    let d = res.device.trim().to_ascii_lowercase();
+    // CLIPFX_DEVICE overrides the setting (support and automated tests, e.g. "gpu:0" to use a
+    // software GPU that is never chosen automatically).
+    let d = std::env::var("CLIPFX_DEVICE").unwrap_or_else(|_| res.device.clone()).trim().to_ascii_lowercase();
     let parse = |p: &str| d.strip_prefix(p).and_then(|n| n.parse::<usize>().ok());
     let plain = |kind: BackendKind, device| Compute { kind, device, gpu: None, label: kind.label().to_string() };
     if d == "cpu" {
@@ -436,11 +438,52 @@ pub fn plan_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, d
 /// [`plan_job`] for a source that was already probed.
 pub fn plan_probed(tools: &FfmpegTools, info: &MediaInfo, spec: &JobSpec, lookup: &dyn ModelLookup, detected_interlaced: Option<bool>) -> Result<ExecutionPlan> {
     let opts = PlanOptions { detected_interlaced, caps: FilterCaps::from_tools(tools) };
-    plan::plan(info, spec.range, &spec.pipeline, &spec.output, lookup, &opts).map_err(|e| anyhow!(e))
+    let interlaced = detected_interlaced.unwrap_or_else(|| info.video().map(|v| v.is_interlaced_flagged()).unwrap_or(false));
+    let auto = adapt(info, &spec.pipeline, &spec.output, interlaced);
+    let (pipeline, output) = auto.as_ref().map(|(p, o)| (p, o)).unwrap_or((&spec.pipeline, &spec.output));
+    let mut plan = plan::plan(info, spec.range, pipeline, output, lookup, &opts).map_err(|e| anyhow!(e))?;
+    if output.video.encoder != spec.output.video.encoder || output.video.pix_fmt != spec.output.video.pix_fmt {
+        plan.issues.push(plan::Issue {
+            severity: plan::Severity::Info,
+            stage_id: None,
+            message: format!("The result is HDR, so it is saved as {} {} (8-bit cannot hold HDR).", output.video.encoder.replace("lib", "").to_uppercase(), output.video.pix_fmt),
+            action: None,
+        });
+    }
+    Ok(plan)
+}
+
+/// Pipeline and output settings adapted to the source: a Deinterlace step first for interlaced
+/// video, and a 10-bit format when an HDR source stays HDR. `None` when nothing changes.
+pub fn adapt(info: &MediaInfo, pipeline: &Pipeline, output: &OutputSettings, interlaced: bool) -> Option<(Pipeline, OutputSettings)> {
+    let p = pipeline.with_auto_deinterlace(interlaced);
+    let src_hdr = info.video().map(|v| clearframe_media::color::ColorTags::from_stream(v).is_hdr()).unwrap_or(false);
+    let to_sdr = pipeline.enabled().any(|s| matches!(&s.op, Operation::Color(c) if c.mode == ColorMode::HdrToSdr));
+    let to_hdr = pipeline.enabled().any(|s| matches!(&s.op, Operation::Color(c) if c.mode == ColorMode::SdrToHdr));
+    let o = if (src_hdr && !to_sdr) || to_hdr { output.for_hdr_result() } else { None };
+    if p.is_none() && o.is_none() {
+        return None;
+    }
+    Some((p.unwrap_or_else(|| pipeline.clone()), o.unwrap_or_else(|| output.clone())))
+}
+
+fn adapt_to_source(info: &MediaInfo, spec: &JobSpec) -> Option<JobSpec> {
+    let interlaced = info.video().map(|v| v.is_interlaced_flagged()).unwrap_or(false);
+    adapt(info, &spec.pipeline, &spec.output, interlaced).map(|(pipeline, output)| JobSpec { pipeline, output, ..spec.clone() })
 }
 
 /// Run a job to completion.
 pub fn run_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, stop: StopFlag, events: &mut dyn FnMut(Event)) -> std::result::Result<JobReport, JobError> {
+    // Adapt the job to the source the same way the export check does (so stage numbers match):
+    // deinterlace interlaced video, keep HDR results in a 10-bit format.
+    let auto_spec;
+    let spec = match probe(tools, &spec.source).ok().and_then(|i| adapt_to_source(&i, spec)) {
+        Some(s) => {
+            auto_spec = s;
+            &auto_spec
+        }
+        None => spec,
+    };
     let started_at = chrono::Utc::now().to_rfc3339();
     let started = Instant::now();
     events(Event::State { state: JobState::Preparing, detail: "Reading source".into() });
@@ -1083,6 +1126,11 @@ fn run_pass(ctx: &mut Ctx, pass: &PassPlan, state: &mut RunState, compute: &Comp
     for p in &procs {
         *ctx.timings.stages_s.entry(p.stage_id.clone()).or_insert(0.0) += p.seconds;
         if let Some(s) = p.inner.stats() {
+            if let Some(w) = s.get("warning").and_then(|w| w.as_str()) {
+                if !ctx.warnings.iter().any(|x| x == w) {
+                    ctx.warn(w.to_string());
+                }
+            }
             ctx.stage_stats.insert(p.stage_id.clone(), s);
         }
     }

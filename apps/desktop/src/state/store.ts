@@ -2,6 +2,8 @@ import { create } from "zustand";
 
 import { api, notify, onEvent, type CodecEntry, type HardwareReport, type OperationDefaults } from "../lib/ipc";
 import { basename } from "../lib/format";
+import { uiLog } from "../lib/activity";
+import { friendlyError } from "../lib/errors";
 import { addStageCanonical } from "../lib/ops";
 import type {
   AppEvent, AppInfo, ClipPreview, OperationType, EngineSettings, InstallProgress, JobRecord, ModelCard, NewJob, OutputSettings, Pipeline,
@@ -149,6 +151,7 @@ const get = useStore.getState;
 
 let toastSeq = 1;
 export function toast(level: Toast["level"], message: string, action?: Toast["action"]) {
+  uiLog(level === "error" ? "error" : level === "warning" ? "warn" : "info", `message shown (${level}): ${message}`);
   const id = toastSeq++;
   set((s) => ({ toasts: [...s.toasts.slice(-4), { id, level, message, action }] }));
   window.setTimeout(() => dismissToast(id), level === "error" ? 12000 : 6000);
@@ -157,7 +160,10 @@ export function dismissToast(id: number) {
   set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
 }
 export function errorToast(e: unknown) {
-  toast("error", e instanceof Error ? e.message : String(e));
+  const raw = e instanceof Error ? e.message : String(e);
+  uiLog("error", `error shown to the user: ${raw}`);
+  const f = friendlyError(raw);
+  toast("error", f.hint ? `${f.title} ${f.hint}` : f.title);
 }
 
 // ---------- boot & events ----------

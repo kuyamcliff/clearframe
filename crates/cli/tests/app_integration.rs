@@ -419,6 +419,11 @@ fn background_ffmpeg_detection_is_awaited_and_announced() {
     assert!(t.has_filter("scale"));
     assert!(!app.tools_pending());
     assert_eq!(app.tools_status().0.map(|t| t.version), Some(t.version));
+    // The announcement follows the moment detection is marked finished (on the detecting thread).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while changed.load(std::sync::atomic::Ordering::SeqCst) == 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     assert_eq!(changed.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 

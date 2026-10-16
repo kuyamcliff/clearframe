@@ -189,11 +189,14 @@ pub struct FilterCaps {
     pub bwdif: bool,
     pub nlmeans: bool,
     pub minterpolate: bool,
+    /// Contrast-adaptive sharpening (FFmpeg 4.4+).
+    pub cas: bool,
+    pub vibrance: bool,
 }
 
 impl FilterCaps {
     pub fn all() -> Self {
-        Self { vidstab: true, zscale: true, tonemap: true, bwdif: true, nlmeans: true, minterpolate: true }
+        Self { vidstab: true, zscale: true, tonemap: true, bwdif: true, nlmeans: true, minterpolate: true, cas: true, vibrance: true }
     }
     pub fn from_tools(t: &clearframe_media::FfmpegTools) -> Self {
         Self {
@@ -203,6 +206,8 @@ impl FilterCaps {
             bwdif: t.has_filter("bwdif"),
             nlmeans: t.has_filter("nlmeans"),
             minterpolate: t.has_filter("minterpolate"),
+            cas: t.has_filter("cas"),
+            vibrance: t.has_filter("vibrance"),
         }
     }
 }
@@ -231,6 +236,23 @@ pub fn snap_fps(r: Rational) -> Rational {
         }
     }
     Rational::new(f.round().max(1.0) as i64, 1)
+}
+
+/// Size for a "1080p"/"4K"-style target: fits inside the 16:9 frame of that height (so wide
+/// films are not made wider than the format), keeps the aspect ratio, and snaps to the exact
+/// standard size when the source is within 1% of 16:9 (854x480 -> 3840x2160, not 3844x2160).
+pub fn standard_size(src_w: u32, src_h: u32, height: u32) -> (u32, u32) {
+    let box_w = (height as f64 * 16.0 / 9.0).round() as u32 / 2 * 2;
+    let aspect = src_w as f64 / src_h.max(1) as f64;
+    if (aspect / (16.0 / 9.0) - 1.0).abs() < 0.01 {
+        return (box_w, height);
+    }
+    let w = height as f64 * aspect;
+    if w > box_w as f64 {
+        (box_w, even(box_w as f64 / aspect))
+    } else {
+        (even(w), height)
+    }
 }
 
 fn even(v: f64) -> u32 {
@@ -388,6 +410,15 @@ pub fn plan(
         let exec = match &st.op {
             Operation::Deinterlace(d) => {
                 seen_deinterlace = true;
+                if sid == AUTO_DEINTERLACE_ID {
+                    issue(
+                        &mut issues,
+                        Severity::Info,
+                        Some(sid),
+                        "The source is interlaced, so it is deinterlaced first (bwdif). Add a Deinterlace step to change how.".into(),
+                        None,
+                    );
+                }
                 if !cur.interlaced {
                     issue(&mut issues, Severity::Warning, Some(sid), "The source does not appear to be interlaced; deinterlacing progressive video can soften it.".into(), None);
                 }
@@ -456,7 +487,10 @@ pub fn plan(
                     SizeTarget::ModelScale => (mw, mh, FitMode::Stretch),
                     SizeTarget::Source => (cur.width, cur.height, FitMode::Stretch),
                     SizeTarget::Scale { factor } => (even(cur.width as f64 * *factor as f64), even(cur.height as f64 * *factor as f64), FitMode::Stretch),
-                    SizeTarget::Height { height } => (even(cur.width as f64 * *height as f64 / cur.height as f64), *height, FitMode::Stretch),
+                    SizeTarget::Height { height } => {
+                        let (w, h) = standard_size(cur.width, cur.height, *height);
+                        (w, h, FitMode::Stretch)
+                    }
                     SizeTarget::Custom { width, height, fit } => (*width, *height, *fit),
                 };
                 let (ow, oh, post) = fit_filters(mw, mh, tw, th, fit, "lanczos+accurate_rnd");
@@ -559,13 +593,12 @@ pub fn plan(
             }
             Operation::Color(c) => {
                 let mut f = Vec::new();
+                let adjust = color_adjust_filters(c, opts.caps.vibrance);
+                if c.vibrance.abs() > 1e-4 && !opts.caps.vibrance {
+                    notes.push("This FFmpeg build has no vibrance filter; vibrance is ignored.".into());
+                }
                 match c.mode {
-                    ColorMode::Adjust => {
-                        let changed = c.brightness.abs() > 1e-4 || (c.contrast - 1.0).abs() > 1e-4 || (c.saturation - 1.0).abs() > 1e-4 || (c.gamma - 1.0).abs() > 1e-4;
-                        if changed {
-                            f.push(format!("eq=brightness={:.4}:contrast={:.4}:saturation={:.4}:gamma={:.4}", c.brightness, c.contrast, c.saturation, c.gamma));
-                        }
-                    }
+                    ColorMode::Adjust => f.extend(adjust.iter().cloned()),
                     ColorMode::HdrToSdr => {
                         if !cur.is_hdr() {
                             issue(&mut issues, Severity::Error, Some(sid), "HDR to SDR needs an HDR (PQ or HLG) source; this video is SDR.".into(), None);
@@ -592,6 +625,8 @@ pub fn plan(
                         out_color.matrix = clearframe_media::color::YuvMatrix::Bt709;
                         out_color.mastering_display = None;
                         out_color.content_light = None;
+                        // Grade the SDR result.
+                        f.extend(adjust.iter().cloned());
                     }
                     ColorMode::SdrToHdr => {
                         if cur.is_hdr() {
@@ -605,6 +640,8 @@ pub fn plan(
                             HdrTransfer::Pq => ("smpte2084", "smpte2084"),
                             HdrTransfer::Hlg => ("arib-std-b67", "arib-std-b67"),
                         };
+                        // Grade the SDR source before it is mapped into HDR.
+                        f.extend(adjust.iter().cloned());
                         let pin = primaries_name(&cur.primaries);
                         f.push(format!(
                             "zscale=tin={}:pin={pin}:p={pin}:{}:t=linear:npl={:.0}",
@@ -628,6 +665,21 @@ pub fn plan(
                 } else {
                     f.push("format=rgb48le".into());
                     StageExec::Ffmpeg { filters: f }
+                }
+            }
+            Operation::Sharpen(sh) => {
+                if sh.amount <= 1e-4 {
+                    StageExec::Skip { reason: "Sharpen amount is zero.".into() }
+                } else if sh.method == SharpenMethod::Adaptive && opts.caps.cas {
+                    StageExec::Ffmpeg { filters: vec![format!("cas=strength={:.3}", sh.amount.clamp(0.0, 1.0))] }
+                } else {
+                    if sh.method == SharpenMethod::Adaptive {
+                        notes.push("This FFmpeg build has no adaptive sharpening (cas); using an unsharp mask instead.".into());
+                    }
+                    let (n, amount) = unsharp_params(sh);
+                    StageExec::Ffmpeg {
+                        filters: vec![format!("unsharp=luma_msize_x={n}:luma_msize_y={n}:luma_amount={amount:.3}:chroma_msize_x={n}:chroma_msize_y={n}:chroma_amount=0")],
+                    }
                 }
             }
             Operation::Resize(r) => {
@@ -713,22 +765,33 @@ pub fn plan(
             None,
         );
     }
+    // Subsampled formats need even sizes: trim the last pixel column or row instead of refusing.
+    let mut even_crop = None;
     if (output.video.pix_fmt.contains("420") || output.video.pix_fmt.contains("422") || output.video.pix_fmt == "nv12" || output.video.pix_fmt == "p010le")
         && (!cur.width.is_multiple_of(2) || !cur.height.is_multiple_of(2))
     {
+        let (w, h) = (cur.width & !1, cur.height & !1);
         issue(
             &mut issues,
-            Severity::Error,
+            Severity::Info,
             None,
-            format!("{}x{} has odd dimensions, which {} cannot encode. Add a Resize step.", cur.width, cur.height, output.video.pix_fmt),
+            format!("{}x{} has an odd size, which {} cannot store; the output is trimmed to {w}x{h}.", cur.width, cur.height, output.video.pix_fmt),
             None,
         );
+        even_crop = Some(format!("crop={w}:{h}:0:0"));
+        cur.width = w;
+        cur.height = h;
     }
     if cur.width > 16384 || cur.height > 16384 {
         issue(&mut issues, Severity::Error, None, format!("Output size {}x{} exceeds supported limits.", cur.width, cur.height), None);
     }
 
-    let passes = build_passes(&stages, &input);
+    let mut passes = build_passes(&stages, &input);
+    if let (Some(c), Some(last)) = (even_crop, passes.last_mut()) {
+        last.encode_filters.push(c);
+        last.output.width = cur.width;
+        last.output.height = cur.height;
+    }
     let output_duration = input_duration * cur.time_scale;
     let input_frames = (input_duration * input.fps.as_f64()).round() as u64;
     let output_frames = (output_duration * cur.fps.as_f64()).round() as u64;
@@ -936,8 +999,55 @@ fn stages_model_mem(sp: &StagePlan, models: &dyn ModelLookup, tile_mp: f64) -> f
     total
 }
 
+/// FFmpeg filters for the colour and light sliders, in grading order: exposure and white
+/// balance, shadows and highlights, brightness/contrast/saturation/gamma, vibrance, hue.
+pub fn color_adjust_filters(c: &ColorSettings, has_vibrance: bool) -> Vec<String> {
+    let mut f = Vec::new();
+    if !c.has_adjustments() {
+        return f;
+    }
+    let e = 1e-4;
+    if c.exposure.abs() > e || c.temperature.abs() > e || c.tint.abs() > e {
+        let k = 2f32.powf(c.exposure);
+        let (r, g, b) = (k * (1.0 + 0.10 * c.temperature), k * (1.0 - 0.08 * c.tint), k * (1.0 - 0.10 * c.temperature));
+        f.push(format!("colorchannelmixer=rr={r:.4}:gg={g:.4}:bb={b:.4}"));
+    }
+    if c.shadows.abs() > e || c.highlights.abs() > e {
+        let s = 0.25 + 0.12 * c.shadows.clamp(-1.0, 1.0);
+        let h = 0.75 + 0.12 * c.highlights.clamp(-1.0, 1.0);
+        f.push(format!("curves=all='0/0 0.25/{s:.4} 0.75/{h:.4} 1/1'"));
+    }
+    if c.brightness.abs() > e || (c.contrast - 1.0).abs() > e || (c.saturation - 1.0).abs() > e || (c.gamma - 1.0).abs() > e {
+        f.push(format!("eq=brightness={:.4}:contrast={:.4}:saturation={:.4}:gamma={:.4}", c.brightness, c.contrast, c.saturation, c.gamma));
+    }
+    if c.vibrance.abs() > e && has_vibrance {
+        f.push(format!("vibrance=intensity={:.4}", c.vibrance.clamp(-1.0, 1.0) * 1.5));
+    }
+    if c.hue.abs() > e {
+        f.push(format!("hue=h={:.2}", c.hue));
+    }
+    f
+}
+
+/// Unsharp mask size (odd, 3..23) and amount for a sharpen setting.
+fn unsharp_params(sh: &SharpenSettings) -> (u32, f32) {
+    let n = ((sh.radius.clamp(0.5, 5.0) * 1.5).round() as u32 * 2 + 1).clamp(3, 23);
+    let amount = if sh.method == SharpenMethod::Adaptive { sh.amount * 2.0 } else { sh.amount };
+    (n, amount.clamp(0.0, 5.0))
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn standard_sizes_fit_the_format() {
+        assert_eq!(standard_size(854, 480, 2160), (3840, 2160));
+        assert_eq!(standard_size(1280, 534, 2160), (3840, 1602));
+        assert_eq!(standard_size(640, 480, 1080), (1440, 1080));
+        assert_eq!(standard_size(853, 480, 1080), (1920, 1080));
+        assert_eq!(standard_size(720, 1280, 1080), (608, 1080));
+    }
+
     use super::*;
     use clearframe_media::probe::parse_probe_json;
 

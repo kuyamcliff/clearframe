@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Blend, Boxes, ChevronRight, Columns2, FolderInput, Layers, PanelRightClose, PanelRightOpen, RectangleHorizontal, Settings as Gear, Sparkles, SquareSplitHorizontal } from "lucide-react";
 
-import { Confirm, Toasts, useMenu, type MenuItem } from "./components/ui";
+import { Confirm, MenuBar, Toasts, useMenu, type MenuItem } from "./components/ui";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { api, inTauri, onFileDrop, VIDEO_EXTENSIONS } from "./lib/ipc";
 import { basename, timecode } from "./lib/format";
@@ -52,6 +52,7 @@ function menus(): Record<string, MenuItem[]> {
     Help: [
       { label: "Models", onClick: () => useStore.setState({ dialog: "models" }) },
       { label: "Diagnostics", onClick: () => useStore.setState({ dialog: "prefs", settingsSection: "diagnostics" }) },
+      { label: "Show log file", onClick: () => api.logPath().then((p) => { toast("info", `Log file: ${p}`); return api.openPath(p); }).catch(errorToast) },
       { label: "About", onClick: () => useStore.setState({ dialog: "prefs", settingsSection: "about" }) },
     ],
   };
@@ -65,7 +66,7 @@ function TopBar({ presets, setPresets }: { presets: boolean; setPresets: (v: boo
   const sideOpen = useStore((s) => s.sideOpen);
   const app = useStore((s) => s.app);
   const problems = useStore((s) => s.models.some((m) => m.state === "missing" || m.state === "broken"));
-  const { open, node } = useMenu();
+  const { node } = useMenu();
   const modes: { value: CompareMode; label: string; icon: typeof Sparkles }[] = [
     { value: "original", label: "Original", icon: RectangleHorizontal },
     { value: "processed", label: "Preview", icon: Sparkles },
@@ -75,12 +76,10 @@ function TopBar({ presets, setPresets }: { presets: boolean; setPresets: (v: boo
   return (
     <header className="topbar">
       <div className="brand"><img src="/logo.svg" alt="" />ClipFX <b>Enhance</b></div>
-      <nav className="row" style={{ gap: 0, padding: "0 6px" }} aria-label="Menu">
-        {Object.keys(menus()).map((k) => <button key={k} className="tb" onClick={(e) => open(e, menus()[k])}>{k}</button>)}
-      </nav>
+      <MenuBar menus={menus} />
       <div className="crumbs">
         <span>Projects</span><ChevronRight size={12} />
-        <span className="cur ellipsis" style={{ maxWidth: 260 }}>{projectName ?? (sourcePath ? basename(sourcePath) : "Default")}{dirty && projectName ? " •" : ""}</span>
+        <span className="cur ellipsis" title={projectName ?? sourcePath ?? undefined}>{projectName ?? (sourcePath ? basename(sourcePath) : "Default")}{dirty && projectName ? " •" : ""}</span>
         {app?.demo && <span className="tag warn" title="Running in a browser without the processing engine">Demo</span>}
         {app && !app.ffmpeg && !app.ffmpeg_checking && <span className="tag err" title={app.ffmpeg_error ?? ""}>FFmpeg missing</span>}
       </div>
@@ -228,6 +227,15 @@ export function App() {
   }, []);
   useEffect(() => {
     if (ready && !bootError) api.startupFiles().then((f) => { if (f.length) openFiles(f); }).catch(() => {});
+  }, [ready, bootError]);
+  // Files opened while the app is already running (double-click, "Open with") arrive here.
+  useEffect(() => {
+    if (!ready || bootError || !inTauri()) return;
+    let off: (() => void) | undefined;
+    void import("@tauri-apps/api/event").then((ev) => ev.listen("cf://open-files", () => {
+      api.startupFiles().then((f) => { if (f.length) openFiles(f); }).catch(() => {});
+    })).then((f) => { off = f; });
+    return () => off?.();
   }, [ready, bootError]);
 
   if (!ready) return <div className="empty-player" style={{ height: "100%" }}><img src="/logo.svg" alt="" width={36} /></div>;

@@ -109,6 +109,8 @@ pub struct Settings {
     /// Optional network features are off until the user turns them on.
     pub check_updates_on_launch: bool,
     pub allow_catalog_updates: bool,
+    /// Send the app's own log (paths and names removed) so problems can be fixed in later versions.
+    pub share_diagnostics: bool,
     pub onboarding_complete: bool,
     pub shortcuts: BTreeMap<String, String>,
     /// Unknown keys from newer versions, preserved verbatim.
@@ -150,6 +152,7 @@ impl Default for Settings {
             confirm_before_quit_with_jobs: true,
             check_updates_on_launch: true,
             allow_catalog_updates: false,
+            share_diagnostics: true,
             onboarding_complete: false,
             shortcuts: default_shortcuts(),
             extra: BTreeMap::new(),

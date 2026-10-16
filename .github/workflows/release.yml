@@ -6,11 +6,21 @@ name: Release
 # Start it by pushing a tag like v1.1.0 (matching the version in Cargo.toml), by running the
 # workflow by hand, or by pushing a commit whose message contains "[release]"; in the last two
 # cases the v<version> tag is created on that commit when the release is published.
+#
+# A Windows-only release ("[windows-only]" in the commit message, or the workflow input) builds
+# only Windows, offers the app-only update package to Windows installs, and does not tell macOS
+# or Linux installs about it. The macOS and Linux downloads of the previous release are carried
+# over so the "latest" download links keep working.
 on:
   push:
     tags: ["v*"]
     branches: ["main", "ccr-**"]
   workflow_dispatch:
+    inputs:
+      windows_only:
+        description: "Windows-only release"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -21,6 +31,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # Address that receives diagnostics reports (repository variable; empty = builds never send).
+  CLIPFX_DIAGNOSTICS_URL: ${{ vars.CLIPFX_DIAGNOSTICS_URL }}
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   RUST_VERSION: "1.99.0"
@@ -32,6 +44,7 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
       tag: ${{ steps.v.outputs.tag }}
+      windows_only: ${{ steps.v.outputs.windows_only }}
     steps:
       - uses: actions/checkout@v4
       - id: v
@@ -47,6 +60,14 @@ jobs:
           fi
           echo "version=$app" >> "$GITHUB_OUTPUT"
           echo "tag=v$app" >> "$GITHUB_OUTPUT"
+          if [ "$WINDOWS_ONLY_INPUT" = true ] || grep -qF '[windows-only]' <<<"$COMMIT_MESSAGE"; then
+            echo "windows_only=true" >> "$GITHUB_OUTPUT"; echo "Windows-only release"
+          else
+            echo "windows_only=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          WINDOWS_ONLY_INPUT: ${{ inputs.windows_only }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
 
   windows:
     needs: version
@@ -107,6 +128,7 @@ jobs:
 
   macos:
     needs: version
+    if: needs.version.outputs.windows_only != 'true'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -148,6 +170,7 @@ jobs:
 
   linux:
     needs: version
+    if: needs.version.outputs.windows_only != 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -185,10 +208,16 @@ jobs:
 
   publish:
     needs: [version, windows, macos, linux]
+    # macOS and Linux are skipped in a Windows-only release; anything else must succeed.
+    if: >-
+      always() && needs.version.result == 'success' && needs.windows.result == 'success' &&
+      (needs.macos.result == 'success' || (needs.version.outputs.windows_only == 'true' && needs.macos.result == 'skipped')) &&
+      (needs.linux.result == 'success' || (needs.version.outputs.windows_only == 'true' && needs.linux.result == 'skipped'))
     runs-on: ubuntu-24.04
     env:
       VERSION: ${{ needs.version.outputs.version }}
       TAG: ${{ needs.version.outputs.tag }}
+      WINDOWS_ONLY: ${{ needs.version.outputs.windows_only }}
     steps:
       - uses: actions/checkout@v4
       - name: Rust toolchain
@@ -198,6 +227,14 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Carry over the previous macOS and Linux downloads (Windows-only release)
+        if: env.WINDOWS_ONLY == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo "$GITHUB_REPOSITORY" --dir dist \
+            --pattern 'ClipFX-Enhance-macos-*' --pattern 'clipfx-enhance-linux-*' --pattern 'ClipFX-Enhance-linux-*'
+          ls -la dist
       - name: Release notes
         run: |
           f="docs/release-notes/$TAG.md"
@@ -219,11 +256,12 @@ jobs:
               "date": datetime.date.today().isoformat(),
               "notes": open("notes.md").read().strip(),
               "page": f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/tag/{os.environ['TAG']}",
-              "packages": {
-                  "windows-x64": pkg("ClipFX-Enhance-windows-x64-update.exe", "nsis-patch"),
-                  "linux-x64-deb": pkg("clipfx-enhance-linux-amd64.deb", "deb"),
-              },
+              "packages": {"windows-x64": pkg("ClipFX-Enhance-windows-x64-update.exe", "nsis-patch")},
           }
+          if os.environ.get("WINDOWS_ONLY") == "true":
+              manifest["platforms"] = ["windows-x64"]
+          else:
+              manifest["packages"]["linux-x64-deb"] = pkg("clipfx-enhance-linux-amd64.deb", "deb")
           json.dump(manifest, open("dist/update.json", "w"), indent=2)
           PY
           umask 077

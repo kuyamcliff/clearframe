@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type PointerEvent as RPointerEvent, type 
 import { FileVideo, FolderOpen, Layers, MoreHorizontal, Pause, Play, Plus, RotateCcw, ScrollText, Square, Trash2, X } from "lucide-react";
 
 import { Confirm, Progress, useMenu } from "../components/ui";
+import { friendlyError, type Friendly } from "../lib/errors";
 import { api, fileUrl, pickFile, VIDEO_EXTENSIONS } from "../lib/ipc";
 import { basename, duration, eta, mb } from "../lib/format";
 import type { JobEvent, JobRecord, JobState } from "../lib/types";
@@ -126,13 +127,28 @@ function JobRow({ j }: { j: JobRecord }) {
       {(j.error || j.warnings.length > 0 || log) && (
         <tr>
           <td colSpan={6} style={{ paddingTop: 0 }}>
-            {j.error && <div className="err selectable" style={{ fontSize: 11.5 }}>{j.error}</div>}
+            {j.error && <JobError message={j.error} />}
             {j.warnings.map((w, i) => <div key={i} className="warn" style={{ fontSize: 11.5 }}>{w}</div>)}
             {log && <div className="log">{log.length ? log.map((e, i) => <div key={i}>{e.at.slice(11, 19)}  {e.message}</div>) : "No entries."}</div>}
           </td>
         </tr>
       )}
     </>
+  );
+}
+
+/** A failed job's error in plain words, with the next step; full text in the log. */
+export function explainError(m: string): Friendly {
+  return friendlyError(m);
+}
+
+function JobError({ message }: { message: string }) {
+  const { title, hint } = explainError(message);
+  return (
+    <div className="job-err">
+      <div className="err">{title}</div>
+      {hint && <div className="muted">{hint}</div>}
+    </div>
   );
 }
 

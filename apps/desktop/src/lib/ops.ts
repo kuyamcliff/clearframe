@@ -21,8 +21,9 @@ export const OPS: OpInfo[] = [
   { type: "enhance", label: "Enhance / Upscale", task: "Upscale & enhance", description: "AI super-resolution with Real-ESRGAN models. Choose an anime model for animation and a general model for live action.", modelTasks: ["super_resolution"] },
   { type: "face_restore", label: "Face recovery", task: "Recover faces", description: "Detects faces with RetinaFace and restores them with GFPGAN, blending back with the strength you choose. Can change identity at high strength.", modelTasks: ["face_restoration"] },
   { type: "interpolate", label: "Frame interpolation", task: "Smooth motion / slow motion", description: "Creates in-between frames with RIFE (AI) or FFmpeg motion interpolation for higher frame rates or slow motion.", modelTasks: ["frame_interpolation"] },
-  { type: "color", label: "Color & HDR", task: "Color & HDR", description: "Brightness, contrast, saturation and gamma, or HDR to SDR tone mapping and SDR to HDR (PQ/HLG) conversion.", modelTasks: [], builtin: true },
+  { type: "color", label: "Color & light", task: "Color & light", description: "Exposure, white balance, shadows, highlights, contrast, saturation, vibrance and hue; also HDR to SDR tone mapping and SDR to HDR (PQ/HLG) conversion.", modelTasks: [], builtin: true },
   { type: "resize", label: "Resize", task: "Resize", description: "Classic scaling (Lanczos, bicubic…) to an exact size with fit, fill or stretch.", modelTasks: [], builtin: true },
+  { type: "sharpen", label: "Sharpen", task: "Sharpen", description: "Adaptive sharpening brings out fine detail without halos; unsharp mask is stronger and has a radius. Runs at the final size.", modelTasks: [], builtin: true },
   { type: "grain", label: "Film grain", task: "Add film grain", description: "Adds natural-looking, luminance-aware grain. Useful after denoising or upscaling to avoid a plastic look.", modelTasks: [], builtin: true },
 ];
 
@@ -140,6 +141,8 @@ export function stageSummary(s: Stage, cards: ModelCard[]): string {
     }
     case "stabilize":
       return `smoothing ${st.smoothing} · ${String(st.mode).replace("_", " ")}`;
+    case "sharpen":
+      return `${st.method === "adaptive" ? "adaptive" : "unsharp"} · ${Math.round(st.amount * 100)}%`;
     case "color":
       return st.mode === "adjust" ? "adjustments" : st.mode === "hdr_to_sdr" ? `HDR → SDR (${st.tone_mapper})` : `SDR → HDR (${String(st.hdr_transfer).toUpperCase()})`;
     case "resize":
@@ -169,9 +172,10 @@ export const SECTION_TITLE: Record<OperationType, string> = {
   interpolate: "Frame interpolation",
   stabilize: "Stabilization",
   deinterlace: "Deinterlace",
-  color: "Color & HDR",
+  color: "Color & light",
+  sharpen: "Sharpen",
   resize: "Resize",
   grain: "Film grain",
 };
 
-export const SECTION_ORDER: OperationType[] = ["enhance", "denoise", "deblur", "face_restore", "interpolate", "stabilize", "deinterlace", "color", "resize", "grain"];
+export const SECTION_ORDER: OperationType[] = ["enhance", "denoise", "deblur", "face_restore", "interpolate", "stabilize", "deinterlace", "color", "resize", "sharpen", "grain"];

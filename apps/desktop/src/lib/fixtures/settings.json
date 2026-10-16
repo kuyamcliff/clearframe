@@ -38,6 +38,7 @@
   "quality_default": "balanced",
   "remember_last_export_folder": false,
   "segment_seconds": 10.0,
+  "share_diagnostics": true,
   "shortcuts": {
     "compare_toggle": "C",
     "export": "CmdOrCtrl+E",

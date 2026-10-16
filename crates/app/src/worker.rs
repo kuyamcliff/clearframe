@@ -74,6 +74,8 @@ pub fn run_worker(envelope_path: &Path) -> i32 {
     };
     crate::resources::apply_process_priority(env.priority);
     apply_threads(env.spec.resources.threads);
+    // A long export must not be cut short by the idle sleep timer.
+    let _awake = crate::resources::KeepAwake::new();
     let tools = match tools_from(&env) {
         Ok(t) => t,
         Err(e) => {
@@ -128,6 +130,10 @@ pub fn run_worker(envelope_path: &Path) -> i32 {
             (ResultKind::Failed, format!("{m}{hint}"), None, 1)
         }
     };
+    match kind {
+        ResultKind::Completed | ResultKind::Paused | ResultKind::Cancelled => log::info!("worker finished: {kind:?}: {message}"),
+        _ => log::error!("worker finished: {kind:?}: {message}"),
+    }
     emit(&WorkerResult { event: "result".into(), kind, message, report });
     code
 }
@@ -174,10 +180,12 @@ pub fn run_still(request_path: &Path, out_dir: &Path) -> i32 {
     })();
     match result {
         Ok(v) => {
+            log::info!("still preview rendered in {} s", v["seconds"]);
             emit(&v);
             0
         }
         Err(m) => {
+            log::error!("still preview failed: {m}");
             emit(&serde_json::json!({"event": "result", "ok": false, "message": m}));
             1
         }

@@ -26,10 +26,12 @@ metal = ["clearframe-app/metal"]
 tauri = { version = "2", default-features = false, features = ["wry", "compression", "common-controls-v6", "dynamic-acl", "x11", "protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 log.workspace = true
+parking_lot.workspace = true
 clearframe-app.workspace = true
 clearframe-core.workspace = true
 clearframe-models.workspace = true
@@ -40,3 +42,6 @@ clearframe-inference = { workspace = true, features = ["gpu"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }

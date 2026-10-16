@@ -469,6 +469,8 @@ export async function mockInvoke(cmd: string, a: Record<string, any> = {}): Prom
       return { freed_bytes: 0, removed_entries: 0, skipped_protected: 0, errors: [] };
     case "open_path":
       return null;
+    case "log_path":
+      return "/home/demo/Documents/ClipFX Enhance Log.txt";
     case "presets_list":
       return structuredClone(state.presets);
     case "preset_action": {

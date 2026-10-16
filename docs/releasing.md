@@ -33,3 +33,12 @@ replace the secret.
 
    It also installs the full installer on a Windows runner, applies the update on top and runs the
    app's self-test, so a broken update never gets published.
+
+## Windows-only releases
+
+Put `[windows-only]` in the release commit message (or tick "Windows-only release" when running
+the workflow by hand). Only Windows is built; `update.json` lists only the Windows app-only
+update and carries `"platforms": ["windows-x64"]`, so apps from 1.1.4 on, on other platforms,
+ignore it (1.1.3 and older on macOS/Linux still see the version and are pointed at the
+release page). The previous release's macOS and Linux downloads are copied into the new release
+so the README's `releases/latest` links keep working.

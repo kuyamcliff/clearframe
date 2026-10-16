@@ -195,6 +195,25 @@ impl ImageModel {
         Ok(())
     }
 
+    /// Stop using the GPU (after it failed); the model continues on the CPU with its
+    /// default tiling.
+    pub fn use_cpu(&mut self) {
+        #[cfg(feature = "gpu")]
+        {
+            self.gpu = None;
+        }
+        (self.tile, self.tile_pad) = self.arch.default_tiling();
+    }
+
+    /// The GPU adapter index this model runs on, if any.
+    pub fn gpu_index(&self) -> Option<usize> {
+        #[cfg(feature = "gpu")]
+        if let Some((g, _)) = &self.gpu {
+            return Some(g.info.index);
+        }
+        None
+    }
+
     /// Name of the GPU this model runs on, if any.
     pub fn gpu_name(&self) -> Option<String> {
         #[cfg(feature = "gpu")]
@@ -304,6 +323,9 @@ impl InterpModel {
     fn interpolate_gpu(&self, a: &RgbImage, b: &RgbImage, t: f32, scale: f64) -> Option<RgbImage> {
         use crate::gpu::nets::Planar;
         let (gpu, net) = self.gpu.as_ref()?;
+        if gpu.is_lost() {
+            return None;
+        }
         let run = || -> std::result::Result<RgbImage, String> {
             let (h, w) = (a.height, a.width);
             let m = ((64.0 / scale).max(64.0)) as usize;
@@ -384,7 +406,7 @@ impl FaceModels {
     /// the CPU; pre- and post-processing are shared.
     pub fn detect(&self, rgb: &candle_core::Tensor, conf_threshold: f32, nms_threshold: f32) -> Result<Vec<crate::arch::retinaface::Detection>> {
         #[cfg(feature = "gpu")]
-        if let (Some(det), Some((gpu, _))) = (&self.gpu_detector, &self.gpu_restorer) {
+        if let (Some(det), Some((gpu, _))) = (&self.gpu_detector, self.gpu_restorer.as_ref().filter(|(g, _)| !g.is_lost())) {
             use crate::arch::retinaface as rf;
             let run = || -> Result<Vec<rf::Detection>> {
                 let (_, _, h, w) = rgb.dims4()?;
@@ -414,7 +436,7 @@ impl FaceModels {
     /// failure) the CPU.
     pub fn restore(&self, face: &candle_core::Tensor) -> Result<candle_core::Tensor> {
         #[cfg(feature = "gpu")]
-        if let Some((gpu, net)) = &self.gpu_restorer {
+        if let Some((gpu, net)) = self.gpu_restorer.as_ref().filter(|(g, _)| !g.is_lost()) {
             let run = || -> std::result::Result<candle_core::Tensor, String> {
                 let p = crate::gpu::nets::Planar::from_tensor(&face.to_dtype(DType::F32).map_err(|e| e.to_string())?)?;
                 net.forward(gpu, &p)?.to_tensor()

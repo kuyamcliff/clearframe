@@ -4,7 +4,7 @@ export type Rational = { num: number; den: number };
 
 export type OperationType =
   | "deinterlace" | "denoise" | "deblur" | "enhance" | "face_restore"
-  | "interpolate" | "stabilize" | "color" | "grain" | "resize";
+  | "interpolate" | "stabilize" | "color" | "sharpen" | "grain" | "resize";
 
 export interface Stage {
   id: string;
@@ -171,7 +171,8 @@ export interface Settings {
   memory_limit_mb: number; max_concurrent_jobs: number; stop_queue_on_error: boolean; segment_seconds: number;
   keep_failed_work: boolean; ffmpeg_dir: string | null; cache_limit_mb: number; cache_max_age_days: number;
   low_disk_warning_mb: number; performance: Performance; notifications: boolean; inspector_mode_advanced: boolean;
-  confirm_before_quit_with_jobs: boolean; check_updates_on_launch: boolean; allow_catalog_updates: boolean;
+  confirm_before_quit_with_jobs: boolean; check_updates_on_launch: boolean;
+  share_diagnostics: boolean; allow_catalog_updates: boolean;
   onboarding_complete: boolean; shortcuts: Record<string, string>; [k: string]: unknown;
 }
 export interface ResourcePlan { threads: number; priority: ProcessPriority; memory_budget_mb: number; reserve_memory_mb: number; max_concurrent_jobs: number; explanation: string[] }

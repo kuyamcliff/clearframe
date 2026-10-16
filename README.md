@@ -7,6 +7,12 @@
 <p><b>Upscale, denoise, deblur and restore video with AI, right on your own computer.</b><br>
 Free and open source. No account, no subscription, no cloud.</p>
 
+<a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest"><img src="https://img.shields.io/github/v/release/kuyamcliff/clipfx-enhance?label=version&color=7c5cff" alt="Latest version"></a>
+<a href="https://github.com/kuyamcliff/clipfx-enhance/releases"><img src="https://img.shields.io/github/downloads/kuyamcliff/clipfx-enhance/total?label=downloads&color=2ea043" alt="Downloads"></a>
+<a href="#get-started"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0078d4" alt="Windows, macOS and Linux"></a>
+<a href="#runs-on-your-gpu"><img src="https://img.shields.io/badge/GPU-NVIDIA%20%7C%20AMD%20%7C%20Intel%20%7C%20Apple-555" alt="NVIDIA, AMD, Intel and Apple GPUs"></a>
+<a href="LICENSE"><img src="https://img.shields.io/github/license/kuyamcliff/clipfx-enhance?color=4c1" alt="MIT license"></a>
+
 <a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/ClipFX-Enhance-windows-x64-setup.exe"><img src="docs/media/btn-windows.svg" alt="Download for Windows" height="48"></a>&nbsp;
 <a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/ClipFX-Enhance-macos-universal.dmg"><img src="docs/media/btn-macos.svg" alt="Download for macOS" height="48"></a>&nbsp;
 <a href="https://github.com/kuyamcliff/clipfx-enhance/releases/latest/download/ClipFX-Enhance-linux-x86_64.AppImage"><img src="docs/media/btn-linux.svg" alt="Download for Linux" height="48"></a>
@@ -36,15 +42,40 @@ Free and open source. No account, no subscription, no cloud.</p>
 
 | | |
 |---|---|
-| **Upscale** | Real-ESRGAN models, up to 4K and beyond |
+| **Upscale** | Real-ESRGAN models for live action and animation, up to 4K and beyond |
 | **Denoise** | FFDNet and DRUNet, or classic filters |
-| **Deblur** | NAFNet for camera-shake blur |
+| **Deblur** | NAFNet for camera-shake and soft focus |
 | **Restore faces** | GFPGAN with RetinaFace detection |
-| **Smooth motion** | RIFE frame interpolation and slow motion |
+| **Smooth motion** | RIFE frame interpolation to 60 fps and slow motion up to 16× |
 | **Stabilize** | Two-pass vid.stab |
+| **Color & light** | Exposure, brightness, contrast, shadows, highlights, gamma, temperature, tint, saturation, vibrance and hue |
+| **Sharpen** | Adaptive sharpening without halos, or unsharp mask |
 | **Also** | Deinterlace, SDR ↔ HDR, resize, film grain |
 
-Stack as many steps as you like, preview any moment against the original, and export to H.264, H.265, AV1, ProRes and more. Audio, subtitles and chapters are kept, and your original file is never overwritten.
+Stack as many steps as you like, preview any moment against the original, and export to H.264, H.265, AV1, ProRes and more. Audio tracks, subtitles and chapters are kept, and your original file is never overwritten.
+
+## Runs on your GPU
+
+All AI models run on the graphics card you already have, through DirectX 12, Vulkan or Metal. That includes laptop and integrated graphics, not only high-end cards.
+
+- **NVIDIA, AMD, Intel and Apple.** No CUDA or extra drivers to install.
+- **Laptop-safe.** Work is split into short pieces sized to your GPU's measured speed, so Windows never resets the graphics driver mid-export.
+- **Keeps going.** If the driver resets anyway, the app reopens the GPU and carries on. If the GPU can't run a model, that step finishes on the CPU instead of failing.
+- **Stays fast in the background.** On Windows, exports aren't slowed by efficiency mode and the PC doesn't sleep until they finish.
+
+Without a GPU, everything still works on the CPU, only slower. See [known limitations](docs/limitations.md).
+
+## Works with the video you have
+
+Every release is tested end to end on real footage in 20 formats, from old phone clips to HDR:
+
+MP4 · MOV · MKV · WebM · AVI · MPG · MXF · 3GP<br>
+H.264 · H.265 10-bit · AV1 · VP9 · ProRes · DNxHR · MPEG-2 · Xvid · H.263
+
+- **Interlaced** DVD and camcorder video is deinterlaced automatically before AI steps.
+- **Phone video** keeps its orientation, and variable frame rate is handled.
+- **HDR stays HDR**, saved in 10-bit HEVC automatically.
+- **Odd sizes, multiple audio tracks, subtitles** and non-English file names all work.
 
 ## Get started
 
@@ -52,7 +83,9 @@ Stack as many steps as you like, preview any moment against the original, and ex
 2. Drop a video in, turn on **Enhancement**, and install the model it suggests.
 3. Press **Render frame** to preview, then **Export**.
 
-The app tells you when an update is out. On Windows and Linux it installs with one click, and on Windows only the app itself (a few MB) is downloaded.
+Not sure where to start? Pick a **preset** such as *Anime upscale to 4K*, *Restore old footage*, *Smooth 60 fps* or *Recover faces*, then adjust it.
+
+**Updates.** The app tells you when a new version is out and installs it with one click on Windows and Linux. On Windows, only the app itself (a few MB) is downloaded, not the whole installer.
 
 <details>
 <summary><b>First launch on macOS</b></summary>
@@ -66,8 +99,45 @@ The app isn't notarized by Apple, which needs a paid developer account, so macOS
 The `.deb` (Debian, Ubuntu, Mint) and `.rpm` (Fedora, openSUSE) packages install FFmpeg from your distribution. For the AppImage, install `ffmpeg` with your package manager, then run `chmod +x ClipFX-Enhance-linux-x86_64.AppImage` and open it.
 </details>
 
-> [!NOTE]
-> Every AI model (upscaling, denoising, deblurring, frame interpolation, face detection and face restoration) runs on your GPU (NVIDIA, AMD, Intel or Apple, through Vulkan, DirectX 12 or Metal). Without a GPU, AI processing is slow. See [known limitations](docs/limitations.md).
+## Questions
+
+<details>
+<summary><b>Is it really free?</b></summary>
+
+Yes. No account, no trial, no watermark and no export limits. The code is MIT licensed.
+</details>
+
+<details>
+<summary><b>Do I need an internet connection?</b></summary>
+
+Only to download a model the first time you use it and to get updates. Processing runs entirely on your computer.
+</details>
+
+<details>
+<summary><b>How long does an export take?</b></summary>
+
+It depends on the model, the output size and your GPU. Press **Render clip** to process a few seconds first and see how fast it goes; the queue shows speed and time left during an export. A plain 2× upscale is much faster than a 4K upscale with face recovery.
+</details>
+
+<details>
+<summary><b>Something went wrong. Where is the log?</b></summary>
+
+**Help → Show log file** opens it. It's a single file in your Documents folder, *ClipFX Enhance Log.txt*. Attach it when you [report a problem](https://github.com/kuyamcliff/clipfx-enhance/issues/new).
+</details>
+
+<details>
+<summary><b>Keyboard shortcuts?</b></summary>
+
+Ctrl+R renders a frame, Ctrl+E exports, Ctrl+Z / Ctrl+Shift+Z undo and redo, Ctrl+J opens the queue. The full list is in the [guide](docs/guide.md). Use ⌘ instead of Ctrl on a Mac.
+</details>
+
+## Privacy
+
+Your videos never leave your computer. To find and fix problems in later versions, ClipFX Enhance
+sends its own activity log: startup, errors and crashes, the settings and speed of each export,
+and your hardware (CPU, memory, GPU). File paths, file names and your user name are removed
+first. Logs collected while offline are sent when you are back online. Turn this off in
+**Preferences → General → Privacy**.
 
 ## Build from source
 

@@ -82,6 +82,12 @@ pub fn is_oom(msg: &str) -> bool {
         || m.contains("use a smaller tile")
 }
 
+/// Whether an error came from the GPU engine (driver reset, hang, validation), so the work can
+/// be retried on a fresh GPU context or on the CPU.
+pub fn is_gpu_failure(msg: &str) -> bool {
+    msg.contains("GPU")
+}
+
 /// Image model stage (enhance / denoise / deblur) with optional strength blend.
 pub struct ImageProc {
     label: String,
@@ -91,6 +97,12 @@ pub struct ImageProc {
     mix: f32,
     oom_fallback: bool,
     oom_retries: u32,
+    /// Video-memory budget, for reattaching to a reopened GPU.
+    vram_budget_mb: u64,
+    /// The GPU was reopened once after a failure; a second failure moves the stage to the CPU.
+    gpu_reopened: bool,
+    /// What happened after a GPU failure, for the job's warnings.
+    gpu_note: Option<String>,
     /// Frames worked on at once. On a GPU two keep it busy: one frame's forward pass runs while the
     /// other's tiles are prepared, read back and blended on the CPU.
     in_flight: usize,
@@ -100,7 +112,19 @@ pub struct ImageProc {
 impl ImageProc {
     fn new(label: String, model: ImageModel, params: ImageParams, mix: f32, res: &JobResources, sp: &StagePlan) -> Self {
         let in_flight = frames_in_flight(model.gpu_name().is_some(), sp, res);
-        Self { label, model, params, mix, oom_fallback: res.oom_tile_fallback, oom_retries: 0, in_flight, pending: Vec::new() }
+        Self {
+            label,
+            model,
+            params,
+            mix,
+            oom_fallback: res.oom_tile_fallback,
+            oom_retries: 0,
+            vram_budget_mb: res.vram_budget_mb,
+            gpu_reopened: false,
+            gpu_note: None,
+            in_flight,
+            pending: Vec::new(),
+        }
     }
 
     /// Run the model on one frame and blend by `mix`.
@@ -127,9 +151,36 @@ impl ImageProc {
                     log::warn!("{}: out of memory, retrying with {}px tiles", self.label, self.model.tile);
                     self.oom_retries += 1;
                 }
+                Err(e) if self.model.gpu_name().is_some() && is_gpu_failure(&e.to_string()) => self.recover_gpu(&e.to_string()),
                 Err(e) => return Err(anyhow!("{}: {e}", self.label)),
             }
         }
+    }
+
+    /// After a GPU failure: reopen the GPU once (a driver reset leaves the old context unusable)
+    /// and retry; if it fails again, finish the job on the CPU rather than failing it.
+    fn recover_gpu(&mut self, err: &str) {
+        self.in_flight = 1;
+        #[cfg(feature = "gpu")]
+        if !self.gpu_reopened {
+            self.gpu_reopened = true;
+            if let Some(index) = self.model.gpu_index() {
+                log::warn!("{}: {err}; reopening the GPU and retrying", self.label);
+                let tile = self.model.tile;
+                match clearframe_inference::gpu::context(index).and_then(|g| self.model.use_gpu_with_budget(g, self.vram_budget_mb).map_err(|e| e.to_string())) {
+                    Ok(()) => {
+                        // Smaller tiles than before: less work per piece, less memory.
+                        self.model.tile = self.model.tile.min((tile / 2).max(256));
+                        self.gpu_note = Some(format!("{}: the graphics driver reset once; the GPU was reopened and processing continued.", self.label));
+                        return;
+                    }
+                    Err(e) => log::warn!("{}: could not reopen the GPU ({e})", self.label),
+                }
+            }
+        }
+        log::warn!("{}: {err}; continuing on the CPU", self.label);
+        self.gpu_note = Some(format!("{}: the GPU stopped responding, so this step finished on the CPU (slower). Updating the graphics driver may help.", self.label));
+        self.model.use_cpu();
     }
 
     fn run_pending(&mut self, out: &mut Vec<Frame>) -> Result<()> {
@@ -152,6 +203,11 @@ impl ImageProc {
                     log::warn!("{}: out of memory with {} frames in flight; continuing one at a time", self.label, self.in_flight);
                     self.in_flight = 1;
                     self.oom_retries += 1;
+                }
+                // A GPU failure: redo the frames one at a time, which recovers or moves to the CPU.
+                Some(e) if is_gpu_failure(&e.to_string()) => {
+                    log::warn!("{}: {e}; continuing one frame at a time", self.label);
+                    self.in_flight = 1;
                 }
                 Some(e) => return Err(anyhow!("{}: {e}", self.label)),
                 None => unreachable!(),
@@ -197,7 +253,7 @@ impl Processor for ImageProc {
         self.run_pending(out)
     }
     fn stats(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({ "tile": self.model.tile, "oom_retries": self.oom_retries, "frames_in_flight": self.in_flight }))
+        Some(serde_json::json!({ "tile": self.model.tile, "oom_retries": self.oom_retries, "frames_in_flight": self.in_flight, "warning": self.gpu_note }))
     }
 }
 

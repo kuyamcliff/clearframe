@@ -15,6 +15,7 @@ pub fn operation_defaults() -> serde_json::Value {
         "interpolate": Operation::Interpolate(Default::default()),
         "stabilize": Operation::Stabilize(Default::default()),
         "color": Operation::Color(Default::default()),
+        "sharpen": Operation::Sharpen(Default::default()),
         "grain": Operation::Grain(Default::default()),
         "resize": Operation::Resize(Default::default()),
         "output": OutputSettings::default(),

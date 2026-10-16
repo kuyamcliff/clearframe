@@ -14,6 +14,7 @@ pub mod preview;
 pub mod queue;
 pub mod resources;
 pub mod storage;
+pub mod telemetry;
 pub mod updates;
 pub mod worker;
 

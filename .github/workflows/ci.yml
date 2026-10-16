@@ -97,6 +97,12 @@ jobs:
         run: cargo run -q --release -p clearframe-cli -- hardware --json | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('gpu_adapters', d.get('hardware', {}).get('gpu_adapters')), indent=1))"
       - name: GPU matches CPU for every architecture
         run: cargo test --release -p clearframe-inference --features gpu --test gpu_parity -- --nocapture --test-threads=1
+      # Every convolution split into 8-row bands and every dispatch in its own submission, as
+      # happens on slow laptop GPUs (keeps each piece of work under the Windows TDR limit).
+      - name: GPU matches CPU with short submissions
+        env:
+          CLIPFX_GPU_SUBMIT_MACS: "100000"
+        run: cargo test --release -p clearframe-inference --features gpu --test gpu_parity -- --test-threads=1
       - name: Real model on the GPU (Real-ESRGAN AnimeVideo v3)
         shell: bash
         run: |
@@ -105,6 +111,73 @@ jobs:
           weights=$(find "$root" -name '*.safetensors' | head -1)
           echo "weights: $weights"
           cargo run --release -p clearframe-inference --features gpu --example gpubench -- "$weights" 320 180
+
+  windows-e2e:
+    # Every built-in preset, start to finish, on Windows: on the DirectX 12 GPU path (Microsoft
+    # WARP, with work split into short submissions as on a laptop GPU) and on the CPU.
+    name: Windows presets end to end
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        shell: bash
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - name: FFmpeg
+        shell: pwsh
+        run: ./packaging/windows/fetch-ffmpeg.ps1
+      - name: Build the CLI
+        run: cargo build --release -p clearframe-cli
+      - name: Install every model
+        shell: bash
+        run: |
+          root="$RUNNER_TEMP/cfx"
+          for m in $(python -c "import json; print(' '.join(m['id'] for m in json.load(open('model-catalog/catalog.json'))['models']))"); do
+            target/release/clipfx.exe --data-root "$root" models install "$m"
+          done
+      - name: Every preset on the GPU (DirectX 12)
+        shell: bash
+        env:
+          CLIPFX_GPU_SUBMIT_MACS: "50000000"
+        run: |
+          export PATH="$PWD/apps/desktop/src-tauri/ffmpeg:$PATH"
+          tools/e2e-presets.sh target/release/clipfx.exe "$RUNNER_TEMP/cfx" gpu:0 0.25
+      # The GPU "fails" after a few submissions (as after a driver reset): exports must reopen the
+      # GPU or finish on the CPU instead of failing.
+      - name: GPU failure mid-export recovers
+        shell: bash
+        env:
+          CLIPFX_GPU_FAIL_AFTER: "3"
+          E2E_PRESETS: "anime-2x faces smooth-60 deblur"
+        run: |
+          export PATH="$PWD/apps/desktop/src-tauri/ffmpeg:$PATH"
+          tools/e2e-presets.sh target/release/clipfx.exe "$RUNNER_TEMP/cfx" gpu:0 0.25
+          grep -q "finished on the CPU" "$RUNNER_TEMP/cfx/e2e-gpu-0/anime-2x.log"
+      - name: Every preset on the CPU
+        shell: bash
+        run: |
+          export PATH="$PWD/apps/desktop/src-tauri/ffmpeg:$PATH"
+          tools/e2e-presets.sh target/release/clipfx.exe "$RUNNER_TEMP/cfx" cpu 0.25
+      # Real footage in the formats people bring (phone, DVD, web, editing, HDR, rotation,
+      # variable frame rate, odd sizes, several audio tracks, non-ASCII names), every model.
+      - name: Real videos in many formats, every model
+        shell: bash
+        env:
+          CORPUS_SECONDS: "0.5"
+          PYTHONUTF8: "1"
+        run: |
+          export PATH="$PWD/apps/desktop/src-tauri/ffmpeg:$PATH"
+          c="$RUNNER_TEMP/corpus"; mkdir -p "$c"
+          curl -sSfL -o "$c/src-sintel.mp4" https://download.blender.org/durian/trailer/sintel_trailer-480p.mp4
+          tools/real-corpus.sh "$c" "$c/src-sintel.mp4" "$c/src-sintel.mp4"
+          python tools/e2e-real.py target/release/clipfx.exe "$RUNNER_TEMP/cfx" "$c" "$RUNNER_TEMP/real-out" --quick --device cpu
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-video-report
+          path: |
+            ${{ runner.temp }}/real-out/report.md
+            ${{ runner.temp }}/real-out/*.log
 
   frontend:
     name: Frontend

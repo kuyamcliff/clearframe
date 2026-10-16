@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
 
@@ -51,15 +52,17 @@ export function NumberInput({ value, onChange, min, max, step = 1, id, label, su
 }
 
 /** Slider with an editable value on the right. `scale` maps stored values to displayed ones. */
-export function Range({ value, onChange, min, max, step = 1, label, scale = 1, disabled }: {
-  value: number; onChange: (v: number) => void; min: number; max: number; step?: number; label: string; scale?: number; disabled?: boolean;
+/** Slider with a typed value. Double-click the slider to return to `reset` (its neutral value). */
+export function Range({ value, onChange, min, max, step = 1, label, scale = 1, disabled, reset }: {
+  value: number; onChange: (v: number) => void; min: number; max: number; step?: number; label: string; scale?: number; disabled?: boolean; reset?: number;
 }) {
   const p = `${((value - min) / (max - min || 1)) * 100}%`;
   const digits = step * scale >= 1 ? 0 : step * scale >= 0.1 ? 1 : 2;
   return (
     <div className="range">
       <input type="range" min={min} max={max} step={step} value={value} disabled={disabled} aria-label={label} style={{ "--p": p } as CSSProperties}
-        onChange={(e) => onChange(Number(e.target.value))} />
+        title={reset !== undefined ? "Double-click to reset" : undefined}
+        onChange={(e) => onChange(Number(e.target.value))} onDoubleClick={() => reset !== undefined && !disabled && onChange(reset)} />
       <NumberInput className="v" label={`${label} value`} value={+(value * scale).toFixed(digits)} min={min * scale} max={max * scale} step={step * scale} disabled={disabled}
         onChange={(v) => onChange(v / scale)} />
     </div>
@@ -128,7 +131,9 @@ export function Menu({ at, items, onClose }: { at: { x: number; y: number }; ite
     const r = ref.current?.getBoundingClientRect();
     if (r) setPos({ x: Math.min(at.x, window.innerWidth - r.width - 8), y: Math.min(at.y, window.innerHeight - r.height - 8) });
   }, [at]);
-  return (
+  // Rendered at the top of the document so no ancestor (scrolling list, animated panel,
+  // stacking context) can clip, cover or move it.
+  return createPortal(
     <div className="menu" ref={ref} role="menu" style={{ left: pos.x, top: pos.y }} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
       {items.map((it, i) => (
         <span key={i}>
@@ -136,7 +141,8 @@ export function Menu({ at, items, onClose }: { at: { x: number; y: number }; ite
           <button role="menuitem" className={it.danger ? "danger" : ""} disabled={it.disabled} onClick={() => { onClose(); it.onClick(); }}>{it.label}</button>
         </span>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -166,7 +172,8 @@ export function Dialog({ title, onClose, children, footer, size, closeDisabled, 
     window.addEventListener("keydown", onKey, true);
     return () => { window.removeEventListener("keydown", onKey, true); prev?.focus?.(); };
   }, [onClose, closeDisabled]);
-  return (
+  // At the top of the document, above popovers and panels that may have opened it.
+  return createPortal(
     <div className="backdrop" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => { e.stopPropagation(); if (e.target === e.currentTarget && !closeDisabled) onClose(); }}>
       <div ref={ref} className={`dialog${size ? " " + size : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="dialog-h">
@@ -177,7 +184,8 @@ export function Dialog({ title, onClose, children, footer, size, closeDisabled, 
         <div className={`dialog-b${flush ? " flush" : ""}`}>{children}</div>
         {footer && <div className="dialog-f">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -222,4 +230,58 @@ export function useInterval(fn: () => void, ms: number, enabled = true) {
     const t = window.setInterval(() => saved.current(), ms);
     return () => window.clearInterval(t);
   }, [ms, enabled]);
+}
+
+/**
+ * Application menu bar (File, Edit, ...): a menu opens when the pointer rests on its title,
+ * moving along the bar switches menus, and the menu closes shortly after the pointer leaves
+ * both the bar and the menu. Clicking, Escape and arrow keys work as usual.
+ */
+export function MenuBar({ menus }: { menus: () => Record<string, MenuItem[]> }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const [at, setAt] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const timer = useRef<number | null>(null);
+  const btns = useRef<Record<string, HTMLButtonElement | null>>({});
+  const clear = () => { if (timer.current !== null) { window.clearTimeout(timer.current); timer.current = null; } };
+  const show = (k: string) => {
+    clear();
+    const r = btns.current[k]?.getBoundingClientRect();
+    if (r) setAt({ x: r.left, y: r.bottom + 2 });
+    setOpen(k);
+  };
+  const later = (f: () => void, ms: number) => { clear(); timer.current = window.setTimeout(f, ms); };
+  useEffect(() => clear, []);
+  const keys = Object.keys(menus());
+  const step = (d: number) => { if (open) show(keys[(keys.indexOf(open) + d + keys.length) % keys.length]); };
+  return (
+    <nav className="row menubar" style={{ gap: 0, padding: "0 6px" }} aria-label="Menu" onMouseLeave={() => open && later(() => setOpen(null), 300)}
+      onKeyDown={(e) => { if (e.key === "ArrowRight") step(1); if (e.key === "ArrowLeft") step(-1); }}>
+      {keys.map((k) => (
+        <button key={k} ref={(el) => { btns.current[k] = el; }} className="tb" aria-haspopup="menu" aria-expanded={open === k} aria-pressed={open === k}
+          onMouseEnter={() => (open ? show(k) : later(() => show(k), 120))}
+          onMouseLeave={() => { if (!open) clear(); }}
+          onClick={() => (open === k ? setOpen(null) : show(k))}>{k}</button>
+      ))}
+      {open && (
+        <HoverMenu at={at} items={menus()[open]} onClose={() => setOpen(null)} onEnter={clear} onLeave={() => later(() => setOpen(null), 300)} />
+      )}
+    </nav>
+  );
+}
+
+function HoverMenu({ at, items, onClose, onEnter, onLeave }: { at: { x: number; y: number }; items: MenuItem[]; onClose: () => void; onEnter: () => void; onLeave: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(ref, onClose);
+  return createPortal(
+    <div className="menu" ref={ref} role="menu" style={{ left: at.x, top: at.y }} onMouseEnter={onEnter} onMouseLeave={onLeave}
+      onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+      {items.map((it, i) => (
+        <span key={i}>
+          {it.sep && <hr />}
+          <button role="menuitem" className={it.danger ? "danger" : ""} disabled={it.disabled} onClick={() => { onClose(); it.onClick(); }}>{it.label}</button>
+        </span>
+      ))}
+    </div>,
+    document.body,
+  );
 }

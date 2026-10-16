@@ -33,6 +33,7 @@ function General({ s, patch }: { s: Settings; patch: Patch }) {
       <F label="Start dialog"><Check checked={!s.hide_start_dialog} onChange={(v) => patch((x) => ({ ...x, hide_start_dialog: !v }))} label="Show after opening a video" /></F>
       <div className="pref-h">Network</div>
       <F label="Updates"><Check checked={s.check_updates_on_launch} onChange={(v) => patch((x) => ({ ...x, check_updates_on_launch: v }))} label="Check for updates automatically" /></F>
+      <F label="Privacy"><Check checked={s.share_diagnostics} onChange={(v) => patch((x) => ({ ...x, share_diagnostics: v }))} label="Help improve ClipFX Enhance by sending its log (app activity, errors and speed; no file names or personal data)" /></F>
       <F label="Model catalog"><Check checked={s.allow_catalog_updates} onChange={(v) => patch((x) => ({ ...x, allow_catalog_updates: v }))} label="Allow signed updates" /></F>
     </div>
   );
@@ -332,8 +333,18 @@ function Advanced({ s, patch }: { s: Settings; patch: Patch }) {
 function Diagnostics() {
   const [redact, setRedact] = useState(true);
   const [text, setText] = useState<string | null>(null);
+  const [logPath, setLogPath] = useState<string | null>(null);
+  useEffect(() => { api.logPath().then(setLogPath).catch(() => setLogPath(null)); }, []);
   return (
     <div className="prefs">
+      <div className="pref-h">Activity log</div>
+      <F label="Log file">
+        <div className="row">
+          <span className="mono" style={{ wordBreak: "break-all" }}>{logPath ?? "…"}</span>
+          {logPath && <button className="btn ghost" onClick={() => api.openPath(logPath).catch(errorToast)}>Show</button>}
+        </div>
+      </F>
+      <p className="muted">Everything the app does is recorded here from the moment it opens: clicks, errors, crashes and performance. Send this file when reporting a problem. It never leaves your computer on its own.</p>
       <div className="pref-h">Report</div>
       <F label="Privacy"><Check checked={redact} onChange={setRedact} label="Hide paths and file names" /></F>
       <div className="row">
