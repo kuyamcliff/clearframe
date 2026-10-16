@@ -397,7 +397,8 @@ pub struct GConv {
     pub pad: u32,
     pub dilation: u32,
     pub groups: u32,
-    /// `true` when the fast 3×3 kernel applies; then `weight` is in its blocked layout.
+    /// `true` when a fast kernel applies (3×3 pad 1 or 1×1 pad 0, stride 1, no groups); then
+    /// `weight` is in the blocked layout.
     fast: bool,
     weight: wgpu::Buffer,
     bias: wgpu::Buffer,
@@ -409,11 +410,11 @@ impl GConv {
     /// `weight` is PyTorch layout [cout][cin/groups][k][k].
     #[allow(clippy::too_many_arguments)]
     pub fn new(gpu: &Gpu, weight: &[f32], bias: Option<&[f32]>, cout: u32, cin_g: u32, k: u32, stride: u32, pad: u32, dilation: u32, groups: u32) -> Self {
-        let fast = k == 3 && stride == 1 && pad == 1 && dilation == 1 && groups == 1;
+        let fast = ((k == 3 && pad == 1) || (k == 1 && pad == 0)) && stride == 1 && dilation == 1 && groups == 1;
         let w = if fast {
             // [ocb][ic][tap][8] so each thread reads 8 output channels as two vec4s.
             let ocb = cout.div_ceil(FAST_OCB) as usize;
-            let (cin, kk) = (cin_g as usize, 9usize);
+            let (cin, kk) = (cin_g as usize, (k * k) as usize);
             let mut out = vec![0f32; ocb * cin * kk * FAST_OCB as usize];
             for oc in 0..cout as usize {
                 let (b, j) = (oc / FAST_OCB as usize, oc % FAST_OCB as usize);
@@ -616,8 +617,10 @@ impl Recorder {
             let band = rows.min(oh - row0);
             p.e[3] = row0;
             let cost = macs_per_row * band as u64;
-            if conv.fast {
-                self.dispatch_cost("conv3x3", p, &[&xb, &wb, &bb, &ob, &rb, &sb], (ow.div_ceil(16), band.div_ceil(8), conv.cout.div_ceil(FAST_OCB)), cost);
+            if conv.fast && conv.k == 1 {
+                self.dispatch_cost("conv1x1", p, &[&xb, &wb, &bb, &ob, &rb, &sb], (ow.div_ceil(64), band.div_ceil(4), conv.cout.div_ceil(FAST_OCB)), cost);
+            } else if conv.fast {
+                self.dispatch_cost("conv3x3", p, &[&xb, &wb, &bb, &ob, &rb, &sb], (ow.div_ceil(64), band.div_ceil(8), conv.cout.div_ceil(FAST_OCB)), cost);
             } else {
                 self.dispatch_cost("conv", p, &[&xb, &wb, &bb, &ob, &rb, &sb], (ow.div_ceil(8), band.div_ceil(8), conv.cout), cost);
             }
@@ -1060,20 +1063,50 @@ fn main(@builtin(global_invocation_id) g: vec3<u32>) {
 @group(0) @binding(5) var<storage, read> res: array<f32>;
 @group(0) @binding(6) var<storage, read> slopes: array<f32>;
 
-const TW: u32 = 16u; const TH: u32 = 8u; const ICB: u32 = 8u;
-const SW: u32 = 18u; const SH: u32 = 10u;
-var<workgroup> tile: array<f32, 1440>; // ICB * SH * SW
+// Each thread computes 4 neighbouring pixels x 8 output channels, so every weight it loads
+// is used four times; input rows come from a shared tile.
+const TW: u32 = 64u; const TH: u32 = 8u; const ICB: u32 = 4u;
+const SW: u32 = 66u; const SH: u32 = 10u;
+var<workgroup> tile: array<f32, 2640>; // ICB * SH * SW
+
+fn finish(v0: f32, oc: u32, pix: u32, H: u32, W: u32) {
+  var v = v0 + bias[oc];
+  switch p.d.z {
+    case 1u: { v = max(v, 0.0); }
+    case 2u: { v = select(v * p.f.x, v, v >= 0.0); }
+    case 3u: { v = select(v * slopes[oc], v, v >= 0.0); }
+    default: {}
+  }
+  v = v * p.f.y;
+  if (p.d.w == 1u) { v += res[(p.e.y + oc) * H * W + pix] * p.f.z; }
+  outp[(p.b.z + oc) * H * W + pix] = v;
+}
+
+fn store(a: vec4<f32>, b: vec4<f32>, ox: u32, oy: u32, ocb: u32, H: u32, W: u32) {
+  if (ox >= W || oy >= H) { return; }
+  let pix = oy * W + ox;
+  let cout = p.b.w;
+  for (var j = 0u; j < 8u; j++) {
+    let oc = ocb * 8u + j;
+    if (oc >= cout) { break; }
+    var v: f32;
+    if (j < 4u) { v = a[j]; } else { v = b[j - 4u]; }
+    finish(v, oc, pix, H, W);
+  }
+}
 
 @compute @workgroup_size(16, 8, 1)
 fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) l: vec3<u32>, @builtin(local_invocation_index) li: u32) {
   let in_off = p.a.y; let cin = p.a.z; let H = p.a.w; let W = p.b.x;
-  let out_off = p.b.z; let cout = p.b.w;
   let ox0 = wg.x * TW; let oy0 = wg.y * TH + p.e.w;
-  let ox = ox0 + l.x; let oy = oy0 + l.y;
+  let lx = l.x * 4u;
   let ocb = wg.z;
-  var a0 = vec4<f32>(0.0); var a1 = vec4<f32>(0.0);
+  var a0 = vec4<f32>(0.0); var b0 = vec4<f32>(0.0);
+  var a1 = vec4<f32>(0.0); var b1 = vec4<f32>(0.0);
+  var a2 = vec4<f32>(0.0); var b2 = vec4<f32>(0.0);
+  var a3 = vec4<f32>(0.0); var b3 = vec4<f32>(0.0);
   for (var ic = 0u; ic < cin; ic += ICB) {
-    for (var i = li; i < ICB * SH * SW; i += TW * TH) {
+    for (var i = li; i < ICB * SH * SW; i += 128u) {
       let ci = i / (SH * SW); let r = i % (SH * SW);
       let gy = i32(oy0 + r / SW) - 1; let gx = i32(ox0 + r % SW) - 1;
       var v = 0.0;
@@ -1086,32 +1119,96 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) l: v
     let n = min(ICB, cin - ic);
     for (var ci = 0u; ci < n; ci++) {
       let base = ((ocb * cin + ic + ci) * 9u) * 2u;
-      for (var t = 0u; t < 9u; t++) {
-        let v = tile[ci * SH * SW + (l.y + t / 3u) * SW + l.x + t % 3u];
-        a0 += v * wt[base + t * 2u];
-        a1 += v * wt[base + t * 2u + 1u];
+      for (var ky = 0u; ky < 3u; ky++) {
+        let row = ci * SH * SW + (l.y + ky) * SW + lx;
+        let v0 = tile[row]; let v1 = tile[row + 1u]; let v2 = tile[row + 2u];
+        let v3 = tile[row + 3u]; let v4 = tile[row + 4u]; let v5 = tile[row + 5u];
+        let k = base + ky * 6u;
+        var wa = wt[k]; var wb = wt[k + 1u];
+        a0 += v0 * wa; b0 += v0 * wb; a1 += v1 * wa; b1 += v1 * wb;
+        a2 += v2 * wa; b2 += v2 * wb; a3 += v3 * wa; b3 += v3 * wb;
+        wa = wt[k + 2u]; wb = wt[k + 3u];
+        a0 += v1 * wa; b0 += v1 * wb; a1 += v2 * wa; b1 += v2 * wb;
+        a2 += v3 * wa; b2 += v3 * wb; a3 += v4 * wa; b3 += v4 * wb;
+        wa = wt[k + 4u]; wb = wt[k + 5u];
+        a0 += v2 * wa; b0 += v2 * wb; a1 += v3 * wa; b1 += v3 * wb;
+        a2 += v4 * wa; b2 += v4 * wb; a3 += v5 * wa; b3 += v5 * wb;
       }
     }
     workgroupBarrier();
   }
+  let oy = oy0 + l.y;
+  let ox = ox0 + lx;
+  store(a0, b0, ox, oy, ocb, H, W);
+  store(a1, b1, ox + 1u, oy, ocb, H, W);
+  store(a2, b2, ox + 2u, oy, ocb, H, W);
+  store(a3, b3, ox + 3u, oy, ocb, H, W);
+}
+"#,
+    ),
+    (
+        "conv1x1",
+        r#"
+@group(0) @binding(1) var<storage, read> inp: array<f32>;
+@group(0) @binding(2) var<storage, read> wt: array<vec4<f32>>;
+@group(0) @binding(3) var<storage, read> bias: array<f32>;
+@group(0) @binding(4) var<storage, read_write> outp: array<f32>;
+@group(0) @binding(5) var<storage, read> res: array<f32>;
+@group(0) @binding(6) var<storage, read> slopes: array<f32>;
+
+// Pointwise convolution: each thread computes 4 neighbouring pixels x 8 output channels, so
+// every weight it loads is used four times.
+fn finish(v0: f32, oc: u32, pix: u32, H: u32, W: u32) {
+  var v = v0 + bias[oc];
+  switch p.d.z {
+    case 1u: { v = max(v, 0.0); }
+    case 2u: { v = select(v * p.f.x, v, v >= 0.0); }
+    case 3u: { v = select(v * slopes[oc], v, v >= 0.0); }
+    default: {}
+  }
+  v = v * p.f.y;
+  if (p.d.w == 1u) { v += res[(p.e.y + oc) * H * W + pix] * p.f.z; }
+  outp[(p.b.z + oc) * H * W + pix] = v;
+}
+
+fn store(a: vec4<f32>, b: vec4<f32>, ox: u32, oy: u32, ocb: u32, H: u32, W: u32) {
   if (ox >= W || oy >= H) { return; }
   let pix = oy * W + ox;
   for (var j = 0u; j < 8u; j++) {
     let oc = ocb * 8u + j;
-    if (oc >= cout) { break; }
+    if (oc >= p.b.w) { break; }
     var v: f32;
-    if (j < 4u) { v = a0[j]; } else { v = a1[j - 4u]; }
-    v += bias[oc];
-    switch p.d.z {
-      case 1u: { v = max(v, 0.0); }
-      case 2u: { v = select(v * p.f.x, v, v >= 0.0); }
-      case 3u: { v = select(v * slopes[oc], v, v >= 0.0); }
-      default: {}
-    }
-    v = v * p.f.y;
-    if (p.d.w == 1u) { v += res[(p.e.y + oc) * H * W + pix] * p.f.z; }
-    outp[(out_off + oc) * H * W + pix] = v;
+    if (j < 4u) { v = a[j]; } else { v = b[j - 4u]; }
+    finish(v, oc, pix, H, W);
   }
+}
+
+@compute @workgroup_size(16, 4, 1)
+fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+  let in_off = p.a.y; let cin = p.a.z; let H = p.a.w; let W = p.b.x;
+  let ox = g.x * 4u; let oy = g.y + p.e.w; let ocb = g.z;
+  if (oy >= H || ox >= W) { return; }
+  var a0 = vec4<f32>(0.0); var b0 = vec4<f32>(0.0);
+  var a1 = vec4<f32>(0.0); var b1 = vec4<f32>(0.0);
+  var a2 = vec4<f32>(0.0); var b2 = vec4<f32>(0.0);
+  var a3 = vec4<f32>(0.0); var b3 = vec4<f32>(0.0);
+  let n = min(4u, W - ox);
+  for (var ic = 0u; ic < cin; ic++) {
+    let row = (in_off + ic) * H * W + oy * W + ox;
+    let v0 = inp[row];
+    var v1 = 0.0; var v2 = 0.0; var v3 = 0.0;
+    if (n > 1u) { v1 = inp[row + 1u]; }
+    if (n > 2u) { v2 = inp[row + 2u]; }
+    if (n > 3u) { v3 = inp[row + 3u]; }
+    let k = (ocb * cin + ic) * 2u;
+    let wa = wt[k]; let wb = wt[k + 1u];
+    a0 += v0 * wa; b0 += v0 * wb; a1 += v1 * wa; b1 += v1 * wb;
+    a2 += v2 * wa; b2 += v2 * wb; a3 += v3 * wa; b3 += v3 * wb;
+  }
+  store(a0, b0, ox, oy, ocb, H, W);
+  store(a1, b1, ox + 1u, oy, ocb, H, W);
+  store(a2, b2, ox + 2u, oy, ocb, H, W);
+  store(a3, b3, ox + 3u, oy, ocb, H, W);
 }
 "#,
     ),
