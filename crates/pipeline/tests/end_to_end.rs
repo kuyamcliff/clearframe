@@ -276,17 +276,19 @@ fn hdr_tonemap_and_sdr_to_hdr() {
 }
 
 #[test]
-fn hdr_without_10bit_is_rejected_before_rendering() {
+fn sdr_to_hdr_with_default_output_is_saved_in_ten_bit() {
+    // The default output is 8-bit H.264, which cannot hold HDR: it becomes HEVC 10-bit instead
+    // of the job being refused.
     let t = need_ffmpeg!();
     let d = tempfile::tempdir().unwrap();
     let src = clip(d.path(), "src.mp4", "", 1.0);
     let c = ColorSettings { mode: ColorMode::SdrToHdr, ..Default::default() };
-    let spec = job(d.path(), &src, Pipeline::single(Operation::Color(c)), OutputSettings::default(), "bad");
-    match run(&t, &spec) {
-        Err(JobError::Invalid(m)) => assert!(m.contains("10-bit"), "{m}"),
-        other => panic!("{other:?}"),
-    }
-    assert!(!spec.destination.exists());
+    let spec = job(d.path(), &src, Pipeline::single(Operation::Color(c)), OutputSettings::default(), "hdr");
+    let r = run(&t, &spec).unwrap();
+    let v = probe(&t, &r.output).unwrap().video.unwrap();
+    assert_eq!(v.codec, "hevc");
+    assert!(v.bit_depth >= 10);
+    assert_eq!(v.color.transfer.as_deref(), Some("smpte2084"));
 }
 
 #[test]
