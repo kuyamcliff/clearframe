@@ -3,14 +3,27 @@
 //! Every network the app uses (Real-ESRGAN compact and RRDB, FFDNet, DRUNet, NAFNet,
 //! RIFE, GFPGAN and RetinaFace) has a GPU implementation in [`nets`].
 //! Tensors are planar NCHW `f32` buffers with a batch of one. A forward pass is
-//! recorded into one compute pass and submitted once, and intermediate buffers
-//! come from a pool so the deep networks don't allocate per layer.
+//! recorded into compute passes, and intermediate buffers come from a pool so the deep
+//! networks don't allocate per layer.
+//!
+//! Short submissions: Windows resets the graphics driver (TDR) when one piece of GPU work runs
+//! for more than about two seconds, and laptop GPUs are slow enough to hit that with one large
+//! tile. So large convolutions are split into bands of rows, and work is submitted in pieces
+//! of about [`TARGET_SUBMIT_SECS`], sized from the measured speed of this GPU.
 
 pub mod nets;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::ThreadId;
+use std::time::{Duration, Instant};
+
+/// Aim for each GPU submission to take about this long (far below the ~2 s Windows TDR limit,
+/// with room for a speed estimate that is several times too high).
+pub const TARGET_SUBMIT_SECS: f64 = 0.15;
+/// Longest wait for one submission before the GPU is considered hung.
+const SUBMIT_TIMEOUT: Duration = Duration::from_secs(60);
 
 use wgpu::util::DeviceExt;
 
@@ -102,6 +115,10 @@ pub struct Gpu {
     turn_free: Condvar,
     /// Largest storage buffer binding, in bytes.
     pub max_binding: u64,
+    /// Measured throughput in multiply-adds per second; sizes submissions.
+    rate: AtomicU64,
+    /// Set when the driver reports the device lost (e.g. after a Windows TDR reset).
+    lost: Arc<AtomicBool>,
 }
 
 /// One thread's exclusive use of a [`Gpu`] while it records, submits and waits for a forward pass.
@@ -133,7 +150,11 @@ pub fn context(index: usize) -> Result<Arc<Gpu>, String> {
     let map = CONTEXTS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut map = map.lock().unwrap();
     if let Some(g) = map.get(&index) {
-        return Ok(g.clone());
+        if !g.is_lost() {
+            return Ok(g.clone());
+        }
+        log::warn!("GPU {} was reset by the driver; reopening it", g.info.name);
+        map.remove(&index);
     }
     let g = Arc::new(Gpu::new(index)?);
     map.insert(index, g.clone());
@@ -158,6 +179,20 @@ impl Gpu {
         // Errors are caught per forward pass with error scopes; anything that escapes is
         // logged instead of wgpu's default panic.
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU error: {e}")));
+        let lost = Arc::new(AtomicBool::new(false));
+        let flag = lost.clone();
+        let name = info.name.clone();
+        device.set_device_lost_callback(move |reason, msg| {
+            flag.store(true, Ordering::SeqCst);
+            log::error!("GPU {name} lost ({reason:?}): {msg}");
+        });
+        // Starting speed estimate until the first submissions are measured: deliberately low so
+        // the first pieces of work are short.
+        let rate = std::env::var("CLIPFX_GPU_RATE").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(match info.kind.as_str() {
+            "discrete" => 100e9,
+            "integrated" => 15e9,
+            _ => 2e9,
+        });
         let max_binding = al.max_storage_buffer_binding_size.min(al.max_buffer_size);
         let mut pipelines = HashMap::new();
         for (name, src) in KERNELS {
@@ -172,7 +207,64 @@ impl Gpu {
             });
             pipelines.insert(*name, p);
         }
-        Ok(Self { info, device, queue, pipelines, pool: Mutex::new(HashMap::new()), turn: Mutex::new((None, 0)), turn_free: Condvar::new(), max_binding })
+        Ok(Self {
+            info,
+            device,
+            queue,
+            pipelines,
+            pool: Mutex::new(HashMap::new()),
+            turn: Mutex::new((None, 0)),
+            turn_free: Condvar::new(),
+            max_binding,
+            rate: AtomicU64::new(rate as u64),
+            lost,
+        })
+    }
+
+    /// Whether the driver has reset or removed this device; a new context is needed.
+    pub fn is_lost(&self) -> bool {
+        self.lost.load(Ordering::SeqCst)
+    }
+
+    /// Multiply-adds that fit in one submission of about [`TARGET_SUBMIT_SECS`].
+    fn submit_budget(&self) -> u64 {
+        // Test hook: a fixed (tiny) budget exercises banding and intermediate submissions.
+        static FIXED: OnceLock<Option<u64>> = OnceLock::new();
+        if let Some(b) = *FIXED.get_or_init(|| std::env::var("CLIPFX_GPU_SUBMIT_MACS").ok().and_then(|v| v.parse().ok())) {
+            return b;
+        }
+        ((self.rate.load(Ordering::Relaxed) as f64 * TARGET_SUBMIT_SECS) as u64).max(20_000_000)
+    }
+
+    /// Update the speed estimate from one measured submission. Slower results are taken at
+    /// once (safety first); faster ones are blended in gradually.
+    fn record_speed(&self, macs: u64, secs: f64) {
+        if macs < 10_000_000 || secs <= 0.0 {
+            return;
+        }
+        let measured = macs as f64 / secs;
+        let old = self.rate.load(Ordering::Relaxed) as f64;
+        let new = if measured < old { measured } else { old * 0.7 + measured * 0.3 };
+        self.rate.store(new.clamp(1e8, 1e14) as u64, Ordering::Relaxed);
+    }
+
+    /// Error text for a submission that did not complete.
+    fn describe_failure(&self, e: &str) -> String {
+        // The lost-device callback can run during the poll that failed.
+        // A submission that never ran ("not returned by a successful submission") also means
+        // the device is no longer usable.
+        let l = e.to_ascii_lowercase();
+        if self.is_lost() || l.contains("lost") || l.contains("successful submission") {
+            self.lost.store(true, Ordering::SeqCst);
+            format!("GPU was reset by the driver: {e}")
+        } else {
+            format!("GPU did not finish: {e}")
+        }
+    }
+
+    /// Current speed estimate in multiply-adds per second (for logs and tests).
+    pub fn speed_estimate(&self) -> f64 {
+        self.rate.load(Ordering::Relaxed) as f64
     }
 
     /// Upload a read-only parameter array (weights, biases, slopes).
@@ -358,6 +450,10 @@ pub struct Recorder {
     scopes: Vec<(wgpu::ErrorScopeGuard, &'static str)>,
     /// Whether any kernel has been recorded (uploads after that must be ordered copies, see `upload`).
     recorded: bool,
+    /// Estimated multiply-adds recorded since the last submission.
+    pending: u64,
+    /// First error from an intermediate submission; reported by `finish_*`.
+    failed: Option<String>,
     /// Held until the recorder is finished or dropped (declared last so it is released last).
     _turn: GpuTurn,
 }
@@ -382,13 +478,44 @@ impl Params {
 impl Recorder {
     pub fn new(gpu: &Arc<Gpu>) -> Self {
         let turn = gpu.turn();
-        let scopes = vec![
-            (gpu.device.push_error_scope(wgpu::ErrorFilter::Validation), "GPU validation error"),
-            (gpu.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory), "GPU out of memory"),
-        ];
+        let scopes = Self::push_scopes(gpu);
         let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("clipfx-forward") });
         let pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None, timestamp_writes: None }).forget_lifetime();
-        Self { gpu: gpu.clone(), encoder, pass: Some(pass), dummy: gpu.constant(&[0.0]), scopes, recorded: false, _turn: turn }
+        Self { gpu: gpu.clone(), encoder, pass: Some(pass), dummy: gpu.constant(&[0.0]), scopes, recorded: false, pending: 0, failed: None, _turn: turn }
+    }
+
+    fn push_scopes(gpu: &Gpu) -> Vec<(wgpu::ErrorScopeGuard, &'static str)> {
+        vec![
+            (gpu.device.push_error_scope(wgpu::ErrorFilter::Validation), "GPU validation error"),
+            (gpu.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory), "GPU out of memory"),
+        ]
+    }
+
+    /// Submit what has been recorded so far, wait for it, and continue in a new command buffer.
+    /// Keeps each piece of GPU work short and measures the GPU's speed.
+    fn flush(&mut self) {
+        if self.failed.is_some() || self.pending == 0 {
+            return;
+        }
+        drop(self.pass.take());
+        let next = self.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("clipfx-forward") });
+        let enc = std::mem::replace(&mut self.encoder, next);
+        let started = Instant::now();
+        let idx = self.gpu.queue.submit([enc.finish()]);
+        for (scope, what) in self.scopes.drain(..).rev() {
+            if let Some(e) = pollster::block_on(scope.pop()) {
+                self.failed.get_or_insert_with(|| format!("{what}: {e}"));
+            }
+        }
+        self.scopes = Self::push_scopes(&self.gpu);
+        if self.failed.is_none() {
+            match self.gpu.device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: Some(SUBMIT_TIMEOUT) }) {
+                Ok(_) => self.gpu.record_speed(self.pending, started.elapsed().as_secs_f64()),
+                Err(e) => self.failed = Some(self.gpu.describe_failure(&e.to_string())),
+            }
+        }
+        self.pending = 0;
+        self.pass = Some(self.encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None, timestamp_writes: None }).forget_lifetime());
     }
 
     pub fn gpu(&self) -> &Arc<Gpu> {
@@ -396,6 +523,24 @@ impl Recorder {
     }
 
     fn dispatch(&mut self, kernel: &str, p: Params, bufs: &[&wgpu::Buffer], groups: (u32, u32, u32)) {
+        // Light kernels (element-wise, resampling, pooling): a nominal cost per thread.
+        let cost = groups.0.max(1) as u64 * groups.1.max(1) as u64 * groups.2.max(1) as u64 * 256 * 16;
+        self.dispatch_cost(kernel, p, bufs, groups, cost);
+    }
+
+    /// Record a dispatch estimated at `cost` multiply-adds, submitting earlier work first when
+    /// adding this one would make the submission too long.
+    fn dispatch_cost(&mut self, kernel: &str, p: Params, bufs: &[&wgpu::Buffer], groups: (u32, u32, u32), cost: u64) {
+        if self.failed.is_some() {
+            return;
+        }
+        if self.pending > 0 && self.pending + cost > self.gpu.submit_budget() {
+            self.flush();
+            if self.failed.is_some() {
+                return;
+            }
+        }
+        self.pending += cost;
         let pipe = &self.gpu.pipelines[kernel];
         let ub = self.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::bytes_of(&p), usage: wgpu::BufferUsages::UNIFORM });
         let mut entries = vec![wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() }];
@@ -461,10 +606,22 @@ impl Recorder {
         let (xb, ob) = (x.t.buf(), out.t.buf());
         // Clone the handles so `dispatch` can borrow `self` mutably.
         let (xb, wb, bb, ob, rb, sb) = (xb.clone(), wb.clone(), bb.clone(), ob.clone(), res_buf.clone(), slopes.clone());
-        if conv.fast {
-            self.dispatch("conv3x3", p, &[&xb, &wb, &bb, &ob, &rb, &sb], (ow.div_ceil(16), oh.div_ceil(8), conv.cout.div_ceil(FAST_OCB)));
-        } else {
-            self.dispatch("conv", p, &[&xb, &wb, &bb, &ob, &rb, &sb], (ow.div_ceil(8), oh.div_ceil(8), conv.cout));
+        // A large convolution is split into bands of rows (multiples of 8, the kernels' tile
+        // height) so no single dispatch runs long enough to trip the driver watchdog.
+        let macs_per_row = ow as u64 * conv.cout as u64 * (conv.cin / conv.groups) as u64 * (conv.k * conv.k) as u64;
+        let budget = self.gpu.submit_budget();
+        let rows = if macs_per_row * oh as u64 <= budget { oh } else { ((budget / macs_per_row.max(1)) as u32 / 8 * 8).max(8) };
+        let mut row0 = 0;
+        while row0 < oh {
+            let band = rows.min(oh - row0);
+            p.e[3] = row0;
+            let cost = macs_per_row * band as u64;
+            if conv.fast {
+                self.dispatch_cost("conv3x3", p, &[&xb, &wb, &bb, &ob, &rb, &sb], (ow.div_ceil(16), band.div_ceil(8), conv.cout.div_ceil(FAST_OCB)), cost);
+            } else {
+                self.dispatch_cost("conv", p, &[&xb, &wb, &bb, &ob, &rb, &sb], (ow.div_ceil(8), band.div_ceil(8), conv.cout), cost);
+            }
+            row0 += band;
         }
     }
 
@@ -753,6 +910,9 @@ impl Recorder {
     /// Finish recording, run everything and read back several tensors (planar data, in order).
     pub fn finish_read_many(mut self, ts: &[&GTensor]) -> Result<Vec<Vec<f32>>, String> {
         drop(self.pass.take());
+        if let Some(e) = self.failed.take() {
+            return Err(e);
+        }
         let stagings: Vec<(wgpu::Buffer, u64)> = ts
             .iter()
             .map(|t| {
@@ -781,7 +941,9 @@ impl Recorder {
             });
             rxs.push(rx);
         }
-        self.gpu.device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: None }).map_err(|e| format!("GPU did not finish: {e}"))?;
+        let started = Instant::now();
+        self.gpu.device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: Some(SUBMIT_TIMEOUT) }).map_err(|e| self.gpu.describe_failure(&e.to_string()))?;
+        self.gpu.record_speed(self.pending, started.elapsed().as_secs_f64());
         let mut out = Vec::new();
         for ((st, _), rx) in stagings.iter().zip(rxs) {
             rx.recv().map_err(|_| "GPU readback was cancelled".to_string())?.map_err(|e| format!("GPU readback failed: {e}"))?;
@@ -798,6 +960,9 @@ impl Recorder {
     /// Finish recording, run everything and read back `t` as planar data.
     pub fn finish_read(mut self, t: &GTensor) -> Result<Vec<f32>, String> {
         drop(self.pass.take());
+        if let Some(e) = self.failed.take() {
+            return Err(e);
+        }
         let bytes = t.c as u64 * t.hw() as u64 * 4;
         let staging = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("readback"),
@@ -818,7 +983,9 @@ impl Recorder {
         slice.map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
         });
-        self.gpu.device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: None }).map_err(|e| format!("GPU did not finish: {e}"))?;
+        let started = Instant::now();
+        self.gpu.device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: Some(SUBMIT_TIMEOUT) }).map_err(|e| self.gpu.describe_failure(&e.to_string()))?;
+        self.gpu.record_speed(self.pending, started.elapsed().as_secs_f64());
         rx.recv().map_err(|_| "GPU readback was cancelled".to_string())?.map_err(|e| format!("GPU readback failed: {e}"))?;
         let data = {
             let view = slice.get_mapped_range().map_err(|e| format!("GPU readback failed: {e:?}"))?;
@@ -852,7 +1019,7 @@ fn main(@builtin(global_invocation_id) g: vec3<u32>) {
   let out_off = p.b.z; let cout = p.b.w;
   let k = p.c.x; let stride = p.c.y; let pad = p.c.z; let groups = p.c.w;
   let OH = p.d.x; let OW = p.d.y; let dil = p.e.z;
-  let ox = g.x; let oy = g.y; let oc = g.z;
+  let ox = g.x; let oy = g.y + p.e.w; let oc = g.z;
   if (ox >= OW || oy >= OH || oc >= cout) { return; }
   let cin_g = cin / groups; let cout_g = cout / groups;
   let grp = oc / cout_g;
@@ -901,7 +1068,7 @@ var<workgroup> tile: array<f32, 1440>; // ICB * SH * SW
 fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) l: vec3<u32>, @builtin(local_invocation_index) li: u32) {
   let in_off = p.a.y; let cin = p.a.z; let H = p.a.w; let W = p.b.x;
   let out_off = p.b.z; let cout = p.b.w;
-  let ox0 = wg.x * TW; let oy0 = wg.y * TH;
+  let ox0 = wg.x * TW; let oy0 = wg.y * TH + p.e.w;
   let ox = ox0 + l.x; let oy = oy0 + l.y;
   let ocb = wg.z;
   var a0 = vec4<f32>(0.0); var a1 = vec4<f32>(0.0);

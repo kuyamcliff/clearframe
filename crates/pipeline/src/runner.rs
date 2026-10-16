@@ -163,7 +163,9 @@ pub struct Compute {
 
 /// Resolve the compute device from job resources ("auto", "cpu", "gpu:N", "cuda:N", "metal:N").
 pub fn select_compute(res: &JobResources, engine: &EngineSettings) -> std::result::Result<Compute, String> {
-    let d = res.device.trim().to_ascii_lowercase();
+    // CLIPFX_DEVICE overrides the setting (support and automated tests, e.g. "gpu:0" to use a
+    // software GPU that is never chosen automatically).
+    let d = std::env::var("CLIPFX_DEVICE").unwrap_or_else(|_| res.device.clone()).trim().to_ascii_lowercase();
     let parse = |p: &str| d.strip_prefix(p).and_then(|n| n.parse::<usize>().ok());
     let plain = |kind: BackendKind, device| Compute { kind, device, gpu: None, label: kind.label().to_string() };
     if d == "cpu" {
