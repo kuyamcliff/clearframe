@@ -579,3 +579,17 @@ fn interlaced_source_is_deinterlaced_automatically() {
     let out = probe(&t, &r.output).unwrap();
     assert!(!out.video.as_ref().unwrap().is_interlaced_flagged(), "output must be progressive");
 }
+
+#[test]
+fn odd_sized_source_is_trimmed_to_even() {
+    let t = need_ffmpeg!();
+    let d = tempfile::tempdir().unwrap();
+    let src = d.path().join("odd.mkv");
+    ffmpeg(&["-f", "lavfi", "-t", "0.5", "-i", "testsrc2=size=321x241:rate=24", "-c:v", "ffv1", src.to_str().unwrap()]);
+    for (name, op) in [("grain", Operation::Grain(GrainSettings::default())), ("color", Operation::Color(ColorSettings { exposure: 0.3, ..Default::default() }))] {
+        let p = Pipeline { stages: vec![Stage::new(op)] };
+        let r = run(&t, &job(d.path(), &src, p, OutputSettings::default(), name)).unwrap();
+        let v = probe(&t, &r.output).unwrap().video.unwrap();
+        assert_eq!((v.width, v.height), (320, 240), "{name}");
+    }
+}

@@ -131,6 +131,19 @@ fn f(v: &Value, k: &str) -> Option<f64> {
 fn u(v: &Value, k: &str) -> Option<u64> {
     v.get(k).and_then(|x| x.as_str().and_then(|s| s.parse().ok()).or_else(|| x.as_u64()))
 }
+/// Stream duration: the `duration` field, or Matroska's `DURATION` tag ("HH:MM:SS.fraction"),
+/// which is the only per-stream length MKV/WebM files carry.
+fn stream_duration(st: &Value) -> Option<f64> {
+    f(st, "duration").filter(|d| *d > 0.0).or_else(|| {
+        let t = tag(st, "DURATION")?;
+        let mut parts = t.trim().split(':').rev();
+        let secs: f64 = parts.next()?.parse().ok()?;
+        let mins: f64 = parts.next().unwrap_or("0").parse().ok()?;
+        let hours: f64 = parts.next().unwrap_or("0").parse().ok()?;
+        Some(hours * 3600.0 + mins * 60.0 + secs).filter(|d| *d > 0.0)
+    })
+}
+
 fn tag(v: &Value, k: &str) -> Option<String> {
     v.get("tags").and_then(|t| t.as_object().and_then(|o| o.iter().find(|(kk, _)| kk.eq_ignore_ascii_case(k)).and_then(|(_, vv)| vv.as_str().map(String::from))))
 }
@@ -217,7 +230,7 @@ pub fn parse_probe_json(path: &str, json: &str, first_frame_json: Option<&str>) 
                     field_order: s(st, "field_order"),
                     rotation,
                     start_time: f(st, "start_time").unwrap_or(0.0),
-                    duration: f(st, "duration"),
+                    duration: stream_duration(st),
                     bit_rate: u(st, "bit_rate"),
                     color,
                 });
@@ -435,6 +448,18 @@ mod tests {
         let j = r#"{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","width":8,"height":8,"pix_fmt":"yuv420p",
             "r_frame_rate":"60/1","avg_frame_rate":"2997/100"}],"format":{"duration":"1"}}"#;
         assert!(parse_probe_json("x", j, None).unwrap().video.unwrap().variable_frame_rate);
+    }
+
+    #[test]
+    fn matroska_stream_duration_tag_wins_over_container() {
+        // A subtitle running past the video makes the container longer than the video.
+        let j = r#"{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","width":8,"height":8,"pix_fmt":"yuv420p",
+            "r_frame_rate":"24/1","avg_frame_rate":"24/1","tags":{"DURATION":"00:00:00.500000000"}},
+            {"index":1,"codec_type":"subtitle","codec_name":"subrip","tags":{"DURATION":"00:00:00.800000000"}}],"format":{"duration":"0.8"}}"#;
+        let m = parse_probe_json("x.mkv", j, None).unwrap();
+        assert_eq!(m.video.unwrap().duration, Some(0.5));
+        let j2 = j.replace("00:00:00.500000000", "01:02:03.250000000");
+        assert_eq!(parse_probe_json("x.mkv", &j2, None).unwrap().video.unwrap().duration, Some(3723.25));
     }
 
     #[test]

@@ -745,22 +745,33 @@ pub fn plan(
             None,
         );
     }
+    // Subsampled formats need even sizes: trim the last pixel column or row instead of refusing.
+    let mut even_crop = None;
     if (output.video.pix_fmt.contains("420") || output.video.pix_fmt.contains("422") || output.video.pix_fmt == "nv12" || output.video.pix_fmt == "p010le")
         && (!cur.width.is_multiple_of(2) || !cur.height.is_multiple_of(2))
     {
+        let (w, h) = (cur.width & !1, cur.height & !1);
         issue(
             &mut issues,
-            Severity::Error,
+            Severity::Info,
             None,
-            format!("{}x{} has odd dimensions, which {} cannot encode. Add a Resize step.", cur.width, cur.height, output.video.pix_fmt),
+            format!("{}x{} has an odd size, which {} cannot store; the output is trimmed to {w}x{h}.", cur.width, cur.height, output.video.pix_fmt),
             None,
         );
+        even_crop = Some(format!("crop={w}:{h}:0:0"));
+        cur.width = w;
+        cur.height = h;
     }
     if cur.width > 16384 || cur.height > 16384 {
         issue(&mut issues, Severity::Error, None, format!("Output size {}x{} exceeds supported limits.", cur.width, cur.height), None);
     }
 
-    let passes = build_passes(&stages, &input);
+    let mut passes = build_passes(&stages, &input);
+    if let (Some(c), Some(last)) = (even_crop, passes.last_mut()) {
+        last.encode_filters.push(c);
+        last.output.width = cur.width;
+        last.output.height = cur.height;
+    }
     let output_duration = input_duration * cur.time_scale;
     let input_frames = (input_duration * input.fps.as_f64()).round() as u64;
     let output_frames = (output_duration * cur.fps.as_f64()).round() as u64;
