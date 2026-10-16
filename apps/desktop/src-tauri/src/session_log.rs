@@ -87,7 +87,7 @@ impl EventLogger {
         match e {
             AppEvent::JobUpdated { job } => {
                 if self.seen_jobs.lock().insert(job.id.clone()) {
-                    log::info!("job {} '{}' ({:?}): {} -> {}", job.id, job.name, job.kind, job.source, job.destination);
+                    log::info!("job {} ({:?}): {} -> {}", job.id, job.kind, job.source, job.destination);
                     log::debug!("job {} spec: {}", job.id, trunc(&job.spec_json, 8000));
                 }
                 let level = if job.error.is_some() { log::Level::Error } else { log::Level::Info };

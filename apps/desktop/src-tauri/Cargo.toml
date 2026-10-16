@@ -42,3 +42,6 @@ clearframe-inference = { workspace = true, features = ["gpu"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }

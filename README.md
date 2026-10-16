@@ -69,6 +69,14 @@ The `.deb` (Debian, Ubuntu, Mint) and `.rpm` (Fedora, openSUSE) packages install
 > [!NOTE]
 > Every AI model (upscaling, denoising, deblurring, frame interpolation, face detection and face restoration) runs on your GPU (NVIDIA, AMD, Intel or Apple, through Vulkan, DirectX 12 or Metal). Without a GPU, AI processing is slow. See [known limitations](docs/limitations.md).
 
+## Privacy
+
+Your videos never leave your computer. To find and fix problems in later versions, ClipFX Enhance
+sends its own activity log: startup, errors and crashes, the settings and speed of each export,
+and your hardware (CPU, memory, GPU). File paths, file names and your user name are removed
+first. Logs collected while offline are sent when you are back online. Turn this off in
+**Preferences → General → Privacy**.
+
 ## Build from source
 
 ```sh

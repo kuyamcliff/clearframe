@@ -33,6 +33,7 @@ function General({ s, patch }: { s: Settings; patch: Patch }) {
       <F label="Start dialog"><Check checked={!s.hide_start_dialog} onChange={(v) => patch((x) => ({ ...x, hide_start_dialog: !v }))} label="Show after opening a video" /></F>
       <div className="pref-h">Network</div>
       <F label="Updates"><Check checked={s.check_updates_on_launch} onChange={(v) => patch((x) => ({ ...x, check_updates_on_launch: v }))} label="Check for updates automatically" /></F>
+      <F label="Privacy"><Check checked={s.share_diagnostics} onChange={(v) => patch((x) => ({ ...x, share_diagnostics: v }))} label="Help improve ClipFX Enhance by sending its log (app activity, errors and speed; no file names or personal data)" /></F>
       <F label="Model catalog"><Check checked={s.allow_catalog_updates} onChange={(v) => patch((x) => ({ ...x, allow_catalog_updates: v }))} label="Allow signed updates" /></F>
     </div>
   );

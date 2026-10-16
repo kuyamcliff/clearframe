@@ -773,11 +773,13 @@ dependencies = [
  "clearframe-pipeline",
  "crossbeam-channel",
  "dirs 5.0.1",
+ "flate2",
  "hex",
  "libc",
  "log",
  "parking_lot",
  "rayon",
+ "regex",
  "serde",
  "serde_json",
  "sha2",
@@ -848,6 +850,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-single-instance",
  "tempfile",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

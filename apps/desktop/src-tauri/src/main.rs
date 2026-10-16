@@ -155,6 +155,7 @@ fn main() {
             session_log::state_details(&state);
             session_log::background_details(state.clone());
             session_log::start_perf_sampler(app.handle().clone(), state.clone());
+            clearframe_app::telemetry::start(state.clone());
             if let Err(err) = media_server::start() {
                 log::warn!("media server failed to start: {err}");
             }
@@ -182,9 +183,28 @@ fn main() {
         .unwrap_or_else(|e| {
             log::error!("ClipFX Enhance could not run: {e:#}");
             log::logger().flush();
-            panic!("error while running ClipFX Enhance: {e}");
+            fatal_message();
+            std::process::exit(1);
         });
     log::info!("ClipFX Enhance closed after {:.0} s", started.elapsed().as_secs_f64());
+}
+
+/// A window could not be created (missing or broken WebView2, graphics driver, permissions):
+/// tell the user in plain words where the details are, instead of silently exiting.
+fn fatal_message() {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+        let log = clearframe_app::logging::default_session_log_path();
+        let text = format!(
+            "ClipFX Enhance could not open its window.\n\nRestarting the computer or reinstalling ClipFX Enhance usually fixes this. Details were saved to:\n{}",
+            log.display()
+        );
+        let w = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let (t, c) = (w(&text), w("ClipFX Enhance"));
+        // SAFETY: both strings are NUL-terminated UTF-16 buffers alive for the call.
+        unsafe { MessageBoxW(std::ptr::null_mut(), t.as_ptr(), c.as_ptr(), MB_OK | MB_ICONERROR) };
+    }
 }
 
 fn bundled_dirs() -> Vec<std::path::PathBuf> {

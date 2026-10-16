@@ -33,6 +33,8 @@ ureq.workspace = true
 dirs.workspace = true
 sysinfo.workspace = true
 rayon.workspace = true
+flate2.workspace = true
+regex.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
