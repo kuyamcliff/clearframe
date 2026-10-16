@@ -231,3 +231,57 @@ export function useInterval(fn: () => void, ms: number, enabled = true) {
     return () => window.clearInterval(t);
   }, [ms, enabled]);
 }
+
+/**
+ * Application menu bar (File, Edit, ...): a menu opens when the pointer rests on its title,
+ * moving along the bar switches menus, and the menu closes shortly after the pointer leaves
+ * both the bar and the menu. Clicking, Escape and arrow keys work as usual.
+ */
+export function MenuBar({ menus }: { menus: () => Record<string, MenuItem[]> }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const [at, setAt] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const timer = useRef<number | null>(null);
+  const btns = useRef<Record<string, HTMLButtonElement | null>>({});
+  const clear = () => { if (timer.current !== null) { window.clearTimeout(timer.current); timer.current = null; } };
+  const show = (k: string) => {
+    clear();
+    const r = btns.current[k]?.getBoundingClientRect();
+    if (r) setAt({ x: r.left, y: r.bottom + 2 });
+    setOpen(k);
+  };
+  const later = (f: () => void, ms: number) => { clear(); timer.current = window.setTimeout(f, ms); };
+  useEffect(() => clear, []);
+  const keys = Object.keys(menus());
+  const step = (d: number) => { if (open) show(keys[(keys.indexOf(open) + d + keys.length) % keys.length]); };
+  return (
+    <nav className="row menubar" style={{ gap: 0, padding: "0 6px" }} aria-label="Menu" onMouseLeave={() => open && later(() => setOpen(null), 300)}
+      onKeyDown={(e) => { if (e.key === "ArrowRight") step(1); if (e.key === "ArrowLeft") step(-1); }}>
+      {keys.map((k) => (
+        <button key={k} ref={(el) => { btns.current[k] = el; }} className="tb" aria-haspopup="menu" aria-expanded={open === k} aria-pressed={open === k}
+          onMouseEnter={() => (open ? show(k) : later(() => show(k), 120))}
+          onMouseLeave={() => { if (!open) clear(); }}
+          onClick={() => (open === k ? setOpen(null) : show(k))}>{k}</button>
+      ))}
+      {open && (
+        <HoverMenu at={at} items={menus()[open]} onClose={() => setOpen(null)} onEnter={clear} onLeave={() => later(() => setOpen(null), 300)} />
+      )}
+    </nav>
+  );
+}
+
+function HoverMenu({ at, items, onClose, onEnter, onLeave }: { at: { x: number; y: number }; items: MenuItem[]; onClose: () => void; onEnter: () => void; onLeave: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(ref, onClose);
+  return createPortal(
+    <div className="menu" ref={ref} role="menu" style={{ left: at.x, top: at.y }} onMouseEnter={onEnter} onMouseLeave={onLeave}
+      onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+      {items.map((it, i) => (
+        <span key={i}>
+          {it.sep && <hr />}
+          <button role="menuitem" className={it.danger ? "danger" : ""} disabled={it.disabled} onClick={() => { onClose(); it.onClick(); }}>{it.label}</button>
+        </span>
+      ))}
+    </div>,
+    document.body,
+  );
+}

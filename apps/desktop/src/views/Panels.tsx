@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type PointerEvent as RPointerEvent, type 
 import { FileVideo, FolderOpen, Layers, MoreHorizontal, Pause, Play, Plus, RotateCcw, ScrollText, Square, Trash2, X } from "lucide-react";
 
 import { Confirm, Progress, useMenu } from "../components/ui";
+import { friendlyError, type Friendly } from "../lib/errors";
 import { api, fileUrl, pickFile, VIDEO_EXTENSIONS } from "../lib/ipc";
 import { basename, duration, eta, mb } from "../lib/format";
 import type { JobEvent, JobRecord, JobState } from "../lib/types";
@@ -136,31 +137,17 @@ function JobRow({ j }: { j: JobRecord }) {
   );
 }
 
-/** A failed job's error: what happened in plain words, what to do, and the full text on request. */
-export function explainError(m: string): { title: string; hint?: string } {
-  const l = m.toLowerCase();
-  if (l.includes("reset by the driver") || l.includes("did not finish") || l.includes("successful submission") || l.includes("device lost"))
-    return { title: "The graphics driver stopped responding.", hint: "Retry: the app now splits work into short pieces and falls back to the CPU. If it keeps happening, update your graphics driver or choose the CPU in Preferences → Performance." };
-  if (l.includes("out of memory") || l.includes("failed to allocate") || l.includes("insufficient memory"))
-    return { title: "Ran out of memory.", hint: "Lower the memory limit or tile size in Preferences → Performance, close other apps, or use a smaller output size." };
-  if (l.includes("missing or damaged") || l.includes("not installed"))
-    return { title: "A model this export needs is missing or damaged.", hint: "Open Help → Models and repair or install it, then retry." };
-  if (l.includes("no space") || l.includes("disk space") || l.includes("not enough space"))
-    return { title: "Not enough disk space.", hint: "Free some space or choose another export folder, then retry." };
-  if (l.includes("ffmpeg"))
-    return { title: "FFmpeg could not process this video.", hint: "Check that the file plays in another player. Details below." };
-  return { title: m.split("\n")[0].slice(0, 200) };
+/** A failed job's error in plain words, with the next step; full text in the log. */
+export function explainError(m: string): Friendly {
+  return friendlyError(m);
 }
 
 function JobError({ message }: { message: string }) {
-  const [open, setOpen] = useState(false);
   const { title, hint } = explainError(message);
-  const more = message.length > title.length + 2;
   return (
     <div className="job-err">
-      <div className="err">{title}{more && <button className="link" onClick={() => setOpen(!open)}>{open ? "Hide details" : "Details"}</button>}</div>
+      <div className="err">{title}</div>
       {hint && <div className="muted">{hint}</div>}
-      {open && <div className="log selectable">{message}</div>}
     </div>
   );
 }
