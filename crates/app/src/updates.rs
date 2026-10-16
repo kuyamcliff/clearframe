@@ -57,6 +57,10 @@ pub struct UpdateManifest {
     /// Release page, for platforms without an in-app package.
     #[serde(default)]
     pub page: String,
+    /// When not empty, the release is only for these platform keys; other platforms are not
+    /// told about it (a Windows-only fix should not prompt macOS or Linux users).
+    #[serde(default)]
+    pub platforms: Vec<String>,
     pub packages: std::collections::BTreeMap<String, UpdatePackage>,
 }
 
@@ -129,7 +133,8 @@ impl App {
         let current = env!("CARGO_PKG_VERSION").to_string();
         if let Ok(m) = self.fetch_manifest() {
             let pkg = m.packages.get(platform_key());
-            let newer = version_tuple(&m.version) > version_tuple(&current);
+            let for_us = m.platforms.is_empty() || m.platforms.iter().any(|p| platform_key().starts_with(p.as_str()));
+            let newer = for_us && version_tuple(&m.version) > version_tuple(&current);
             let downloaded = newer && pkg.is_some_and(|p| self.updates_dir().join(file_name(p)).is_file());
             return Ok(UpdateInfo {
                 newer,
