@@ -25,8 +25,8 @@ pub const ENDPOINT: Option<&str> = option_env!("CLIPFX_DIAGNOSTICS_URL");
 
 /// Largest piece of log sent in one report (the newest part is kept if there is more).
 const MAX_CHUNK: u64 = 4 << 20;
-/// How often to look for new log data once caught up.
-const INTERVAL: Duration = Duration::from_secs(10 * 60);
+/// How often to send new log data once caught up (each report becomes one email).
+const INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct State {
