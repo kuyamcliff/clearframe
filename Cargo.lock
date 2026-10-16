@@ -761,7 +761,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "clearframe-app"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -793,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-cli"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -810,7 +810,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-core"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -830,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-desktop"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "clearframe-app",
@@ -855,7 +855,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-hardware"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "clearframe-inference",
  "log",
@@ -866,7 +866,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-inference"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "bytemuck",
  "candle-core",
@@ -884,7 +884,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-media"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "crossbeam-channel",
  "log",
@@ -897,7 +897,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-models"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -920,7 +920,7 @@ dependencies = [
 
 [[package]]
 name = "clearframe-pipeline"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "chrono",
