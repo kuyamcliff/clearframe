@@ -3,7 +3,6 @@ import { create } from "zustand";
 import { api, notify, onEvent, type CodecEntry, type HardwareReport, type OperationDefaults } from "../lib/ipc";
 import { basename } from "../lib/format";
 import { uiLog } from "../lib/activity";
-import { friendlyError } from "../lib/errors";
 import { addStageCanonical } from "../lib/ops";
 import type {
   AppEvent, AppInfo, ClipPreview, OperationType, EngineSettings, InstallProgress, JobRecord, ModelCard, NewJob, OutputSettings, Pipeline,
@@ -160,10 +159,7 @@ export function dismissToast(id: number) {
   set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
 }
 export function errorToast(e: unknown) {
-  const raw = e instanceof Error ? e.message : String(e);
-  uiLog("error", `error shown to the user: ${raw}`);
-  const f = friendlyError(raw);
-  toast("error", f.hint ? `${f.title} ${f.hint}` : f.title);
+  toast("error", e instanceof Error ? e.message : String(e));
 }
 
 // ---------- boot & events ----------
