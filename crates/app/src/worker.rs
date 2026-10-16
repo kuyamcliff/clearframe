@@ -74,6 +74,8 @@ pub fn run_worker(envelope_path: &Path) -> i32 {
     };
     crate::resources::apply_process_priority(env.priority);
     apply_threads(env.spec.resources.threads);
+    // A long export must not be cut short by the idle sleep timer.
+    let _awake = crate::resources::KeepAwake::new();
     let tools = match tools_from(&env) {
         Ok(t) => t,
         Err(e) => {

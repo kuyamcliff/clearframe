@@ -230,6 +230,15 @@ export function App() {
   useEffect(() => {
     if (ready && !bootError) api.startupFiles().then((f) => { if (f.length) openFiles(f); }).catch(() => {});
   }, [ready, bootError]);
+  // Files opened while the app is already running (double-click, "Open with") arrive here.
+  useEffect(() => {
+    if (!ready || bootError || !inTauri()) return;
+    let off: (() => void) | undefined;
+    void import("@tauri-apps/api/event").then((ev) => ev.listen("cf://open-files", () => {
+      api.startupFiles().then((f) => { if (f.length) openFiles(f); }).catch(() => {});
+    })).then((f) => { off = f; });
+    return () => off?.();
+  }, [ready, bootError]);
 
   if (!ready) return <div className="empty-player" style={{ height: "100%" }}><img src="/logo.svg" alt="" width={36} /></div>;
   if (bootError) {

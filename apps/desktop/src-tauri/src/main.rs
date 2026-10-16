@@ -4,6 +4,7 @@
 mod commands;
 mod media_server;
 mod session_log;
+mod taskbar;
 
 use std::sync::Arc;
 
@@ -97,6 +98,37 @@ fn main() {
     let startup: Vec<std::path::PathBuf> = args.iter().skip(1).filter(|a| !a.starts_with('-')).map(std::path::PathBuf::from).filter(|p| p.is_file()).collect();
 
     tauri::Builder::default()
+        // Opening a video while the app runs (double-click, "Open with") must not start a second
+        // copy on the same database and queue: hand the files to the running window instead.
+        // Registered first so the second process exits before doing anything else.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            let files: Vec<std::path::PathBuf> = argv
+                .iter()
+                .skip(1)
+                .filter(|a| !a.starts_with('-'))
+                .map(|a| {
+                    let p = std::path::PathBuf::from(a);
+                    if p.is_absolute() {
+                        p
+                    } else {
+                        std::path::Path::new(&cwd).join(p)
+                    }
+                })
+                .filter(|p| p.is_file())
+                .collect();
+            log::info!("second launch forwarded {} file(s) to the running window", files.len());
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            if !files.is_empty() {
+                if let Some(state) = app.try_state::<commands::StartupFiles>() {
+                    state.0.lock().unwrap().extend(files);
+                }
+                let _ = app.emit("cf://open-files", ());
+            }
+        }))
         .manage(commands::StartupFiles(std::sync::Mutex::new(startup)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -104,8 +136,10 @@ fn main() {
             log::info!("window setup started after {} ms", started.elapsed().as_millis());
             let handle = app.handle().clone();
             let events = session_log::EventLogger::default();
+            let bar = taskbar::Taskbar::default();
             let sink: clearframe_app::EventSink = Arc::new(move |e: AppEvent| {
                 events.log(&e);
+                bar.on_event(&handle, &e);
                 let _ = handle.emit("cf://event", &e);
             });
             let mut dirs = bundled_dirs();

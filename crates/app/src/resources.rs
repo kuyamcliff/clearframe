@@ -13,6 +13,61 @@ use crate::App;
 
 /// Lower (or raise) the priority of the current process. Child processes
 /// (FFmpeg) inherit it. Returns a description of what was applied.
+/// Windows 11 runs processes it thinks are background work in "efficiency mode" (EcoQoS):
+/// low clocks on efficient cores. A worker the user is waiting for must not be throttled, so
+/// opt out explicitly, except at Low priority where the user asked for background behaviour.
+#[cfg(windows)]
+fn set_power_throttling(allow: bool) {
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, ProcessPowerThrottling, SetProcessInformation, PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+        PROCESS_POWER_THROTTLING_STATE,
+    };
+    let state = PROCESS_POWER_THROTTLING_STATE {
+        Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+        StateMask: if allow { PROCESS_POWER_THROTTLING_EXECUTION_SPEED } else { 0 },
+    };
+    // SAFETY: the pointer and size describe a valid PROCESS_POWER_THROTTLING_STATE for this call.
+    let ok = unsafe { SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &state as *const _ as *const core::ffi::c_void, std::mem::size_of_val(&state) as u32) };
+    if ok == 0 {
+        log::debug!("power throttling setting not applied (older Windows)");
+    }
+}
+
+/// Keeps the computer from sleeping on the idle timer while the guard lives (the screen may
+/// still turn off). Windows ties the request to the calling thread, so create it on a thread
+/// that lives for the whole job, such as the worker's main thread.
+pub struct KeepAwake(());
+
+impl KeepAwake {
+    pub fn new() -> Self {
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
+            // SAFETY: plain flags; no pointers.
+            unsafe { SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) };
+        }
+        Self(())
+    }
+}
+
+impl Default for KeepAwake {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for KeepAwake {
+    fn drop(&mut self) {
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS};
+            // SAFETY: plain flags; no pointers.
+            unsafe { SetThreadExecutionState(ES_CONTINUOUS) };
+        }
+    }
+}
+
 pub fn apply_process_priority(p: ProcessPriority) -> String {
     #[cfg(unix)]
     {
@@ -44,6 +99,7 @@ pub fn apply_process_priority(p: ProcessPriority) -> String {
         };
         // SAFETY: GetCurrentProcess returns a pseudo-handle valid for this call.
         let ok = unsafe { SetPriorityClass(GetCurrentProcess(), class) };
+        set_power_throttling(p == ProcessPriority::Low);
         if ok != 0 {
             format!("priority class {p:?}")
         } else {
