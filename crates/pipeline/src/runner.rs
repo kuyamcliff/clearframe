@@ -438,11 +438,23 @@ pub fn plan_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, d
 /// [`plan_job`] for a source that was already probed.
 pub fn plan_probed(tools: &FfmpegTools, info: &MediaInfo, spec: &JobSpec, lookup: &dyn ModelLookup, detected_interlaced: Option<bool>) -> Result<ExecutionPlan> {
     let opts = PlanOptions { detected_interlaced, caps: FilterCaps::from_tools(tools) };
-    plan::plan(info, spec.range, &spec.pipeline, &spec.output, lookup, &opts).map_err(|e| anyhow!(e))
+    let interlaced = detected_interlaced.unwrap_or_else(|| info.video().map(|v| v.is_interlaced_flagged()).unwrap_or(false));
+    let auto = spec.pipeline.with_auto_deinterlace(interlaced);
+    plan::plan(info, spec.range, auto.as_ref().unwrap_or(&spec.pipeline), &spec.output, lookup, &opts).map_err(|e| anyhow!(e))
 }
 
 /// Run a job to completion.
 pub fn run_job(tools: &FfmpegTools, spec: &JobSpec, lookup: &dyn ModelLookup, stop: StopFlag, events: &mut dyn FnMut(Event)) -> std::result::Result<JobReport, JobError> {
+    // An interlaced source gets a Deinterlace step first when the pipeline has none (the plan
+    // made for the export check does the same, so stage numbers match).
+    let auto_spec;
+    let spec = match probe(tools, &spec.source).ok().and_then(|i| i.video().ok().map(|v| v.is_interlaced_flagged())).and_then(|il| spec.pipeline.with_auto_deinterlace(il)) {
+        Some(p) => {
+            auto_spec = JobSpec { pipeline: p, ..spec.clone() };
+            &auto_spec
+        }
+        None => spec,
+    };
     let started_at = chrono::Utc::now().to_rfc3339();
     let started = Instant::now();
     events(Event::State { state: JobState::Preparing, detail: "Reading source".into() });

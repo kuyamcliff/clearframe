@@ -393,6 +393,15 @@ pub fn plan(
         let exec = match &st.op {
             Operation::Deinterlace(d) => {
                 seen_deinterlace = true;
+                if sid == AUTO_DEINTERLACE_ID {
+                    issue(
+                        &mut issues,
+                        Severity::Info,
+                        Some(sid),
+                        "The source is interlaced, so it is deinterlaced first (bwdif). Add a Deinterlace step to change how.".into(),
+                        None,
+                    );
+                }
                 if !cur.interlaced {
                     issue(&mut issues, Severity::Warning, Some(sid), "The source does not appear to be interlaced; deinterlacing progressive video can soften it.".into(), None);
                 }

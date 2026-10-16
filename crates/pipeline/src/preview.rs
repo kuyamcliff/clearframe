@@ -115,6 +115,14 @@ pub fn render_still(tools: &FfmpegTools, info: &MediaInfo, req: &StillRequest, l
     let started = std::time::Instant::now();
     let opts = PlanOptions { detected_interlaced: None, caps: FilterCaps::from_tools(tools) };
     let range = TimeRange { start: req.time.max(0.0), end: (req.time + 1.0).min(info.duration.max(req.time + 0.04)) };
+    let auto_req;
+    let req = match req.pipeline.with_auto_deinterlace(info.video().map(|v| v.is_interlaced_flagged()).unwrap_or(false)) {
+        Some(p) => {
+            auto_req = StillRequest { pipeline: p, ..req.clone() };
+            &auto_req
+        }
+        None => req,
+    };
     let plan = plan::plan(info, Some(range), &req.pipeline, &req.output, lookup, &opts).map_err(|e| anyhow!(e))?;
     if let Some(e) = plan.errors().next() {
         bail!("{}", e.message);

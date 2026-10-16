@@ -618,6 +618,9 @@ impl Operation {
     }
 }
 
+/// Stage id of a Deinterlace step added automatically for an interlaced source.
+pub const AUTO_DEINTERLACE_ID: &str = "auto-deinterlace";
+
 /// A pipeline stage.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Stage {
@@ -657,6 +660,19 @@ impl Pipeline {
     }
     pub fn enabled(&self) -> impl Iterator<Item = &Stage> {
         self.stages.iter().filter(|s| s.enabled)
+    }
+
+    /// For an interlaced source, the same pipeline with a Deinterlace step added first when the
+    /// pipeline has none: AI models and most filters expect progressive frames, and comb lines
+    /// would be enlarged and baked in. `None` when nothing needs adding.
+    pub fn with_auto_deinterlace(&self, source_interlaced: bool) -> Option<Pipeline> {
+        let has = self.enabled().any(|s| matches!(s.op, Operation::Deinterlace(_)));
+        if !source_interlaced || has || self.enabled().next().is_none() {
+            return None;
+        }
+        let mut p = self.clone();
+        p.stages.insert(0, Stage { id: AUTO_DEINTERLACE_ID.into(), enabled: true, op: Operation::Deinterlace(DeinterlaceSettings::default()) });
+        Some(p)
     }
     pub fn required_models(&self) -> Vec<String> {
         let mut v: Vec<String> = self.enabled().flat_map(|s| s.op.required_models()).collect();

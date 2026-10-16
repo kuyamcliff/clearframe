@@ -542,3 +542,40 @@ fn sharpen_methods_render() {
         assert!(q.is_finite() && q < 60.0, "{name}: sharpening must change the image (PSNR {q})");
     }
 }
+
+#[test]
+fn interlaced_source_is_deinterlaced_automatically() {
+    let t = need_ffmpeg!();
+    let d = tempfile::tempdir().unwrap();
+    // Interlaced H.264 (top field first), as from a DVD or camcorder.
+    let src = d.path().join("dv.mp4");
+    ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-t",
+        "1",
+        "-i",
+        "testsrc2=size=320x240:rate=60,tinterlace=interleave_top,setfield=tff",
+        "-c:v",
+        "libx264",
+        "-flags",
+        "+ilme+ildct",
+        "-x264-params",
+        "tff=1",
+        "-pix_fmt",
+        "yuv420p",
+        src.to_str().unwrap(),
+    ]);
+    let info = probe(&t, &src).unwrap();
+    assert!(info.video.as_ref().unwrap().is_interlaced_flagged(), "fixture must be flagged interlaced");
+    let p = Pipeline { stages: vec![Stage::new(Operation::Grain(GrainSettings::default()))] };
+    let spec = job(d.path(), &src, p, OutputSettings::default(), "auto-deint");
+    let lookup = clearframe_pipeline::runner::ResolvedLookup { models: &Default::default(), scales: Default::default() };
+    let plan = clearframe_pipeline::runner::plan_probed(&t, &info, &spec, &lookup, None).unwrap();
+    assert_eq!(plan.stages[0].stage_id, AUTO_DEINTERLACE_ID);
+    assert!(!plan.issues.iter().any(|i| i.message.contains("Add a Deinterlace step first")));
+    let r = run(&t, &spec).unwrap();
+    assert!(r.validation.as_ref().unwrap().ok);
+    let out = probe(&t, &r.output).unwrap();
+    assert!(!out.video.as_ref().unwrap().is_interlaced_flagged(), "output must be progressive");
+}
